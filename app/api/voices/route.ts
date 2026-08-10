@@ -7,6 +7,21 @@ import { assertSameOrigin, fetchWithTimeout, jsonNoStore } from "@/lib/http";
 
 const ELEVENLABS = "https://api.elevenlabs.io/v1";
 
+export async function GET(request: Request) {
+  try {
+    const user = await requireApiUser(request);
+    await ensureUser(user);
+    const voice = await getDb().select({ providerVoiceId: voices.providerVoiceId, name: voices.name })
+      .from(voices)
+      .where(and(eq(voices.userId, user.userId), eq(voices.status, "ready")))
+      .get();
+    return jsonNoStore({ voice: voice ? { voiceId: voice.providerVoiceId, name: voice.name } : null });
+  } catch (error) {
+    if (error instanceof Response) return error;
+    return jsonNoStore({ error: "Voice profile could not be loaded." }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);

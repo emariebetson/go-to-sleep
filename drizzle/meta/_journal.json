@@ -15,6 +15,13 @@
       "when": 1786379800269,
       "tag": "0001_google_apple_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786381247628,
+      "tag": "0002_sharp_shinobi_shaw",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,5 @@
+import { canonicalYouTubeUrl } from "./youtube-source";
+
 export type SessionInput = {
   requestId: string;
   childName: string;
@@ -8,8 +10,12 @@ export type SessionInput = {
   sound: "soft-rain" | "brown-noise" | "none";
   style: "slow-story" | "rhythmic" | "lullaby";
   scriptMode: "curated" | "personalized";
+  contentType: "story" | "sleep-hypnosis";
+  sourceUrl: string;
+  sourceTitle: string;
   script: string;
   providerVoiceId: string;
+  generationMode: "preview" | "save";
 };
 
 const allowed = {
@@ -19,6 +25,8 @@ const allowed = {
   sound: ["soft-rain", "brown-noise", "none"],
   style: ["slow-story", "rhythmic", "lullaby"],
   scriptMode: ["curated", "personalized"],
+  contentType: ["story", "sleep-hypnosis"],
+  generationMode: ["preview", "save"],
 } as const;
 
 const unsafeScriptPatterns = [
@@ -74,7 +82,19 @@ export function validateSessionInput(body: Record<string, unknown>): SessionInpu
     sound: allowedValue("sound", body.sound),
     style: allowedValue("style", body.style),
     scriptMode: allowedValue("scriptMode", body.scriptMode),
+    contentType: allowedValue("contentType", body.contentType),
+    sourceUrl: canonicalYouTubeUrl(body.sourceUrl),
+    sourceTitle: cleanText(body.sourceTitle, 160),
     script,
     providerVoiceId,
+    generationMode: allowedValue("generationMode", body.generationMode),
   };
+}
+
+export function previewExcerpt(script: string, maxWords = 68) {
+  const words = script.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  if (words.length <= maxWords) return words.join(" ");
+  const excerpt = words.slice(0, maxWords).join(" ");
+  const lastSentence = Math.max(excerpt.lastIndexOf(". "), excerpt.lastIndexOf("! "), excerpt.lastIndexOf("? "));
+  return `${lastSentence >= 35 ? excerpt.slice(0, lastSentence + 1) : excerpt.replace(/[,:;\s]+$/, "") + "…"}`;
 }

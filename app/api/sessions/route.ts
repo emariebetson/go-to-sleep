@@ -5,7 +5,7 @@ import { sleepSessions, usageEvents, users, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
-import { validateSessionInput } from "@/lib/sleep-session";
+import { previewExcerpt, validateSessionInput } from "@/lib/sleep-session";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -14,6 +14,18 @@ type AudioBucket = {
 type RuntimeEnv = { AUDIO?: AudioBucket };
 
 const labels: Record<string, string> = { "moonlit-meadow": "Moonlit Meadow", "sleepy-sea": "Sleepy Sea", "cloud-garden": "Cloud Garden" };
+
+async function generateSpeech(apiKey: string, providerVoiceId: string, text: string) {
+  return fetchWithTimeout(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(providerVoiceId)}?output_format=mp3_44100_128`, {
+    method: "POST",
+    headers: { "xi-api-key": apiKey, "content-type": "application/json" },
+    body: JSON.stringify({
+      text,
+      model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
+      voice_settings: { stability: 0.78, similarity_boost: 0.75, style: 0.12, use_speaker_boost: true },
+    }),
+  }, 90_000);
+}
 
 export async function POST(request: Request) {
   let sessionId = "";
@@ -42,8 +54,26 @@ export async function POST(request: Request) {
       .where(and(eq(voices.userId, user.userId), eq(voices.providerVoiceId, input.providerVoiceId), eq(voices.status, "ready")))
       .get();
     if (!ownedVoice) return jsonNoStore({ error: "That voice profile is unavailable. Create or select your own voice first." }, { status: 404 });
+
+    if (input.generationMode === "preview") {
+      const response = await generateSpeech(apiKey, input.providerVoiceId, previewExcerpt(input.script));
+      if (!response.ok) {
+        const detail = await response.text();
+        console.error("ElevenLabs preview failed", response.status, detail.slice(0, 400));
+        return jsonNoStore({ error: "The 30-second sample is temporarily unavailable." }, { status: 502 });
+      }
+      return new Response(await response.arrayBuffer(), {
+        headers: {
+          "content-type": "audio/mpeg",
+          "cache-control": "private, no-store",
+          "content-disposition": "inline; filename=nearnight-sample.mp3",
+          "x-nearnight-preview": "30-seconds",
+        },
+      });
+    }
+
     const now = new Date();
-    const title = labels[input.theme] || "A gentle bedtime";
+    const title = input.sourceTitle || `${labels[input.theme] || "A gentle bedtime"}${input.contentType === "sleep-hypnosis" ? " relaxation" : ""}`;
     const claimed = await db.insert(sleepSessions).values({
       id: sessionId,
       userId: user.userId,
@@ -51,6 +81,9 @@ export async function POST(request: Request) {
       title,
       script: input.script,
       scriptMode: input.scriptMode,
+      contentType: input.contentType,
+      sourceUrl: input.sourceUrl || null,
+      sourceTitle: input.sourceTitle || null,
       theme: input.theme,
       style: input.style,
       backgroundSound: input.sound,
@@ -80,15 +113,7 @@ export async function POST(request: Request) {
     creditReserved = true;
     await db.update(sleepSessions).set({ status: "generating" }).where(eq(sleepSessions.id, sessionId));
 
-    const response = await fetchWithTimeout(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.providerVoiceId)}?output_format=mp3_44100_128`, {
-      method: "POST",
-      headers: { "xi-api-key": apiKey, "content-type": "application/json" },
-      body: JSON.stringify({
-        text: input.script,
-        model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
-        voice_settings: { stability: 0.78, similarity_boost: 0.75, style: 0.12, use_speaker_boost: true },
-      }),
-    }, 90_000);
+    const response = await generateSpeech(apiKey, input.providerVoiceId, input.script);
     if (!response.ok) {
       const detail = await response.text();
       console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));
