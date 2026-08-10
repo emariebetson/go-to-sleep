@@ -15,6 +15,7 @@ export type SessionInput = {
   sourceTitle: string;
   script: string;
   providerVoiceId: string;
+  narrationKind: "parent_clone" | "demo_narrator";
   generationMode: "preview" | "save";
 };
 
@@ -27,6 +28,7 @@ const allowed = {
   scriptMode: ["curated", "personalized"],
   contentType: ["story", "sleep-hypnosis"],
   generationMode: ["preview", "save"],
+  narrationKind: ["parent_clone", "demo_narrator"],
 } as const;
 
 const unsafeScriptPatterns = [
@@ -69,8 +71,9 @@ export function validateSessionInput(body: Record<string, unknown>): SessionInpu
   if (unsafeScriptPatterns.some((pattern) => pattern.test(script))) {
     throw new Error("The edited script contains language outside Nearnight’s safety boundaries. Please revise it before creating audio.");
   }
+  const narrationKind = allowedValue("narrationKind", body.narrationKind);
   const providerVoiceId = cleanText(body.voiceId, 80);
-  if (!/^[A-Za-z0-9_-]{8,80}$/.test(providerVoiceId)) throw new Error("Create or select your voice first.");
+  if (narrationKind === "parent_clone" && !/^[A-Za-z0-9_-]{8,80}$/.test(providerVoiceId)) throw new Error("Create or select your voice first.");
   const duration = allowedValue("duration", body.duration);
   return {
     requestId,
@@ -87,6 +90,7 @@ export function validateSessionInput(body: Record<string, unknown>): SessionInpu
     sourceTitle: cleanText(body.sourceTitle, 160),
     script,
     providerVoiceId,
+    narrationKind,
     generationMode: allowedValue("generationMode", body.generationMode),
   };
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `sleep_sessions` ADD `narration_kind` text DEFAULT 'parent_clone' NOT NULL;

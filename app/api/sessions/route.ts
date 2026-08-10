@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sleepSessions, usageEvents, users, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
 import { previewExcerpt, validateSessionInput } from "@/lib/sleep-session";
+import { demoNarratorEnabled } from "@/lib/demo-narrator";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -14,6 +15,9 @@ type AudioBucket = {
 type RuntimeEnv = { AUDIO?: AudioBucket };
 
 const labels: Record<string, string> = { "moonlit-meadow": "Moonlit Meadow", "sleepy-sea": "Sleepy Sea", "cloud-garden": "Cloud Garden" };
+// Jessica is an ElevenLabs default voice. This public catalog ID is not a secret.
+const DEFAULT_DEMO_VOICE_ID = "cgSgspJ2msm6clMCkdW9";
+const MAX_PREVIEWS_PER_HOUR = 5;
 
 async function generateSpeech(apiKey: string, providerVoiceId: string, text: string) {
   return fetchWithTimeout(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(providerVoiceId)}?output_format=mp3_44100_128`, {
@@ -49,14 +53,41 @@ export async function POST(request: Request) {
     if (!apiKey) return jsonNoStore({ error: "ElevenLabs is not connected yet. Add its API key to generate audio." }, { status: 503 });
     await ensureUser(user);
     const db = getDb();
-    const ownedVoice = await db.select({ id: voices.id })
+    const isDemoNarrator = input.narrationKind === "demo_narrator";
+    if (isDemoNarrator && !demoNarratorEnabled()) return jsonNoStore({ error: "Demo narration is unavailable." }, { status: 403 });
+    const ownedVoice = isDemoNarrator ? null : await db.select({ id: voices.id })
       .from(voices)
       .where(and(eq(voices.userId, user.userId), eq(voices.providerVoiceId, input.providerVoiceId), eq(voices.status, "ready")))
       .get();
-    if (!ownedVoice) return jsonNoStore({ error: "That voice profile is unavailable. Create or select your own voice first." }, { status: 404 });
+    if (!isDemoNarrator && !ownedVoice) return jsonNoStore({ error: "That voice profile is unavailable. Create or select your own voice first." }, { status: 404 });
+    const providerVoiceId = isDemoNarrator
+      ? process.env.ELEVENLABS_DEMO_VOICE_ID || DEFAULT_DEMO_VOICE_ID
+      : input.providerVoiceId;
 
     if (input.generationMode === "preview") {
-      const response = await generateSpeech(apiKey, input.providerVoiceId, previewExcerpt(input.script));
+      const previewCreatedAt = new Date();
+      const previewUsageId = `preview:${input.requestId}`;
+      const entitlement = await db.select({ creditsRemaining: users.creditsRemaining }).from(users)
+        .where(and(eq(users.id, user.userId), gt(users.creditsRemaining, 0))).get();
+      if (!entitlement) return jsonNoStore({ error: "You have no generation credits remaining. Choose a plan or add a session pack." }, { status: 402 });
+      const inserted = await db.insert(usageEvents).values({
+        id: previewUsageId,
+        userId: user.userId,
+        type: "audio_preview",
+        units: previewExcerpt(input.script).length,
+        metadata: { provider: "elevenlabs", narrationKind: input.narrationKind },
+        createdAt: previewCreatedAt,
+      }).onConflictDoNothing().returning({ id: usageEvents.id }).get();
+      if (!inserted) return jsonNoStore({ error: "That preview request was already used. Create a new sample request." }, { status: 409 });
+      const previewWindowStart = new Date(previewCreatedAt.getTime() - 60 * 60 * 1000);
+      const previewCount = await db.select({ value: sql<number>`count(*)` }).from(usageEvents)
+        .where(and(eq(usageEvents.userId, user.userId), eq(usageEvents.type, "audio_preview"), gte(usageEvents.createdAt, previewWindowStart)))
+        .get();
+      if ((previewCount?.value || 0) > MAX_PREVIEWS_PER_HOUR) {
+        await db.delete(usageEvents).where(eq(usageEvents.id, previewUsageId));
+        return jsonNoStore({ error: "You’ve reached the preview limit. Try again in about an hour." }, { status: 429 });
+      }
+      const response = await generateSpeech(apiKey, providerVoiceId, previewExcerpt(input.script));
       if (!response.ok) {
         const detail = await response.text();
         console.error("ElevenLabs preview failed", response.status, detail.slice(0, 400));
@@ -77,11 +108,12 @@ export async function POST(request: Request) {
     const claimed = await db.insert(sleepSessions).values({
       id: sessionId,
       userId: user.userId,
-      voiceId: ownedVoice.id,
+      voiceId: ownedVoice?.id || null,
       title,
       script: input.script,
       scriptMode: input.scriptMode,
       contentType: input.contentType,
+      narrationKind: input.narrationKind,
       sourceUrl: input.sourceUrl || null,
       sourceTitle: input.sourceTitle || null,
       theme: input.theme,
@@ -113,7 +145,7 @@ export async function POST(request: Request) {
     creditReserved = true;
     await db.update(sleepSessions).set({ status: "generating" }).where(eq(sleepSessions.id, sessionId));
 
-    const response = await generateSpeech(apiKey, input.providerVoiceId, input.script);
+    const response = await generateSpeech(apiKey, providerVoiceId, input.script);
     if (!response.ok) {
       const detail = await response.text();
       console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));

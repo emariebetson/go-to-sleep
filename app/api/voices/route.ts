@@ -4,6 +4,8 @@ import { users, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore } from "@/lib/http";
+import { classifyVoiceCreationError } from "@/lib/elevenlabs";
+import { demoNarratorEnabled } from "@/lib/demo-narrator";
 
 const ELEVENLABS = "https://api.elevenlabs.io/v1";
 
@@ -15,7 +17,7 @@ export async function GET(request: Request) {
       .from(voices)
       .where(and(eq(voices.userId, user.userId), eq(voices.status, "ready")))
       .get();
-    return jsonNoStore({ voice: voice ? { voiceId: voice.providerVoiceId, name: voice.name } : null });
+    return jsonNoStore({ voice: voice ? { voiceId: voice.providerVoiceId, name: voice.name } : null, demoEnabled: demoNarratorEnabled() });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonNoStore({ error: "Voice profile could not be loaded." }, { status: 500 });
@@ -54,10 +56,12 @@ export async function POST(request: Request) {
     providerForm.append("files", sample, sample.name || "voice-sample.webm");
     providerForm.append("remove_background_noise", "true");
     const response = await fetchWithTimeout(`${ELEVENLABS}/voices/add`, { method: "POST", headers: { "xi-api-key": apiKey }, body: providerForm }, 90_000);
-    const payload = await response.json() as { voice_id?: string; detail?: { message?: string } | string };
+    const payload = await response.json() as { voice_id?: string; detail?: { message?: string; status?: string; code?: string } | string };
     if (!response.ok || !payload.voice_id) {
-      const detail = typeof payload.detail === "string" ? payload.detail : payload.detail?.message;
-      return jsonNoStore({ error: detail || "ElevenLabs could not create the voice profile." }, { status: response.status || 502 });
+      const failure = classifyVoiceCreationError(response.status, payload);
+      const demoEnabled = failure.code === "voice_cloning_unavailable" && demoNarratorEnabled();
+      console.error("ElevenLabs voice creation failed", response.status, failure.code);
+      return jsonNoStore({ error: `${failure.message}${demoEnabled ? " You can continue with the demo narrator for testing; it is not your voice." : ""}`, code: failure.code, demoEnabled }, { status: failure.httpStatus });
     }
 
     const consentedAt = new Date();

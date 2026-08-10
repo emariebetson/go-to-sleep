@@ -27,7 +27,7 @@ export default async function LibraryPage() {
     <div className="panel" style={{ marginTop: 30, padding: sessions.length ? 0 : 32 }}>
       {sessions.length ? sessions.map((session) => <article className="session-card" style={{ gridTemplateColumns: "58px 1fr", alignItems: "start" }} key={session.id}>
         <span className="session-art" aria-hidden="true">{themeIcons[session.theme] || "✦"}</span>
-        <div><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}><div><h3>{session.title}</h3><p>{soundNames[session.backgroundSound] || "voice only"} · {session.durationMinutes} min</p></div><span className="status-pill">{session.status}</span></div>
+        <div><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}><div><h3>{session.title}</h3><p>{session.narrationKind === "demo_narrator" ? "Demo narrator (not your voice)" : "Parent voice"} · {soundNames[session.backgroundSound] || "voice only"} · {session.durationMinutes} min</p></div><span className="status-pill">{session.status}</span></div>
           {session.status === "ready" && session.audioKey && <div style={{ marginTop: 12 }}><SleepPlayer src={`/api/audio/${session.id}`} sound={session.backgroundSound} /></div>}
         </div>
       </article>) : <div style={{ textAlign: "center", padding: "18px 0" }}><span className="session-art" style={{ margin: "0 auto 16px" }} aria-hidden="true">☾</span><h2 style={{ marginBottom: 6 }}>Your first bedtime will appear here</h2><p className="muted">Create and save a session, then replay it without using another credit.</p><Link className="btn btn-primary" href="/studio" style={{ marginTop: 12 }}>Create your first bedtime</Link></div>}

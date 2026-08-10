@@ -18,6 +18,7 @@ type StudioData = {
 
 type SourceMetadata = { url: string; title: string; creator: string };
 type BusyAction = "" | "voice" | "script" | "preview" | "save";
+type NarrationKind = "parent_clone" | "demo_narrator";
 const MIN_RECORDING_SECONDS = 60;
 
 const initialData: StudioData = {
@@ -83,6 +84,8 @@ export function SleepStudio() {
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const [voiceId, setVoiceId] = useState("");
   const [savedVoiceName, setSavedVoiceName] = useState("");
+  const [narrationKind, setNarrationKind] = useState<NarrationKind>("parent_clone");
+  const [demoNarratorEnabled, setDemoNarratorEnabled] = useState(false);
   const [script, setScript] = useState("");
   const [source, setSource] = useState<SourceMetadata | null>(null);
   const [busy, setBusy] = useState<BusyAction>("");
@@ -96,15 +99,19 @@ export function SleepStudio() {
   const chunksRef = useRef<Blob[]>([]);
   const recordingSecondsRef = useRef(0);
   const generationRequestRef = useRef("");
+  const discardRecordingRef = useRef(false);
 
   useEffect(() => {
     let active = true;
     fetch("/api/voices", { headers: { accept: "application/json" } })
-      .then(async (response) => response.ok ? response.json() as Promise<{ voice?: { voiceId: string; name: string } | null }> : null)
+      .then(async (response) => response.ok ? response.json() as Promise<{ voice?: { voiceId: string; name: string } | null; demoEnabled?: boolean }> : null)
       .then((payload) => {
-        if (!active || !payload?.voice) return;
+        if (!active || !payload) return;
+        setDemoNarratorEnabled(Boolean(payload.demoEnabled));
+        if (!payload.voice) return;
         setVoiceId(payload.voice.voiceId);
         setSavedVoiceName(payload.voice.name);
+        setNarrationKind("parent_clone");
       })
       .catch(() => undefined);
     return () => { active = false; };
@@ -148,20 +155,27 @@ export function SleepStudio() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      discardRecordingRef.current = false;
       setVoiceBlob(null);
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined });
       recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
         const elapsedSeconds = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
         recordingSecondsRef.current = elapsedSeconds;
         setSeconds(elapsedSeconds);
-        if (elapsedSeconds < MIN_RECORDING_SECONDS || blob.size < 10_000) {
+        if (discardRecordingRef.current) {
           setVoiceBlob(null);
-          setMessage(`Please record at least ${MIN_RECORDING_SECONDS} seconds so the voice sample is clear enough.`);
+          chunksRef.current = [];
+          discardRecordingRef.current = false;
         } else {
-          setVoiceBlob(blob);
+          const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
+          if (elapsedSeconds < MIN_RECORDING_SECONDS || blob.size < 10_000) {
+            setVoiceBlob(null);
+            setMessage(`Please record at least ${MIN_RECORDING_SECONDS} seconds so the voice sample is clear enough.`);
+          } else {
+            setVoiceBlob(blob);
+          }
         }
         stream.getTracks().forEach((track) => track.stop());
         recordingStreamRef.current = null;
@@ -187,14 +201,31 @@ export function SleepStudio() {
     form.append("consent", "true");
     try {
       const response = await fetch("/api/voices", { method: "POST", body: form });
-      const payload = await response.json() as { voiceId?: string; error?: string };
+      const payload = await response.json() as { voiceId?: string; error?: string; code?: string; demoEnabled?: boolean };
+      if (payload.code === "voice_cloning_unavailable" && payload.demoEnabled) setDemoNarratorEnabled(true);
       if (!response.ok || !payload.voiceId) throw new Error(payload.error || "Voice setup could not be completed.");
       setVoiceId(payload.voiceId);
+      setNarrationKind("parent_clone");
       setSavedVoiceName(`${data.childName || "Baby"}'s parent`);
       setStep(3);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Voice setup could not be completed.");
     } finally { setBusy(""); }
+  }
+
+  function useDemoNarrator() {
+    discardRecordingRef.current = true;
+    if (recording) recorderRef.current?.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
+    setRecording(false);
+    setVoiceBlob(null);
+    setConsented(false);
+    setVoiceId("");
+    setSavedVoiceName("");
+    setNarrationKind("demo_narrator");
+    setMessage("");
+    setStep(3);
   }
 
   async function createScript() {
@@ -227,6 +258,7 @@ export function SleepStudio() {
           ...data,
           script,
           voiceId,
+          narrationKind,
           requestId,
           generationMode,
           sourceUrl: source?.url || "",
@@ -262,7 +294,7 @@ export function SleepStudio() {
     <>
       <span className="eyebrow">Tonight’s sleep recipe</span>
       <h1 className="app-title display">Create a gentler bedtime</h1>
-      <p className="muted">Clone your voice, shape an original bedtime, preview 30 seconds, then save it to My nights.</p>
+      <p className="muted">{narrationKind === "demo_narrator" ? "Test the full bedtime flow with a clearly labeled demo narrator, preview 30 seconds, then save it to My nights." : "Clone your voice, shape an original bedtime, preview 30 seconds, then save it to My nights."}</p>
       <div className="progress" aria-label={`Step ${step} of 4`}>{[1,2,3,4].map((value) => <span className={value <= step ? "done" : ""} key={value} />)}</div>
 
       {step === 1 && <section className="panel">
@@ -290,11 +322,12 @@ export function SleepStudio() {
           <label className="consent-box"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} /><span><strong>I confirm this is my voice and I consent to creating a voice clone.</strong><br />I understand generated audio can say words I did not record, and I can permanently delete the clone at any time.</span></label>
         </>}
         {message && <div className="alert" role="alert">{message}</div>}
-        <div className="panel-actions"><button className="btn btn-secondary" onClick={() => setStep(1)} disabled={recording}>← Back</button>{!voiceId && <button className="btn btn-primary" onClick={createVoice} disabled={recording || !voiceBlob || !consented || Boolean(busy)}>{busy === "voice" ? "Creating your voice…" : "Use this recording →"}</button>}</div>
+        {!voiceId && demoNarratorEnabled && <div className="consent-box" style={{ marginTop: 16 }}><span aria-hidden="true">▶</span><span><strong>Testing before upgrading ElevenLabs?</strong><br />Continue with a standard demo narrator. It is not your voice; your recording will be discarded and will not be uploaded.</span></div>}
+        <div className="panel-actions panel-actions-wrap"><button className="btn btn-secondary" onClick={() => setStep(1)} disabled={recording}>← Back</button>{!voiceId && <div className="action-pair">{demoNarratorEnabled && <button className="btn btn-secondary" onClick={useDemoNarrator} disabled={Boolean(busy)}>Use demo narrator</button>}<button className="btn btn-primary" onClick={createVoice} disabled={recording || !voiceBlob || !consented || Boolean(busy)}>{busy === "voice" ? "Creating your voice…" : "Use this recording →"}</button></div>}</div>
       </section>}
 
       {step === 3 && <section className="panel">
-        <h2>Choose what your voice will read</h2><p className="panel-intro">Make an original story or a gentle, non-clinical guided relaxation. You may add a YouTube link for high-level inspiration.</p>
+        <h2>Choose what {narrationKind === "demo_narrator" ? "the demo narrator" : "your voice"} will read</h2><p className="panel-intro">{narrationKind === "demo_narrator" && <><strong>Demo narrator is active — this is not your voice.</strong><br /></>}Make an original story or a gentle, non-clinical guided relaxation. You may add a YouTube link for high-level inspiration.</p>
         <div className="form-grid">
           <fieldset className="field full choice-field"><legend>Bedtime type</legend><div className="choice-grid choice-grid-two">
             <label className={`choice ${data.contentType === "story" ? "selected" : ""}`}><input type="radio" name="contentType" value="story" checked={data.contentType === "story"} onChange={() => update("contentType", "story")} /><strong>Bedtime story</strong><small>Original characters and a quiet story arc</small></label>
@@ -313,10 +346,10 @@ export function SleepStudio() {
       </section>}
 
       {step === 4 && <section className="panel">
-        <h2>Review, preview, then save</h2><p className="panel-intro">You have final say. Edit anything that doesn’t sound like you, then listen to a 30-second sample before generating the full bedtime.</p>
+        <h2>Review, preview, then save</h2><p className="panel-intro">You have final say. Edit anything that doesn’t sound {narrationKind === "demo_narrator" ? "right" : "like you"}, then listen to a 30-second sample before generating the full bedtime.</p>
         {source && <div className="source-note"><strong>Inspired by:</strong> {source.title}{source.creator ? ` · ${source.creator}` : ""}<br /><small>Original wording generated from title/channel metadata only.</small></div>}
         <div className="field"><label htmlFor="script">Tonight’s script</label><textarea id="script" style={{ minHeight: 310, lineHeight: 1.75 }} value={script} onChange={(event) => { setScript(event.target.value); clearGeneratedAudio(); }} /></div>
-        {previewAudioUrl && !savedAudioUrl && <div className="alert success"><strong>Your 30-second voice sample is ready.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={previewAudioUrl} sound={data.sound} /></div><p style={{ margin: "9px 0 0" }}>If it sounds right, save the full bedtime below.</p></div>}
+        {previewAudioUrl && !savedAudioUrl && <div className="alert success"><strong>Your 30-second {narrationKind === "demo_narrator" ? "demo narrator" : "voice"} sample is ready.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={previewAudioUrl} sound={data.sound} /></div><p style={{ margin: "9px 0 0" }}>If it sounds right, save the full bedtime below.</p></div>}
         {savedAudioUrl && <div className="alert success"><strong>Your full bedtime is saved to My nights.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={savedAudioUrl} sound={data.sound} /></div><div style={{ marginTop: 12 }}><a className="btn btn-primary btn-small" href="/library">Open My nights →</a></div>{savedSessionId && <span className="sr-only">Saved session {savedSessionId}</span>}</div>}
         {message && <div className="alert" role="alert">{message}</div>}
         <div className="panel-actions panel-actions-wrap">
