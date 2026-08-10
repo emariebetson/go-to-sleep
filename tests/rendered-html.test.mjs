@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render(path = "/") {
@@ -20,6 +21,33 @@ test("server-renders the Nearnight landing page", async () => {
   assert.match(html, /Your voice/);
   assert.match(html, /Create tonight/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
+});
+
+test("navigation uses deployment-safe native links", async () => {
+  const files = [
+    "../app/page.tsx",
+    "../app/account/page.tsx",
+    "../app/library/page.tsx",
+    "../app/pricing/page.tsx",
+    "../app/sign-in/page.tsx",
+    "../app/studio/SleepStudio.tsx",
+    "../components/AppShell.tsx",
+    "../components/Brand.tsx",
+    "../components/SiteFooter.tsx",
+    "../components/SiteHeader.tsx",
+  ];
+  for (const file of files) {
+    const source = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /from ["']next\/link["']/, file);
+    if (source.startsWith('"use client"')) assert.doesNotMatch(source, /components\/Link/, file);
+  }
+});
+
+test("saved audio authenticates with the incoming request", async () => {
+  const source = await readFile(new URL("../app/api/audio/[id]/route.ts", import.meta.url), "utf8");
+  assert.match(source, /GET\(request: Request/);
+  assert.match(source, /requireApiUser\(request\)/);
+  assert.doesNotMatch(source, /GET\(_request: Request/);
 });
 
 test("server-renders public trust and pricing pages", async () => {
@@ -50,14 +78,16 @@ test("private generation APIs reject anonymous requests", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
+  const runtime = {
+    ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+    DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] },
+    AUDIO: { get: async () => null, put: async () => undefined },
+  };
+  const context = { waitUntil() {}, passThroughOnException() {} };
   const response = await worker.fetch(new Request("http://localhost/api/scripts", {
     method: "POST",
     headers: { "content-type": "application/json", origin: "http://localhost" },
     body: JSON.stringify({ childName: "Junie", ageMonths: "6", challenge: "settling", theme: "moonlit-meadow", duration: "5", style: "slow-story", scriptMode: "curated" }),
-  }), {
-    ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-    DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] },
-    AUDIO: { get: async () => null, put: async () => undefined },
-  }, { waitUntil() {}, passThroughOnException() {} });
+  }), runtime, context);
   assert.equal(response.status, 401);
 });

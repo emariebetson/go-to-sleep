@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Link } from "./Link";
 import { Brand } from "./Brand";
 
 export function SiteHeader() {

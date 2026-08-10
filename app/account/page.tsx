@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Link } from "@/components/Link";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
 import { users, voices } from "@/db/schema";

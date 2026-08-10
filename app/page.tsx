@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Link } from "@/components/Link";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 
@@ -87,7 +87,7 @@ export default function Home() {
         <div className="container">
           <div className="section-head center"><span className="eyebrow">Simple, sustainable pricing</span><h2 className="display">Start with tonight</h2><p className="muted">One free session. Upgrade only when Nearnight earns a place in your routine.</p></div>
           <div className="pricing-card">
-            <div className="pricing-main"><span className="eyebrow">Nearnight Plus</span><div className="price">$12 <small>/ month</small></div><p className="muted">Includes 12 new personalized sessions each month, with unlimited replays of your library.</p><Link className="btn btn-primary" href="/pricing" style={{ marginTop: 20 }}>Start free</Link><p className="pricing-note">Cancel anytime. Additional session packs available; no surprise usage bills.</p></div>
+            <div className="pricing-main"><span className="eyebrow">Nearnight Plus</span><div className="price">$12 <small>/ month</small></div><p className="muted">Includes 12 new personalized sessions each month, with unlimited replays of your library.</p><Link className="btn btn-primary" href="/studio" style={{ marginTop: 20 }}>Create your free bedtime</Link><p className="pricing-note">Cancel anytime. Additional session packs available; no surprise usage bills.</p></div>
             <div className="pricing-details"><strong>Everything parents need</strong><ul className="check-list"><li>Your private voice profile</li><li>Curated and personalized stories</li><li>5–20 minute sessions</li><li>On-device calming sound layers</li><li>Offline-ready mobile architecture</li><li>Voice and account deletion controls</li></ul></div>
           </div>
         </div>

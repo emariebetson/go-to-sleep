@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Link } from "./Link";
 import { getAppUser, isAdmin } from "@/lib/auth";
 import { Brand } from "./Brand";
 import { SignOutButton } from "./SignOutButton";

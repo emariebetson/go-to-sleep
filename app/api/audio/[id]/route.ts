@@ -7,7 +7,7 @@ import { requireApiUser } from "@/lib/auth";
 type StoredAudio = { body: BodyInit | null; httpMetadata?: { contentType?: string }; writeHttpMetadata(headers: Headers): void };
 type AudioBucket = { get(key: string): Promise<StoredAudio | null> };
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireApiUser(request);
     const { id } = await context.params;

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Link } from "@/components/Link";
 import { Brand } from "@/components/Brand";
 import { configuredOAuthProviders, safeRelativeReturnPath } from "@/lib/auth";
 import { SignInOptions } from "./SignInOptions";

@@ -3,12 +3,7 @@ import { betterAuth } from "better-auth/minimal";
 import { getDb } from "@/db";
 import { authSessions, authVerifications, oauthAccounts, users } from "@/db/schema";
 
-const instances = new Map<string, ReturnType<typeof betterAuth>>();
-
-export function getOAuthAuth(baseURL: string) {
-  const existing = instances.get(baseURL);
-  if (existing) return existing;
-
+function createOAuthAuth(baseURL: string) {
   const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const socialProviders = {
     ...(googleEnabled ? {
@@ -21,7 +16,7 @@ export function getOAuthAuth(baseURL: string) {
     } : {}),
   };
 
-  const auth = betterAuth({
+  return betterAuth({
     appName: "Nearnight",
     baseURL,
     basePath: "/api/auth",
@@ -59,6 +54,14 @@ export function getOAuthAuth(baseURL: string) {
     },
   });
 
+}
+
+const instances = new Map<string, ReturnType<typeof createOAuthAuth>>();
+
+export function getOAuthAuth(baseURL: string) {
+  const existing = instances.get(baseURL);
+  if (existing) return existing;
+  const auth = createOAuthAuth(baseURL);
   instances.set(baseURL, auth);
   return auth;
 }

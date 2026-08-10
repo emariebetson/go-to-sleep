@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SleepPlayer } from "@/components/SleepPlayer";
 
@@ -19,6 +18,7 @@ type StudioData = {
 
 type SourceMetadata = { url: string; title: string; creator: string };
 type BusyAction = "" | "voice" | "script" | "preview" | "save";
+const MIN_RECORDING_SECONDS = 60;
 
 const initialData: StudioData = {
   childName: "",
@@ -91,7 +91,10 @@ export function SleepStudio() {
   const [savedAudioUrl, setSavedAudioUrl] = useState("");
   const [savedSessionId, setSavedSessionId] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStartedAtRef = useRef(0);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const recordingSecondsRef = useRef(0);
   const generationRequestRef = useRef("");
 
   useEffect(() => {
@@ -109,11 +112,16 @@ export function SleepStudio() {
 
   useEffect(() => {
     if (!recording) return;
-    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    const timer = window.setInterval(() => {
+      recordingSecondsRef.current = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
+      setSeconds(recordingSecondsRef.current);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [recording]);
 
   useEffect(() => () => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
     if (previewAudioUrl.startsWith("blob:")) URL.revokeObjectURL(previewAudioUrl);
     if (savedAudioUrl.startsWith("blob:")) URL.revokeObjectURL(savedAudioUrl);
   }, [previewAudioUrl, savedAudioUrl]);
@@ -140,14 +148,28 @@ export function SleepStudio() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      setVoiceBlob(null);
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined });
       recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
       recorder.onstop = () => {
-        setVoiceBlob(new Blob(chunksRef.current, { type: recorder.mimeType }));
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
+        const elapsedSeconds = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
+        recordingSecondsRef.current = elapsedSeconds;
+        setSeconds(elapsedSeconds);
+        if (elapsedSeconds < MIN_RECORDING_SECONDS || blob.size < 10_000) {
+          setVoiceBlob(null);
+          setMessage(`Please record at least ${MIN_RECORDING_SECONDS} seconds so the voice sample is clear enough.`);
+        } else {
+          setVoiceBlob(blob);
+        }
         stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
       };
       recorderRef.current = recorder;
+      recordingStreamRef.current = stream;
+      recordingStartedAtRef.current = Date.now();
+      recordingSecondsRef.current = 0;
       setSeconds(0);
       recorder.start(1000);
       setRecording(true);
@@ -262,13 +284,13 @@ export function SleepStudio() {
           <div className="record-box">
             <button className={`record-pulse ${recording ? "live" : ""}`} onClick={toggleRecording} aria-label={recording ? "Stop recording" : "Start recording"}>{recording ? "■" : "●"}</button>
             <div className="record-time">{formatSeconds(seconds)}</div>
-            <p className="muted" style={{ margin: "5px 0 0" }}>{voiceBlob ? "Recording ready. You can record again if you’d like." : "Tap to record a calm sample of your voice."}</p>
+            <p className="muted" style={{ margin: "5px 0 0" }}>{voiceBlob ? "Recording ready. You can record again if you’d like." : recording ? `Keep reading until at least ${formatSeconds(MIN_RECORDING_SECONDS)}.` : "Tap to record a calm sample of your voice."}</p>
           </div>
           <p style={{ fontSize: ".82rem", color: "var(--ink-soft)" }}>Try reading: “The moon is rising, the room is quiet, and everything can soften now. We are safe and close together.” Continue with any calm text.</p>
           <label className="consent-box"><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} /><span><strong>I confirm this is my voice and I consent to creating a voice clone.</strong><br />I understand generated audio can say words I did not record, and I can permanently delete the clone at any time.</span></label>
         </>}
         {message && <div className="alert" role="alert">{message}</div>}
-        <div className="panel-actions"><button className="btn btn-secondary" onClick={() => setStep(1)}>← Back</button>{!voiceId && <button className="btn btn-primary" onClick={createVoice} disabled={!voiceBlob || !consented || Boolean(busy)}>{busy === "voice" ? "Creating your voice…" : "Use this recording →"}</button>}</div>
+        <div className="panel-actions"><button className="btn btn-secondary" onClick={() => setStep(1)} disabled={recording}>← Back</button>{!voiceId && <button className="btn btn-primary" onClick={createVoice} disabled={recording || !voiceBlob || !consented || Boolean(busy)}>{busy === "voice" ? "Creating your voice…" : "Use this recording →"}</button>}</div>
       </section>}
 
       {step === 3 && <section className="panel">
@@ -295,7 +317,7 @@ export function SleepStudio() {
         {source && <div className="source-note"><strong>Inspired by:</strong> {source.title}{source.creator ? ` · ${source.creator}` : ""}<br /><small>Original wording generated from title/channel metadata only.</small></div>}
         <div className="field"><label htmlFor="script">Tonight’s script</label><textarea id="script" style={{ minHeight: 310, lineHeight: 1.75 }} value={script} onChange={(event) => { setScript(event.target.value); clearGeneratedAudio(); }} /></div>
         {previewAudioUrl && !savedAudioUrl && <div className="alert success"><strong>Your 30-second voice sample is ready.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={previewAudioUrl} sound={data.sound} /></div><p style={{ margin: "9px 0 0" }}>If it sounds right, save the full bedtime below.</p></div>}
-        {savedAudioUrl && <div className="alert success"><strong>Your full bedtime is saved to My nights.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={savedAudioUrl} sound={data.sound} /></div><div style={{ marginTop: 12 }}><Link className="btn btn-primary btn-small" href="/library">Open My nights →</Link></div>{savedSessionId && <span className="sr-only">Saved session {savedSessionId}</span>}</div>}
+        {savedAudioUrl && <div className="alert success"><strong>Your full bedtime is saved to My nights.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={savedAudioUrl} sound={data.sound} /></div><div style={{ marginTop: 12 }}><a className="btn btn-primary btn-small" href="/library">Open My nights →</a></div>{savedSessionId && <span className="sr-only">Saved session {savedSessionId}</span>}</div>}
         {message && <div className="alert" role="alert">{message}</div>}
         <div className="panel-actions panel-actions-wrap">
           <button className="btn btn-secondary" onClick={() => setStep(3)}>← Adjust</button>
