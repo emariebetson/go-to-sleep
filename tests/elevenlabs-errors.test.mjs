@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyVoiceCreationError } from "../lib/elevenlabs.ts";
+import { classifySpeechGenerationError, classifyVoiceCreationError } from "../lib/elevenlabs.ts";
 
 test("maps the ElevenLabs cloning-plan rejection without exposing provider wording", () => {
   const rawMessage = "Your subscription does not include instant voice cloning. Please upgrade your plan.";
@@ -26,4 +26,12 @@ test("gives invalid samples specific retry guidance", () => {
   assert.equal(result.code, "voice_sample_invalid");
   assert.equal(result.httpStatus, 422);
   assert.match(result.message, /60–120 seconds/i);
+});
+
+test("maps depleted speech credits to an actionable provider message", () => {
+  const result = classifySpeechGenerationError(401, JSON.stringify({ detail: { code: "quota_exceeded", message: "This request exceeds your quota." } }));
+
+  assert.equal(result.code, "provider_quota_exhausted");
+  assert.equal(result.httpStatus, 503);
+  assert.match(result.message, /add provider credits|upgrade/i);
 });

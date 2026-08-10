@@ -7,6 +7,7 @@ import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
 import { previewExcerpt, validateSessionInput } from "@/lib/sleep-session";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
+import { classifySpeechGenerationError } from "@/lib/elevenlabs";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -90,8 +91,9 @@ export async function POST(request: Request) {
       const response = await generateSpeech(apiKey, providerVoiceId, previewExcerpt(input.script));
       if (!response.ok) {
         const detail = await response.text();
+        const failure = classifySpeechGenerationError(response.status, detail);
         console.error("ElevenLabs preview failed", response.status, detail.slice(0, 400));
-        return jsonNoStore({ error: "The 30-second sample is temporarily unavailable." }, { status: 502 });
+        return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
       }
       return new Response(await response.arrayBuffer(), {
         headers: {
@@ -148,10 +150,11 @@ export async function POST(request: Request) {
     const response = await generateSpeech(apiKey, providerVoiceId, input.script);
     if (!response.ok) {
       const detail = await response.text();
+      const failure = classifySpeechGenerationError(response.status, detail);
       console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));
       await db.update(sleepSessions).set({ status: "failed", errorCode: `elevenlabs_${response.status}` }).where(eq(sleepSessions.id, sessionId));
       await refundCredit();
-      return jsonNoStore({ error: "Audio generation is temporarily unavailable." }, { status: 502 });
+      return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
     }
     const audio = await response.arrayBuffer();
     const runtime = env as unknown as RuntimeEnv;

@@ -12,6 +12,12 @@ export type VoiceCreationError = {
   httpStatus: number;
 };
 
+export type SpeechGenerationError = {
+  code: "provider_quota_exhausted" | "speech_provider_unavailable";
+  message: string;
+  httpStatus: number;
+};
+
 function providerErrorText(payload: ProviderErrorPayload) {
   if (typeof payload.detail === "string") return payload.detail;
   return [payload.detail?.status, payload.detail?.code, payload.detail?.message].filter(Boolean).join(" ");
@@ -46,6 +52,22 @@ export function classifyVoiceCreationError(status: number, payload: ProviderErro
   return {
     code: "voice_provider_unavailable",
     message: "Voice setup is temporarily unavailable. Please try again later.",
+    httpStatus: 502,
+  };
+}
+
+export function classifySpeechGenerationError(status: number, providerBody: string): SpeechGenerationError {
+  const detail = providerBody.toLowerCase();
+  if ((status === 401 || status === 402) && (detail.includes("quota_exceeded") || detail.includes("exceeds your quota"))) {
+    return {
+      code: "provider_quota_exhausted",
+      message: "Nearnight’s ElevenLabs credits are exhausted. Add provider credits or upgrade the ElevenLabs plan, then try again.",
+      httpStatus: 503,
+    };
+  }
+  return {
+    code: "speech_provider_unavailable",
+    message: "Audio generation is temporarily unavailable.",
     httpStatus: 502,
   };
 }
