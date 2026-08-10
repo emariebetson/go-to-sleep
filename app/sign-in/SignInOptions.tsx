@@ -3,40 +3,32 @@
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 
-type Provider = "google" | "apple";
-
-export function SignInOptions({ appleEnabled, googleEnabled, returnTo }: {
-  appleEnabled: boolean;
+export function SignInOptions({ googleEnabled, returnTo }: {
   googleEnabled: boolean;
   returnTo: string;
 }) {
-  const [busy, setBusy] = useState<Provider | null>(null);
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function signIn(provider: Provider) {
-    setBusy(provider);
+  async function signIn() {
+    setBusy(true);
     setMessage("");
     try {
-      const result = await authClient.signIn.social({ provider, callbackURL: returnTo });
-      if (result.error) setMessage(result.error.message || `Could not continue with ${provider === "google" ? "Google" : "Apple"}.`);
+      const result = await authClient.signIn.social({ provider: "google", callbackURL: returnTo });
+      if (result.error) setMessage(result.error.message || "Could not continue with Google.");
     } catch {
       setMessage("Sign-in could not start. Please try again.");
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  const unavailable = !googleEnabled && !appleEnabled;
   return <div className="auth-options">
-    <button className="auth-provider" type="button" disabled={!googleEnabled || busy !== null} onClick={() => signIn("google")}>
+    <button className="auth-provider" type="button" disabled={!googleEnabled || busy} onClick={signIn}>
       <span className="provider-mark google-mark" aria-hidden="true">G</span>
-      <span>{busy === "google" ? "Opening Google…" : "Continue with Google"}</span>
+      <span>{busy ? "Opening Google…" : "Continue with Google"}</span>
     </button>
-    <button className="auth-provider apple-provider" type="button" disabled={!appleEnabled || busy !== null} onClick={() => signIn("apple")}>
-      <span className="provider-mark" aria-hidden="true">●</span>
-      <span>{busy === "apple" ? "Opening Apple…" : "Continue with Apple"}</span>
-    </button>
-    {unavailable && <p className="auth-notice">Provider credentials still need to be added before sign-in can open.</p>}
+    {!googleEnabled && <p className="auth-notice">Google sign-in is being connected. Please try again shortly.</p>}
     {message && <p className="alert" role="alert">{message}</p>}
   </div>;
 }

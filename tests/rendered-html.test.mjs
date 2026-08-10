@@ -37,12 +37,12 @@ test("private product pages require an authenticated parent", async () => {
   }
 });
 
-test("offers Google and Apple as the account sign-in choices", async () => {
+test("offers Google as the only account sign-in choice", async () => {
   const response = await render("/sign-in");
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Continue with Google/);
-  assert.match(html, /Continue with Apple/);
+  assert.doesNotMatch(html, /Continue with Apple/);
   assert.doesNotMatch(html, /Sign in with ChatGPT/i);
 });
 

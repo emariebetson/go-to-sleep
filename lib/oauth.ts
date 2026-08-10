@@ -10,20 +10,13 @@ export function getOAuthAuth(baseURL: string) {
   if (existing) return existing;
 
   const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-  const appleEnabled = Boolean(process.env.APPLE_CLIENT_ID && process.env.APPLE_CLIENT_SECRET);
   const socialProviders = {
     ...(googleEnabled ? {
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         scope: ["openid", "email", "profile"],
-      },
-    } : {}),
-    ...(appleEnabled ? {
-      apple: {
-        clientId: process.env.APPLE_CLIENT_ID!,
-        clientSecret: process.env.APPLE_CLIENT_SECRET!,
-        scope: ["name", "email"],
+        prompt: "select_account" as const,
       },
     } : {}),
   };
@@ -51,7 +44,7 @@ export function getOAuthAuth(baseURL: string) {
       encryptOAuthTokens: true,
       accountLinking: {
         enabled: true,
-        trustedProviders: ["google", "apple"],
+        trustedProviders: ["google"],
         allowDifferentEmails: false,
       },
     },

@@ -17,8 +17,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
       <Brand />
       <span className="eyebrow">Welcome to Nearnight</span>
       <h1 className="display">A private place for gentler nights</h1>
-      <p className="muted">Sign in with the account you already use. Nearnight never receives your Google or Apple password.</p>
-      <SignInOptions appleEnabled={providers.apple} googleEnabled={providers.google} returnTo={returnTo} />
+      <p className="muted">Sign in with Google. Nearnight never receives your Google password.</p>
+      <SignInOptions googleEnabled={providers.google} returnTo={returnTo} />
       <p className="auth-fine-print">For parents and caregivers 18+. By continuing, you agree to the <Link href="/terms">terms</Link> and acknowledge the <Link href="/privacy">privacy notice</Link>.</p>
       <Link className="auth-back" href="/">← Back to Nearnight</Link>
     </div>

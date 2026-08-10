@@ -75,7 +75,6 @@ export function isAdmin(user: AppUser): boolean {
 export function configuredOAuthProviders() {
   return {
     google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    apple: Boolean(process.env.APPLE_CLIENT_ID && process.env.APPLE_CLIENT_SECRET),
   };
 }
 
