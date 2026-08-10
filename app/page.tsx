@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   title: "Your voice, their gentlest bedtime",
   description: "Create personalized baby bedtime stories and calming audio in your own familiar voice.",
 };
+export const dynamic = "force-dynamic";
 
 export default function Home() {
   return (
