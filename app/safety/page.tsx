@@ -1,0 +1,9 @@
+import type { Metadata } from "next";
+import { SiteFooter } from "@/components/SiteFooter";
+import { SiteHeader } from "@/components/SiteHeader";
+
+export const metadata: Metadata = { title: "Safety" };
+
+export default function SafetyPage() {
+  return <><SiteHeader /><main className="section" style={{ paddingTop: 55 }}><article className="container" style={{ maxWidth: 820 }}><span className="eyebrow">Product safety</span><h1 className="display" style={{ fontSize: "clamp(3.5rem,7vw,6rem)", lineHeight: .95 }}>Calm audio.<br />Clear boundaries.</h1><p className="hero-copy">Nearnight is a parent-operated wellbeing product. It does not diagnose or treat sleep conditions, replace responsive caregiving, monitor a baby, or provide safe-sleep instructions.</p><section className="panel" style={{ marginTop: 36 }}><h2>Playback basics</h2><ul className="check-list"><li>Keep the device and speaker outside the crib and away from the baby.</li><li>Use the lowest effective volume and a timer rather than loud, all-night playback.</li><li>Follow current pediatric and local safe-sleep guidance for your baby.</li><li>Stop playback if it appears to agitate rather than settle your baby.</li></ul></section><section className="panel" style={{ marginTop: 20 }}><h2>Content boundaries</h2><p>Personalized scripts are filtered to exclude medical claims, sleep guarantees, unsafe positioning advice, fear, shame, startling imagery, commands to ignore crying, and requests unrelated to bedtime. Parents review every script before audio is generated.</p></section><section className="panel" style={{ marginTop: 20 }}><h2>Voice consent</h2><p>Only the adult account holder may submit their own voice. Explicit consent is required at creation. Raw samples are sent directly to the voice provider and are not retained by Nearnight. Deleting a voice triggers deletion with the provider and removes local references.</p></section></article></main><SiteFooter /></>;
+}
