@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getAppUser, isAdmin } from "@/lib/auth";
 import { Brand } from "./Brand";
+import { SignOutButton } from "./SignOutButton";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -39,6 +40,7 @@ export async function AppShell({ children, active }: AppShellProps) {
             <strong style={{ display: "block", color: "var(--ink)", marginBottom: 4 }}>Tonight’s reminder</strong>
             Place the speaker across the room, keep the volume low, and always follow safe-sleep guidance.
           </div>
+          {user && <div className="sidebar-account"><span>{user.displayName}</span><small>{user.email}</small><SignOutButton /></div>}
         </aside>
         <main className="app-main">{children}</main>
       </div>

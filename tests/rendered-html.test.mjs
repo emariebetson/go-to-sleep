@@ -33,8 +33,17 @@ test("private product pages require an authenticated parent", async () => {
   for (const path of ["/studio", "/library", "/account", "/admin"]) {
     const response = await render(path);
     assert.ok([302, 303, 307, 308].includes(response.status), `${path}: ${response.status}`);
-    assert.match(response.headers.get("location") || "", /^\/signin-with-chatgpt\?/);
+    assert.match(response.headers.get("location") || "", /^\/sign-in\?returnTo=/);
   }
+});
+
+test("offers Google and Apple as the account sign-in choices", async () => {
+  const response = await render("/sign-in");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Continue with Google/);
+  assert.match(html, /Continue with Apple/);
+  assert.doesNotMatch(html, /Sign in with ChatGPT/i);
 });
 
 test("private generation APIs reject anonymous requests", async () => {

@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   }
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const input = validateSessionInput(await readJsonObject(request, 24_000));
     sessionId = input.requestId;
     const apiKey = process.env.ELEVENLABS_API_KEY;

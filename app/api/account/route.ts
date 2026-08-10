@@ -11,7 +11,7 @@ type AudioBucket = { delete(keys: string | string[]): Promise<void> };
 export async function DELETE(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const db = getDb();
     const [account, voiceRecords, sessionRecords] = await Promise.all([
       db.select().from(users).where(eq(users.id, user.userId)).get(),

@@ -6,7 +6,7 @@ import { curatedScript, personalizedScript, validateScriptInput } from "@/lib/sl
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const input = validateScriptInput(await readJsonObject(request, 8_000));
     const script = input.scriptMode === "curated" ? curatedScript(input) : await personalizedScript(input);
     const [{ getDb }, { bestEffortEnsureUser }] = await Promise.all([import("@/db"), import("@/lib/data")]);

@@ -9,7 +9,7 @@ import { stripePost } from "@/lib/stripe";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const priceId = process.env.STRIPE_PRICE_PLUS_MONTHLY;
     if (!priceId) return jsonNoStore({ error: "The Plus plan is not configured yet." }, { status: 503 });
     await bestEffortEnsureUser(user);

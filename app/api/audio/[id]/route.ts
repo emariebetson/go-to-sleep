@@ -9,7 +9,7 @@ type AudioBucket = { get(key: string): Promise<StoredAudio | null> };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const { id } = await context.params;
     const record = await getDb().select({ audioKey: sleepSessions.audioKey }).from(sleepSessions).where(and(eq(sleepSessions.id, id), eq(sleepSessions.userId, user.userId))).get();
     if (!record?.audioKey) return new Response("Not found", { status: 404 });

@@ -10,7 +10,7 @@ const ELEVENLABS = "https://api.elevenlabs.io/v1";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) return jsonNoStore({ error: "ElevenLabs is not connected yet. Add its API key to finish voice setup." }, { status: 503 });
     await ensureUser(user);
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const searchParams = new URL(request.url).searchParams;
     const voiceId = searchParams.get("voiceId");
     const deleteAll = searchParams.get("all") === "true";

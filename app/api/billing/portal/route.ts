@@ -8,7 +8,7 @@ import { stripePost } from "@/lib/stripe";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiUser();
+    const user = await requireApiUser(request);
     const record = await getDb().select({ customerId: users.stripeCustomerId }).from(users).where(eq(users.id, user.userId)).get();
     if (!record?.customerId) return jsonNoStore({ error: "No Stripe subscription was found." }, { status: 404 });
     const session = await stripePost("/billing_portal/sessions", { customer: record.customerId, return_url: `${publicAppOrigin(request)}/account` });

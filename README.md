@@ -11,7 +11,7 @@ Nearnight is a parent-operated SaaS product that creates personalized baby bedti
 - **Voice:** ElevenLabs Instant Voice Cloning with explicit adult attestation. Raw samples are transferred directly and are not stored by Nearnight.
 - **Pricing:** one free lifetime generation; $12/month for 12 new sessions; unlimited replays; optional $7 five-session packs. This is more predictable than unlimited usage and simpler than metered invoices.
 - **Storage:** D1 for relational metadata and R2 for generated MP3 files. Background sounds should be mixed on-device so the same voice track can be reused cheaply.
-- **Identity:** Sites' dispatch-owned sign-in is isolated behind `lib/auth.ts`. Replace that adapter with a mobile-compatible OIDC provider before native app launch.
+- **Identity:** Nearnight uses Better Auth with Google and Apple OAuth, server-validated sessions, encrypted provider tokens, and D1-backed account records.
 
 ## Local setup
 
@@ -24,6 +24,12 @@ Nearnight is a parent-operated SaaS product that creates personalized baby bedti
 The repository intentionally never commits `.env.local`.
 
 ## Required provider setup
+
+### Google and Apple sign-in
+
+Generate a long random `BETTER_AUTH_SECRET` and keep it stable. Create a Google web OAuth client with `/api/auth/callback/google` as its callback, then save its client ID and secret as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+For Apple, create a Services ID associated with a Sign in with Apple-enabled App ID, register the site domain and `/api/auth/callback/apple`, and save the Services ID and current client-secret JWT as `APPLE_CLIENT_ID` and `APPLE_CLIENT_SECRET`. Apple client-secret JWTs expire and must be rotated before expiry. Set `BETTER_AUTH_URL` to the site's canonical HTTPS origin in production.
 
 ### OpenAI
 
@@ -51,7 +57,7 @@ Save the signing secret as `STRIPE_WEBHOOK_SECRET`. Configure Stripe's customer 
 - Every generated audio object uses a user-scoped R2 key and is served only after server-side ownership verification.
 - Voice creation requires an explicit consent checkbox; deletion first checks ownership, then deletes at ElevenLabs, then tombstones the local record.
 - Stripe webhooks use timestamped HMAC verification and an idempotency table.
-- API routes require server-injected identity in production. The local preview identity is never enabled in production.
+- API routes require a valid server-side OAuth session in production. The local preview identity is never enabled in production.
 - Admin access must use `ADMIN_EMAILS`; production must never trust an admin flag supplied by the browser.
 - Full names, exact birth dates, photos, health details, and child accounts are intentionally out of scope.
 

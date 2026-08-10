@@ -6,6 +6,8 @@ export const users = sqliteTable(
     id: text("id").primaryKey(),
     email: text("email").notNull(),
     displayName: text("display_name"),
+    emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+    image: text("image"),
     role: text("role", { enum: ["parent", "admin"] }).notNull().default("parent"),
     stripeCustomerId: text("stripe_customer_id"),
     subscriptionId: text("subscription_id"),
@@ -19,6 +21,64 @@ export const users = sqliteTable(
   (table) => [
     uniqueIndex("users_email_idx").on(table.email),
     uniqueIndex("users_stripe_customer_idx").on(table.stripeCustomerId),
+  ],
+);
+
+export const authSessions = sqliteTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    uniqueIndex("auth_sessions_token_idx").on(table.token),
+    index("auth_sessions_user_idx").on(table.userId),
+    index("auth_sessions_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export const oauthAccounts = sqliteTable(
+  "oauth_accounts",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp_ms" }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("oauth_accounts_provider_idx").on(table.providerId, table.accountId),
+    index("oauth_accounts_user_idx").on(table.userId),
+  ],
+);
+
+export const authVerifications = sqliteTable(
+  "auth_verifications",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("auth_verifications_identifier_idx").on(table.identifier),
+    index("auth_verifications_expiry_idx").on(table.expiresAt),
   ],
 );
 

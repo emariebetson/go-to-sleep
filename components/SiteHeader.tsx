@@ -10,6 +10,7 @@ export function SiteHeader() {
           <Link href="/#how-it-works">How it works</Link>
           <Link href="/#safety">Safety</Link>
           <Link href="/pricing">Pricing</Link>
+          <Link href="/sign-in">Sign in</Link>
           <Link className="btn btn-secondary btn-small" href="/library">My nights</Link>
           <Link className="btn btn-primary btn-small" href="/studio">Create a bedtime</Link>
         </nav>
