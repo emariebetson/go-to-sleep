@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./visualizer.css";
 
 :root {
   --ink: #1c2238;

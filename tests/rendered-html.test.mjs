@@ -55,7 +55,19 @@ test("saved audio authenticates with the incoming request", async () => {
   const source = await readFile(new URL("../app/api/audio/[id]/route.ts", import.meta.url), "utf8");
   assert.match(source, /GET\(request: Request/);
   assert.match(source, /requireApiUser\(request\)/);
+  assert.match(source, /parseByteRange\(request\.headers\.get\("range"\)/);
+  assert.match(source, /status: range \? 206 : 200/);
+  assert.match(source, /"accept-ranges": "bytes"/);
   assert.doesNotMatch(source, /GET\(_request: Request/);
+});
+
+test("visualizer preserves the single narration audio element", async () => {
+  const player = await readFile(new URL("../components/SleepPlayer.tsx", import.meta.url), "utf8");
+  const visualizer = await readFile(new URL("../components/SleepVisualizer.tsx", import.meta.url), "utf8");
+  assert.equal(player.match(/<audio\b/g)?.length, 1);
+  assert.doesNotMatch(visualizer, /<audio\b/);
+  assert.match(player, /playbackEpoch !== playbackEpochRef\.current/);
+  assert.match(player, /visualizerOpen && <SleepVisualizer/);
 });
 
 test("server-renders public trust and pricing pages", async () => {
