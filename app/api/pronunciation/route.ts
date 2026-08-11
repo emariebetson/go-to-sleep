@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       import("@/db/schema"),
       import("@/lib/data"),
     ]);
-    await ensureUser(user);
+    const { householdId } = await ensureUser(user);
     const db = getDb();
     const saved = await db.select({ pronunciation: children.pronunciation }).from(children)
       .where(and(eq(children.userId, user.userId), eq(children.normalizedNickname, normalizeNickname(nickname))))
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
     await db.insert(usageEvents).values({
       id: usageId,
       userId: user.userId,
+      householdId,
       type: "pronunciation_guess",
       units: 1,
       metadata: { provider: "openai", nicknameLength: nickname.length },

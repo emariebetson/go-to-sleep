@@ -27,12 +27,7 @@ export function assertSameOrigin(request: Request) {
 }
 
 export async function readJsonObject(request: Request, maxBytes = 32_000) {
-  const declaredLength = Number(request.headers.get("content-length") || "0");
-  if (declaredLength > maxBytes) throw jsonNoStore({ error: "Request is too large." }, { status: 413 });
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
-    throw jsonNoStore({ error: "Request is too large." }, { status: 413 });
-  }
+  const raw = new TextDecoder().decode(await readLimitedBytes(request, maxBytes));
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -43,6 +38,34 @@ export async function readJsonObject(request: Request, maxBytes = 32_000) {
     throw jsonNoStore({ error: "Request body must be a JSON object." }, { status: 400 });
   }
   return parsed as Record<string, unknown>;
+}
+
+export async function readLimitedBytes(request: Request, maxBytes: number) {
+  const declaredLength = Number(request.headers.get("content-length") || "0");
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw jsonNoStore({ error: "Request is too large." }, { status: 413 });
+  }
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw jsonNoStore({ error: "Request is too large." }, { status: 413 });
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 25_000) {

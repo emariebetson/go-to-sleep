@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb } from "@/db";
-import { sleepSessions, users, voices } from "@/db/schema";
+import { householdMembers, households, sleepSessions, users, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
+import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore } from "@/lib/http";
 import { stripeDelete } from "@/lib/stripe";
 
@@ -12,13 +13,19 @@ export async function DELETE(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireApiUser(request);
+    await ensureUser(user);
     const db = getDb();
-    const [account, voiceRecords, sessionRecords] = await Promise.all([
+    const [account, ownedHouseholds, voiceRecords, sessionRecords] = await Promise.all([
       db.select().from(users).where(eq(users.id, user.userId)).get(),
+      db.select({ id: households.id }).from(households).where(eq(households.ownerUserId, user.userId)).all(),
       db.select().from(voices).where(eq(voices.userId, user.userId)).all(),
       db.select({ audioKey: sleepSessions.audioKey }).from(sleepSessions).where(eq(sleepSessions.userId, user.userId)).all(),
     ]);
     if (!account) return jsonNoStore({ deleted: true });
+    const ownedHouseholdIds = ownedHouseholds.map(({ id }) => id);
+    const otherActiveMembers = ownedHouseholdIds.length ? await db.select({ id: householdMembers.id }).from(householdMembers)
+      .where(and(inArray(householdMembers.householdId, ownedHouseholdIds), eq(householdMembers.status, "active"), ne(householdMembers.userId, user.userId))).all() : [];
+    if (otherActiveMembers.length) return jsonNoStore({ error: "Transfer every shared household you own or remove its other active members before deleting this account." }, { status: 409 });
 
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
     if (voiceRecords.some((voice) => voice.status !== "deleted") && !elevenLabsKey) return jsonNoStore({ error: "Voice-provider deletion is not configured. Your account was not deleted." }, { status: 503 });
@@ -32,6 +39,7 @@ export async function DELETE(request: Request) {
     const bucket = (env as unknown as { AUDIO?: AudioBucket }).AUDIO;
     const audioKeys = sessionRecords.flatMap((record) => record.audioKey ? [record.audioKey] : []);
     if (bucket && audioKeys.length) await bucket.delete(audioKeys);
+    if (ownedHouseholdIds.length) await db.delete(households).where(and(inArray(households.id, ownedHouseholdIds), eq(households.ownerUserId, user.userId)));
     await db.delete(users).where(eq(users.id, user.userId));
     return jsonNoStore({ deleted: true });
   } catch (error) {

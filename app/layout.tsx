@@ -10,6 +10,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const metadataBase = new URL(`${protocol}://${host}`);
   return {
     metadataBase,
+    applicationName: "NearSleep by NearYou",
     title: { default: "Nearnight — Your voice, their gentlest bedtime", template: "%s · Nearnight" },
     description: "Create calming, personalized bedtime audio for your baby in the voice they know best—yours.",
     openGraph: {
@@ -19,6 +20,12 @@ export async function generateMetadata(): Promise<Metadata> {
       images: [{ url: new URL("/og.png", metadataBase), width: 1200, height: 630, alt: "Nearnight — Your voice. Their gentlest bedtime." }],
     },
     twitter: { card: "summary_large_image", images: [new URL("/og.png", metadataBase)] },
+    other: {
+      "nearyou-umbrella": "NearYou",
+      "nearyou-product-family": "NearSleep",
+      "nearyou-compatible-product": "Nearnight",
+      "nearyou-api-version": "v1",
+    },
   };
 }
 

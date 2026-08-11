@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gt, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { children, sleepSessions, usageEvents, users, voices } from "@/db/schema";
+import { childProfiles, children, sleepSessions, usageEvents, users, voiceConsents, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
@@ -10,6 +10,7 @@ import { demoNarratorEnabled } from "@/lib/demo-narrator";
 import { classifySpeechGenerationError } from "@/lib/elevenlabs";
 import { normalizeNickname } from "@/lib/pronunciation";
 import { prepareNarration } from "@/lib/session-narration";
+import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -55,15 +56,27 @@ export async function POST(request: Request) {
     sessionId = input.requestId;
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) return jsonNoStore({ error: "ElevenLabs is not connected yet. Add its API key to generate audio." }, { status: 503 });
-    await ensureUser(user);
+    const { householdId } = await ensureUser(user);
     const db = getDb();
     const isDemoNarrator = input.narrationKind === "demo_narrator";
+    const requireVerifiedConsent = featureFlagsFromEnv(process.env).requireVerifiedVoiceConsent;
     if (isDemoNarrator && !demoNarratorEnabled()) return jsonNoStore({ error: "Demo narration is unavailable." }, { status: 403 });
     const ownedVoice = isDemoNarrator ? null : await db.select({ id: voices.id })
       .from(voices)
-      .where(and(eq(voices.userId, user.userId), eq(voices.providerVoiceId, input.providerVoiceId), eq(voices.status, "ready")))
+      .leftJoin(voiceConsents, eq(voices.currentConsentId, voiceConsents.id))
+      .where(and(
+        eq(voices.userId, user.userId),
+        eq(voices.householdId, householdId),
+        eq(voices.providerVoiceId, input.providerVoiceId),
+        eq(voices.status, "ready"),
+        ...(requireVerifiedConsent ? [
+          eq(voiceConsents.householdId, householdId),
+          eq(voiceConsents.adultUserId, user.userId),
+          eq(voiceConsents.status, "active_verified"),
+        ] : []),
+      ))
       .get();
-    if (!isDemoNarrator && !ownedVoice) return jsonNoStore({ error: "That voice profile is unavailable. Create or select your own voice first." }, { status: 404 });
+    if (!isDemoNarrator && !ownedVoice) return jsonNoStore({ error: requireVerifiedConsent ? "That voice requires current verified adult consent before narration." : "That voice profile is unavailable. Create or select your own voice first." }, { status: requireVerifiedConsent ? 403 : 404 });
     const providerVoiceId = isDemoNarrator
       ? process.env.ELEVENLABS_DEMO_VOICE_ID || DEFAULT_DEMO_VOICE_ID
       : input.providerVoiceId;
@@ -77,6 +90,7 @@ export async function POST(request: Request) {
       const inserted = await db.insert(usageEvents).values({
         id: previewUsageId,
         userId: user.userId,
+        householdId,
         type: "audio_preview",
         units: narration.preview.length,
         metadata: { provider: "elevenlabs", narrationKind: input.narrationKind },
@@ -113,6 +127,7 @@ export async function POST(request: Request) {
     const claimed = await db.insert(sleepSessions).values({
       id: sessionId,
       userId: user.userId,
+      householdId,
       voiceId: ownedVoice?.id || null,
       title,
       script: input.script,
@@ -166,6 +181,7 @@ export async function POST(request: Request) {
     const child = await db.insert(children).values({
       id: crypto.randomUUID(),
       userId: user.userId,
+      householdId,
       nickname: input.childName,
       normalizedNickname: normalizeNickname(input.childName),
       pronunciation: input.pronunciation || null,
@@ -184,6 +200,22 @@ export async function POST(request: Request) {
       },
     }).returning({ id: children.id }).get();
     if (!child) throw new Error("The child settings could not be saved.");
+    const childProfileId = `child-profile:${child.id}`;
+    await db.insert(childProfiles).values({
+      id: childProfileId,
+      householdId,
+      legacyChildId: child.id,
+      nickname: input.childName,
+      normalizedNickname: normalizeNickname(input.childName),
+      ageMonths: input.ageMonths,
+      bedtimeChallenge: input.challenge,
+      createdAt: childSavedAt,
+      updatedAt: childSavedAt,
+    }).onConflictDoUpdate({
+      target: [childProfiles.householdId, childProfiles.normalizedNickname],
+      set: { legacyChildId: child.id, nickname: input.childName, ageMonths: input.ageMonths, bedtimeChallenge: input.challenge, updatedAt: childSavedAt },
+    });
+    await db.update(children).set({ householdId, profileId: childProfileId }).where(eq(children.id, child.id));
     const runtime = env as unknown as RuntimeEnv;
     const audioKey = `audio/${user.userId}/${sessionId}.mp3`;
 
@@ -192,7 +224,7 @@ export async function POST(request: Request) {
       storedAudioKey = audioKey;
       const completedAt = new Date();
       await db.update(sleepSessions).set({ status: "ready", childId: child.id, audioKey, providerRequestId: response.headers.get("request-id"), completedAt }).where(eq(sleepSessions.id, sessionId));
-      await db.insert(usageEvents).values({ id: crypto.randomUUID(), userId: user.userId, sessionId, type: "audio_generation", units: input.script.length, metadata: { provider: "elevenlabs" }, createdAt: completedAt });
+      await db.insert(usageEvents).values({ id: crypto.randomUUID(), userId: user.userId, householdId, sessionId, type: "audio_generation", units: input.script.length, metadata: { provider: "elevenlabs" }, createdAt: completedAt });
       creditReserved = false;
       return jsonNoStore({ sessionId, audioUrl: `/api/audio/${sessionId}` });
     }

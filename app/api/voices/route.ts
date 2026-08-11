@@ -1,9 +1,9 @@
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
-import { users, voices } from "@/db/schema";
+import { users, voiceConsents, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
-import { assertSameOrigin, fetchWithTimeout, jsonNoStore } from "@/lib/http";
+import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readLimitedBytes } from "@/lib/http";
 import { classifyVoiceCreationError } from "@/lib/elevenlabs";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
 
@@ -30,12 +30,19 @@ export async function POST(request: Request) {
     const user = await requireApiUser(request);
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) return jsonNoStore({ error: "ElevenLabs is not connected yet. Add its API key to finish voice setup." }, { status: 503 });
-    await ensureUser(user);
+    const { householdId } = await ensureUser(user);
     const existingVoice = await getDb().select({ id: voices.id }).from(voices).where(and(eq(voices.userId, user.userId), ne(voices.status, "deleted"))).get();
     if (existingVoice) return jsonNoStore({ error: "This account already has an active voice. Delete it before creating a replacement." }, { status: 409 });
-    const declaredLength = Number(request.headers.get("content-length") || "0");
-    if (declaredLength > 26_000_000) return jsonNoStore({ error: "Voice sample is too large." }, { status: 413 });
-    const form = await request.formData();
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data;")) return jsonNoStore({ error: "Voice setup requires multipart form data." }, { status: 400 });
+    let form: FormData;
+    try {
+      const upload = await readLimitedBytes(request, 26_000_000);
+      form = await new Response(upload, { headers: { "content-type": contentType } }).formData();
+    } catch (error) {
+      if (error instanceof Response) return error;
+      return jsonNoStore({ error: "Voice setup form data is invalid." }, { status: 400 });
+    }
     const sample = form.get("sample");
     const consent = form.get("consent") === "true";
     const name = Array.from(String(form.get("name") || "Parent voice"))
@@ -65,11 +72,26 @@ export async function POST(request: Request) {
     }
 
     const consentedAt = new Date();
+    const voiceId = crypto.randomUUID();
+    const consentId = crypto.randomUUID();
+    const db = getDb();
     try {
-      const db = getDb();
-      await db.insert(voices).values({ id: crypto.randomUUID(), userId: user.userId, providerVoiceId: payload.voice_id, name, status: "ready", consentAttestedAt: consentedAt, createdAt: consentedAt });
-      await db.update(users).set({ consentVersion: "voice-v1", consentedAt, updatedAt: consentedAt }).where(eq(users.id, user.userId));
+      await db.insert(voices).values({ id: voiceId, userId: user.userId, householdId, currentConsentId: null, providerVoiceId: payload.voice_id, name, status: "ready", consentAttestedAt: consentedAt, createdAt: consentedAt });
+      await db.insert(voiceConsents).values({
+        id: consentId,
+        householdId,
+        voiceId,
+        adultUserId: user.userId,
+        consentVersion: "legacy-voice-checkbox-v1",
+        scope: "adult_self_private_narration",
+        status: "pending_verification",
+        evidence: { kind: "legacy_checkbox_attestation", verified: false, posthumousSynthesis: false },
+        attestedAt: consentedAt,
+      });
+      await db.update(voices).set({ currentConsentId: consentId }).where(eq(voices.id, voiceId));
+      await db.update(users).set({ consentVersion: "legacy-voice-checkbox-v1", consentedAt, updatedAt: consentedAt }).where(eq(users.id, user.userId));
     } catch (error) {
+      try { await db.delete(voices).where(eq(voices.id, voiceId)); } catch { /* retried account cleanup handles a failed local rollback */ }
       try {
         await fetchWithTimeout(`${ELEVENLABS}/voices/${encodeURIComponent(payload.voice_id)}`, { method: "DELETE", headers: { "xi-api-key": apiKey } });
       } catch { /* provider cleanup will be reconciled from request logs */ }
@@ -86,6 +108,7 @@ export async function DELETE(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireApiUser(request);
+    const { householdId } = await ensureUser(user);
     const searchParams = new URL(request.url).searchParams;
     const voiceId = searchParams.get("voiceId");
     const deleteAll = searchParams.get("all") === "true";
@@ -106,6 +129,8 @@ export async function DELETE(request: Request) {
       const response = await fetchWithTimeout(`${ELEVENLABS}/voices/${encodeURIComponent(record.providerVoiceId)}`, { method: "DELETE", headers: { "xi-api-key": apiKey } });
       if (!response.ok && response.status !== 404) return jsonNoStore({ error: "The provider could not delete this voice." }, { status: 502 });
       await db.update(voices).set({ status: "deleted", deletedAt: new Date() }).where(eq(voices.id, record.id));
+      await db.update(voiceConsents).set({ status: "revoked", revokedAt: new Date() })
+        .where(and(eq(voiceConsents.householdId, householdId), eq(voiceConsents.voiceId, record.id)));
     }
     return jsonNoStore({ deleted: true, count: records.length });
   } catch (error) {
