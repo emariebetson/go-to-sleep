@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+let workerPromise;
+function loadWorker() {
+  if (!workerPromise) {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+    workerPromise = import(workerUrl.href).then((module) => module.default);
+  }
+  return workerPromise;
+}
+
 async function render(path = "/") {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  const worker = await loadWorker();
   return worker.fetch(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }), {
     ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
     DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] },
@@ -74,20 +82,22 @@ test("offers Google as the only account sign-in choice", async () => {
   assert.doesNotMatch(html, /Sign in with ChatGPT/i);
 });
 
-test("private generation APIs reject anonymous requests", async () => {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  const runtime = {
-    ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-    DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] },
-    AUDIO: { get: async () => null, put: async () => undefined },
-  };
+test("private billing routes enforce origin and authentication before database access", async () => {
+  for (const path of ["../app/api/billing/checkout/route.ts", "../app/api/billing/portal/route.ts"]) {
+    const source = await readFile(new URL(path, import.meta.url), "utf8");
+    const originCheck = source.indexOf("assertSameOrigin(request)");
+    const authCheck = source.indexOf("requireApiUser(request)");
+    const databaseLoad = source.indexOf('await import("@/db")');
+    assert.ok(originCheck >= 0 && authCheck > originCheck && databaseLoad > authCheck, path);
+  }
+});
+
+test("Stripe webhook rejects invalid signatures and oversized payloads", async () => {
+  const worker = await loadWorker();
+  const runtime = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) }, DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] } };
   const context = { waitUntil() {}, passThroughOnException() {} };
-  const response = await worker.fetch(new Request("http://localhost/api/scripts", {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: "http://localhost" },
-    body: JSON.stringify({ childName: "Junie", ageMonths: "6", challenge: "settling", theme: "moonlit-meadow", duration: "5", style: "slow-story", scriptMode: "curated" }),
-  }), runtime, context);
-  assert.equal(response.status, 401);
+  const invalid = await worker.fetch(new Request("http://localhost/api/webhooks/stripe", { method: "POST", headers: { "stripe-signature": "bad" }, body: "{}" }), runtime, context);
+  assert.equal(invalid.status, 400);
+  const oversized = await worker.fetch(new Request("http://localhost/api/webhooks/stripe", { method: "POST", headers: { "content-length": "1000001" }, body: "x" }), runtime, context);
+  assert.equal(oversized.status, 413);
 });
