@@ -44,6 +44,13 @@ const unsafeScriptPatterns = [
   /\b(?:hypnosis|hypnotize|hypnotic)\b/i,
 ];
 
+export function validateNarrationSafety(script: string) {
+  if (unsafeScriptPatterns.some((pattern) => pattern.test(script))) {
+    throw new Error("The edited script contains language outside Nearnight’s safety boundaries. Please revise it before creating audio.");
+  }
+  return script;
+}
+
 function cleanText(value: unknown, limit: number) {
   return Array.from(String(value || ""))
     .filter((character) => {
@@ -72,9 +79,7 @@ export function validateSessionInput(body: Record<string, unknown>): SessionInpu
   const ageMonths = Math.max(0, Math.min(24, Number.parseInt(String(body.ageMonths || "0"), 10) || 0));
   const script = String(body.script || "").replace(/\r\n/g, "\n").trim();
   if (script.length < 80 || script.length > 18_000) throw new Error("Review the script length and try again.");
-  if (unsafeScriptPatterns.some((pattern) => pattern.test(script))) {
-    throw new Error("The edited script contains language outside Nearnight’s safety boundaries. Please revise it before creating audio.");
-  }
+  validateNarrationSafety(script);
   const narrationKind = allowedValue("narrationKind", body.narrationKind);
   const providerVoiceId = cleanText(body.voiceId, 80);
   if (narrationKind === "parent_clone" && !/^[A-Za-z0-9_-]{8,80}$/.test(providerVoiceId)) throw new Error("Create or select your voice first.");

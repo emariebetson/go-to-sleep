@@ -80,6 +80,7 @@ export type PlanId = keyof typeof PLAN_CATALOG;
 
 export type FeatureFlags = {
   foundationApi: boolean;
+  productionUpgradeFoundation: boolean;
   legacyNearsleepRoutes: boolean;
   story: boolean;
   legacyArchive: boolean;
@@ -98,6 +99,7 @@ function enabled(value: string | undefined) {
 export function featureFlagsFromEnv(environment: Record<string, string | undefined>): FeatureFlags {
   return {
     foundationApi: enabled(environment.NEARYOU_ENABLE_FOUNDATION_API),
+    productionUpgradeFoundation: enabled(environment.NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION),
     legacyNearsleepRoutes: true,
     story: enabled(environment.NEARYOU_ENABLE_STORY),
     legacyArchive: enabled(environment.NEARYOU_ENABLE_LEGACY_ARCHIVE),

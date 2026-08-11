@@ -48,6 +48,8 @@ test("safety-gated capabilities stay disabled even when environment input reques
   assert.equal(flags.posthumousSynthesis, false);
   assert.equal(flags.story, true);
   assert.equal(featureFlagsFromEnv({}).foundationApi, false);
+  assert.equal(featureFlagsFromEnv({}).productionUpgradeFoundation, false);
+  assert.equal(featureFlagsFromEnv({ NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION: "true" }).productionUpgradeFoundation, true);
   assert.equal(featureFlagsFromEnv({}).requireVerifiedVoiceConsent, false);
   assert.equal(featureFlagsFromEnv({ NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT: "true" }).requireVerifiedVoiceConsent, true);
   assert.equal(featureFlagsFromEnv({ NEARYOU_ENABLE_FOUNDATION_API: "true" }).foundationApi, true);

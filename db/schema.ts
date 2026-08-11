@@ -239,6 +239,83 @@ export const voiceConsents = sqliteTable(
   ],
 );
 
+export const adultOnboardingAcceptances = sqliteTable(
+  "adult_onboarding_acceptances",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    adultUserId: text("adult_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    attestation: text("attestation").notNull(),
+    acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [uniqueIndex("adult_onboarding_household_user_version_idx").on(table.householdId, table.adultUserId, table.version)],
+);
+
+export const voiceVerificationChallenges = sqliteTable(
+  "voice_verification_challenges",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    voiceId: text("voice_id").notNull().references(() => voices.id, { onDelete: "cascade" }),
+    adultUserId: text("adult_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    onboardingAcceptanceId: text("onboarding_acceptance_id").notNull().references(() => adultOnboardingAcceptances.id, { onDelete: "restrict" }),
+    version: text("version").notNull(),
+    phrase: text("phrase").notNull(),
+    phraseHash: text("phrase_hash").notNull(),
+    status: text("status", { enum: ["pending", "processing", "verified", "failed", "expired"] }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("voice_verification_voice_status_idx").on(table.voiceId, table.status)],
+);
+
+export const voiceReplacements = sqliteTable(
+  "voice_replacements",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    voiceId: text("voice_id").notNull().references(() => voices.id, { onDelete: "cascade" }),
+    challengeId: text("challenge_id").notNull().references(() => voiceVerificationChallenges.id, { onDelete: "cascade" }),
+    adultUserId: text("adult_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    originalProviderVoiceId: text("original_provider_voice_id").notNull(),
+    originalConsentId: text("original_consent_id").notNull().references(() => voiceConsents.id, { onDelete: "restrict" }),
+    replacementProviderVoiceId: text("replacement_provider_voice_id"),
+    providerRequestId: text("provider_request_id"),
+    consentId: text("consent_id").notNull(),
+    consentVersion: text("consent_version").notNull(),
+    evidence: text("evidence", { mode: "json" }),
+    status: text("status", { enum: ["processing", "provider_created", "activating", "cleanup_pending", "completed", "failed"] }).notNull().default("processing"),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("voice_replacements_challenge_idx").on(table.challengeId),
+    index("voice_replacements_voice_status_idx").on(table.voiceId, table.status),
+  ],
+);
+
+export const voiceConsentLeases = sqliteTable(
+  "voice_consent_leases",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    voiceId: text("voice_id").notNull().references(() => voices.id, { onDelete: "cascade" }),
+    consentId: text("consent_id").notNull().references(() => voiceConsents.id, { onDelete: "cascade" }),
+    consentVersion: text("consent_version").notNull(),
+    sessionId: text("session_id").references((): AnySQLiteColumn => sleepSessions.id, { onDelete: "set null" }),
+    status: text("status", { enum: ["active", "consumed", "revoked", "expired"] }).notNull().default("active"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    finalizedAt: integer("finalized_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("voice_consent_leases_consent_status_idx").on(table.consentId, table.status)],
+);
+
 export const sleepSessions = sqliteTable(
   "sleep_sessions",
   {
@@ -256,6 +333,8 @@ export const sleepSessions = sqliteTable(
     narrationKind: text("narration_kind", { enum: ["parent_clone", "demo_narrator"] }).notNull().default("parent_clone"),
     sourceUrl: text("source_url"),
     sourceTitle: text("source_title"),
+    consentId: text("consent_id").references(() => voiceConsents.id, { onDelete: "set null" }),
+    consentVersion: text("consent_version"),
     theme: text("theme").notNull(),
     style: text("style").notNull(),
     backgroundSound: text("background_sound").notNull(),
@@ -266,6 +345,8 @@ export const sleepSessions = sqliteTable(
       .notNull()
       .default("queued"),
     audioKey: text("audio_key"),
+    favorite: integer("favorite", { mode: "boolean" }).notNull().default(false),
+    repeatMinutes: integer("repeat_minutes"),
     providerRequestId: text("provider_request_id"),
     errorCode: text("error_code"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -339,6 +420,90 @@ export const usageLedger = sqliteTable(
   ],
 );
 
+export const usageReservations = sqliteTable(
+  "usage_reservations",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    entitlementId: text("entitlement_id").notNull().references(() => entitlements.id, { onDelete: "restrict" }),
+    operation: text("operation").notNull(),
+    quantity: integer("quantity").notNull(),
+    weightMilliunits: integer("weight_milliunits").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status", { enum: ["reserved", "committed", "released"] }).notNull().default("reserved"),
+    consentLeaseId: text("consent_lease_id").references(() => voiceConsentLeases.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    finalizedAt: integer("finalized_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("usage_reservations_household_idempotency_idx").on(table.householdId, table.idempotencyKey),
+    index("usage_reservations_household_status_created_idx").on(table.householdId, table.status, table.createdAt),
+  ],
+);
+
+export const providerSpendReservations = sqliteTable(
+  "provider_spend_reservations",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    operation: text("operation").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    estimatedMicrocents: integer("estimated_microcents").notNull(),
+    actualMicrocents: integer("actual_microcents"),
+    status: text("status", { enum: ["in_flight", "charge_committed", "settled", "released"] }).notNull().default("in_flight"),
+    chargeCommittedAt: integer("charge_committed_at", { mode: "timestamp_ms" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("provider_spend_household_idempotency_idx").on(table.householdId, table.idempotencyKey),
+    index("provider_spend_provider_status_created_idx").on(table.provider, table.status, table.createdAt),
+  ],
+);
+
+export const providerBudgetPolicies = sqliteTable("provider_budget_policies", {
+  provider: text("provider").primaryKey(),
+  householdWindowMicrocents: integer("household_window_microcents").notNull(),
+  globalWindowMicrocents: integer("global_window_microcents").notNull(),
+  windowMilliseconds: integer("window_milliseconds").notNull(),
+  maxConcurrent: integer("max_concurrent").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const providerCircuits = sqliteTable("provider_circuits", {
+  provider: text("provider").primaryKey(),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  openUntil: integer("open_until", { mode: "timestamp_ms" }),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const generationOperations = sqliteTable(
+  "generation_operations",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    operation: text("operation").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status", { enum: ["processing", "succeeded", "failed"] }).notNull().default("processing"),
+    result: text("result", { mode: "json" }),
+    errorCode: text("error_code"),
+    allowanceReservationId: text("allowance_reservation_id").references(() => usageReservations.id, { onDelete: "set null" }),
+    providerSpendReservationId: text("provider_spend_reservation_id").references(() => providerSpendReservations.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("generation_operations_household_status_idx").on(table.householdId, table.status)],
+);
+
 export const mediaAssets = sqliteTable(
   "media_assets",
   {
@@ -395,6 +560,24 @@ export const playlistItems = sqliteTable(
   ],
 );
 
+export const bedtimeQueueItems = sqliteTable(
+  "bedtime_queue_items",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    queuedByUserId: text("queued_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull().references(() => sleepSessions.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    status: text("status", { enum: ["queued", "playing", "played", "removed"] }).notNull().default("queued"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("bedtime_queue_household_position_idx").on(table.householdId, table.position),
+    index("bedtime_queue_household_status_idx").on(table.householdId, table.status),
+  ],
+);
+
 export const jobs = sqliteTable(
   "jobs",
   {
@@ -410,6 +593,11 @@ export const jobs = sqliteTable(
     result: text("result", { mode: "json" }),
     attempts: integer("attempts").notNull().default(0),
     errorCode: text("error_code"),
+    progressPercent: integer("progress_percent").notNull().default(0),
+    progressStage: text("progress_stage").notNull().default("queued"),
+    reservationId: text("reservation_id").references(() => usageReservations.id, { onDelete: "set null" }),
+    consentId: text("consent_id").references(() => voiceConsents.id, { onDelete: "set null" }),
+    consentVersion: text("consent_version"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     startedAt: integer("started_at", { mode: "timestamp_ms" }),
