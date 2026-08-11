@@ -398,7 +398,9 @@ git commit -m "feat: apply saved pronunciation to narration"
 ### Task 5: Add race-safe studio controls and local tone synthesis
 
 **Files:**
+- Create: `lib/audio-layers.ts`
 - Create: `lib/studio-pronunciation.ts`
+- Create: `tests/audio-layers.test.mjs`
 - Create: `tests/studio-pronunciation.test.mjs`
 - Modify: `app/studio/SleepStudio.tsx`
 - Modify: `components/SleepPlayer.tsx`
@@ -406,6 +408,7 @@ git commit -m "feat: apply saved pronunciation to narration"
 
 **Interfaces:**
 - Produces: `shouldApplyPronunciationGuess(requestedNickname, currentNickname, manualVersionAtRequest, currentManualVersion): boolean`.
+- Produces: `startFrequencyLayers(context, value)` and `stopFrequencyLayers(active)` with explicit oscillator lifecycle ownership.
 - Extends: `StudioData` with `pronunciation: string` and `frequencies: SolfeggioFrequency[]`.
 - Extends: `SleepPlayerProps` with `frequencies?: readonly number[]`.
 
@@ -436,6 +439,8 @@ Expected: FAIL because the helper does not exist.
 - [ ] **Step 3: Implement the helper and nickname-blur automation**
 
 Track a pronunciation manual-edit version in a ref and the active request in an `AbortController` ref. Nickname changes clear only an automatically supplied guess; pronunciation input changes increment the manual version. On nickname blur, abort the older request, record nickname/version, show “Finding our best guess…”, POST to `/api/pronunciation`, and apply the returned value only when `shouldApplyPronunciationGuess` returns true. Failure clears the loading text without blocking Continue. Provide a “Guess again” button that clears the manual state and explicitly repeats the request.
+
+Before UI wiring, add `tests/audio-layers.test.mjs` with fake Web Audio nodes that assert every supported oscillator starts as a sine wave, total gain remains bounded, and cleanup stops/disconnects every created node. Verify RED while `lib/audio-layers.ts` is missing, then implement the two lifecycle functions and verify GREEN.
 
 - [ ] **Step 4: Add the accessible fields and frequency choices**
 
@@ -474,7 +479,7 @@ Expected: focused tests, lint, typecheck, and build pass.
 - [ ] **Step 8: Commit the studio and player UI**
 
 ```bash
-git add lib/studio-pronunciation.ts tests/studio-pronunciation.test.mjs app/studio/SleepStudio.tsx components/SleepPlayer.tsx app/globals.css
+git add lib/audio-layers.ts lib/studio-pronunciation.ts tests/audio-layers.test.mjs tests/studio-pronunciation.test.mjs app/studio/SleepStudio.tsx components/SleepPlayer.tsx app/globals.css
 git commit -m "feat: add pronunciation and tone controls"
 ```
 

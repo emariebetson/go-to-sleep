@@ -2,14 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SleepPlayer } from "@/components/SleepPlayer";
+import { SOLFEGGIO_OPTIONS, type SolfeggioFrequency } from "@/lib/frequency-layers";
+import { shouldApplyPronunciationGuess } from "@/lib/studio-pronunciation";
 
 type StudioData = {
   childName: string;
+  pronunciation: string;
   ageMonths: string;
   challenge: string;
   theme: string;
   duration: string;
   sound: string;
+  frequencies: SolfeggioFrequency[];
   style: string;
   scriptMode: "curated" | "personalized";
   contentType: "story" | "sleep-hypnosis";
@@ -23,11 +27,13 @@ const MIN_RECORDING_SECONDS = 60;
 
 const initialData: StudioData = {
   childName: "",
+  pronunciation: "",
   ageMonths: "6",
   challenge: "settling",
   theme: "moonlit-meadow",
   duration: "10",
   sound: "soft-rain",
+  frequencies: [],
   style: "slow-story",
   scriptMode: "personalized",
   contentType: "story",
@@ -93,6 +99,7 @@ export function SleepStudio() {
   const [previewAudioUrl, setPreviewAudioUrl] = useState("");
   const [savedAudioUrl, setSavedAudioUrl] = useState("");
   const [savedSessionId, setSavedSessionId] = useState("");
+  const [pronunciationStatus, setPronunciationStatus] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStartedAtRef = useRef(0);
   const recordingStreamRef = useRef<MediaStream | null>(null);
@@ -100,6 +107,11 @@ export function SleepStudio() {
   const recordingSecondsRef = useRef(0);
   const generationRequestRef = useRef("");
   const discardRecordingRef = useRef(false);
+  const childNameRef = useRef("");
+  const autoPronunciationRef = useRef("");
+  const pronunciationManualVersionRef = useRef(0);
+  const pronunciationRequestIdRef = useRef(0);
+  const pronunciationControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -133,6 +145,8 @@ export function SleepStudio() {
     if (savedAudioUrl.startsWith("blob:")) URL.revokeObjectURL(savedAudioUrl);
   }, [previewAudioUrl, savedAudioUrl]);
 
+  useEffect(() => () => pronunciationControllerRef.current?.abort(), []);
+
   function clearGeneratedAudio() {
     if (previewAudioUrl.startsWith("blob:")) URL.revokeObjectURL(previewAudioUrl);
     if (savedAudioUrl.startsWith("blob:")) URL.revokeObjectURL(savedAudioUrl);
@@ -144,6 +158,77 @@ export function SleepStudio() {
 
   function update<K extends keyof StudioData>(key: K, value: StudioData[K]) {
     setData((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateChildName(value: string) {
+    const clearAutomaticGuess = Boolean(autoPronunciationRef.current) && data.pronunciation === autoPronunciationRef.current;
+    childNameRef.current = value;
+    pronunciationRequestIdRef.current += 1;
+    pronunciationControllerRef.current?.abort();
+    pronunciationControllerRef.current = null;
+    setPronunciationStatus("");
+    if (clearAutomaticGuess) autoPronunciationRef.current = "";
+    setData((current) => ({ ...current, childName: value, pronunciation: clearAutomaticGuess ? "" : current.pronunciation }));
+    clearGeneratedAudio();
+  }
+
+  function updatePronunciation(value: string) {
+    pronunciationManualVersionRef.current += 1;
+    pronunciationRequestIdRef.current += 1;
+    pronunciationControllerRef.current?.abort();
+    pronunciationControllerRef.current = null;
+    autoPronunciationRef.current = "";
+    setPronunciationStatus("");
+    update("pronunciation", value);
+    clearGeneratedAudio();
+  }
+
+  async function guessPronunciation(force = false) {
+    const nickname = childNameRef.current.trim() || data.childName.trim();
+    if (!nickname) return;
+    const hasManualValue = Boolean(data.pronunciation.trim()) && data.pronunciation !== autoPronunciationRef.current;
+    if (hasManualValue && !force) return;
+    if (force) {
+      pronunciationManualVersionRef.current += 1;
+      autoPronunciationRef.current = "";
+      update("pronunciation", "");
+      clearGeneratedAudio();
+    }
+
+    pronunciationControllerRef.current?.abort();
+    const controller = new AbortController();
+    pronunciationControllerRef.current = controller;
+    const requestId = ++pronunciationRequestIdRef.current;
+    const manualVersion = pronunciationManualVersionRef.current;
+    setPronunciationStatus("Finding our best guess…");
+    try {
+      const response = await fetch("/api/pronunciation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nickname }),
+        signal: controller.signal,
+      });
+      const payload = await response.json() as { pronunciation?: string; error?: string };
+      if (!response.ok || !payload.pronunciation) throw new Error(payload.error || "No guess was available.");
+      if (requestId !== pronunciationRequestIdRef.current || !shouldApplyPronunciationGuess(nickname, childNameRef.current, manualVersion, pronunciationManualVersionRef.current)) return;
+      autoPronunciationRef.current = payload.pronunciation;
+      setData((current) => ({ ...current, pronunciation: payload.pronunciation || "" }));
+      setPronunciationStatus("Best guess added. You can edit it before continuing.");
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setPronunciationStatus(error instanceof Error ? error.message : "Type the pronunciation manually and continue.");
+    } finally {
+      if (pronunciationControllerRef.current === controller) pronunciationControllerRef.current = null;
+    }
+  }
+
+  function toggleFrequency(frequency: SolfeggioFrequency) {
+    setData((current) => {
+      const selected = current.frequencies.includes(frequency);
+      if (!selected && current.frequencies.length >= 3) return current;
+      return { ...current, frequencies: selected ? current.frequencies.filter((value) => value !== frequency) : [...current.frequencies, frequency] };
+    });
+    clearGeneratedAudio();
   }
 
   async function toggleRecording() {
@@ -300,7 +385,8 @@ export function SleepStudio() {
       {step === 1 && <section className="panel">
         <h2>First, tell us about tonight</h2><p className="panel-intro">Use a nickname only. We don’t need your baby’s full name or birth date.</p>
         <div className="form-grid">
-          <div className="field"><label htmlFor="childName">Baby’s nickname</label><input id="childName" maxLength={32} value={data.childName} onChange={(event) => update("childName", event.target.value)} placeholder="Junie" autoComplete="off" /></div>
+          <div className="field"><label htmlFor="childName">Baby’s nickname</label><input id="childName" maxLength={32} value={data.childName} onChange={(event) => updateChildName(event.target.value)} onBlur={() => void guessPronunciation()} placeholder="Junie" autoComplete="off" /></div>
+          <div className="field"><label htmlFor="pronunciation">Pronounced like</label><input id="pronunciation" maxLength={64} value={data.pronunciation} onChange={(event) => updatePronunciation(event.target.value)} placeholder="LOCK-ee" autoComplete="off" aria-describedby="pronunciation-help pronunciation-status" /><div className="field-helper-row"><small id="pronunciation-help">Type it how it sounds. We use this only for narration.</small><button className="text-button" type="button" disabled={!data.childName.trim() || pronunciationStatus === "Finding our best guess…"} onClick={() => void guessPronunciation(true)}>{data.pronunciation ? "Guess again" : "Make a guess"}</button></div><span className="field-status" id="pronunciation-status" aria-live="polite">{pronunciationStatus}</span></div>
           <div className="field"><label htmlFor="ageMonths">Age in months</label><input id="ageMonths" min="0" max="24" inputMode="numeric" type="number" value={data.ageMonths} onChange={(event) => update("ageMonths", event.target.value)} /></div>
           <div className="field"><label htmlFor="challenge">What feels hardest tonight?</label><select id="challenge" value={data.challenge} onChange={(event) => update("challenge", event.target.value)}><option value="settling">Settling at bedtime</option><option value="frequent-waking">Frequent waking</option><option value="separation">Parent separation</option><option value="overtired">Overtired or fussy</option><option value="nap-transition">Nap transition</option></select></div>
           <div className="field"><label htmlFor="duration">Session length</label><select id="duration" value={data.duration} onChange={(event) => update("duration", event.target.value)}><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option></select></div>
@@ -340,6 +426,15 @@ export function SleepStudio() {
           <div className="field full"><label htmlFor="sourceUrl">YouTube inspiration (optional)</label><input id="sourceUrl" type="url" inputMode="url" value={data.sourceUrl} onChange={(event) => setData((current) => ({ ...current, sourceUrl: event.target.value, scriptMode: event.target.value.trim() ? "personalized" : current.scriptMode }))} placeholder="https://www.youtube.com/watch?v=…" /><small>We use only the public video title and channel as inspiration. Nearnight does not copy or transcribe the video.</small></div>
           <ChoiceGroup label="Narration style" type="style" value={data.style} onChange={(value) => update("style", value)} />
           <ChoiceGroup label="Background sound" type="sound" value={data.sound} onChange={(value) => update("sound", value)} />
+          <fieldset className="field full choice-field" aria-describedby="frequency-help"><legend>Solfeggio layers (optional)</legend><div className="frequency-grid">{SOLFEGGIO_OPTIONS.map((option) => {
+            const selected = data.frequencies.includes(option.frequency);
+            const disabled = !selected && data.frequencies.length >= 3;
+            const inputId = `frequency-${option.frequency}`;
+            return <label aria-label={`Select ${option.frequency} hertz: ${option.description}`} className={`frequency-choice ${selected ? "selected" : ""} ${disabled ? "disabled" : ""}`} htmlFor={inputId} key={option.frequency}>
+              <input id={inputId} type="checkbox" value={option.frequency} checked={selected} disabled={disabled} onChange={() => toggleFrequency(option.frequency)} />
+              <span><strong>{option.frequency} Hz</strong><small>{option.description}</small></span>
+            </label>;
+          })}</div><small id="frequency-help" className="frequency-help">Choose up to three. These descriptions reflect traditional associations, not proven medical or sleep benefits. Keep the volume comfortable.</small></fieldset>
         </div>
         {message && <div className="alert" role="alert">{message}</div>}
         <div className="panel-actions"><button className="btn btn-secondary" onClick={() => setStep(2)}>← Back</button><button className="btn btn-primary" onClick={createScript} disabled={Boolean(busy)}>{busy === "script" ? "Writing softly…" : "Write this bedtime →"}</button></div>
@@ -349,8 +444,8 @@ export function SleepStudio() {
         <h2>Review, preview, then save</h2><p className="panel-intro">You have final say. Edit anything that doesn’t sound {narrationKind === "demo_narrator" ? "right" : "like you"}, then listen to a 30-second sample before generating the full bedtime.</p>
         {source && <div className="source-note"><strong>Inspired by:</strong> {source.title}{source.creator ? ` · ${source.creator}` : ""}<br /><small>Original wording generated from title/channel metadata only.</small></div>}
         <div className="field"><label htmlFor="script">Tonight’s script</label><textarea id="script" style={{ minHeight: 310, lineHeight: 1.75 }} value={script} onChange={(event) => { setScript(event.target.value); clearGeneratedAudio(); }} /></div>
-        {previewAudioUrl && !savedAudioUrl && <div className="alert success"><strong>Your 30-second {narrationKind === "demo_narrator" ? "demo narrator" : "voice"} sample is ready.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={previewAudioUrl} sound={data.sound} /></div><p style={{ margin: "9px 0 0" }}>If it sounds right, save the full bedtime below.</p></div>}
-        {savedAudioUrl && <div className="alert success"><strong>Your full bedtime is saved to My nights.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={savedAudioUrl} sound={data.sound} /></div><div style={{ marginTop: 12 }}><a className="btn btn-primary btn-small" href="/library">Open My nights →</a></div>{savedSessionId && <span className="sr-only">Saved session {savedSessionId}</span>}</div>}
+        {previewAudioUrl && !savedAudioUrl && <div className="alert success"><strong>Your 30-second {narrationKind === "demo_narrator" ? "demo narrator" : "voice"} sample is ready.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={previewAudioUrl} sound={data.sound} frequencies={data.frequencies} /></div><p style={{ margin: "9px 0 0" }}>If it sounds right, save the full bedtime below.</p></div>}
+        {savedAudioUrl && <div className="alert success"><strong>Your full bedtime is saved to My nights.</strong><div style={{ marginTop: 10 }}><SleepPlayer src={savedAudioUrl} sound={data.sound} frequencies={data.frequencies} /></div><div style={{ marginTop: 12 }}><a className="btn btn-primary btn-small" href="/library">Open My nights →</a></div>{savedSessionId && <span className="sr-only">Saved session {savedSessionId}</span>}</div>}
         {message && <div className="alert" role="alert">{message}</div>}
         <div className="panel-actions panel-actions-wrap">
           <button className="btn btn-secondary" onClick={() => setStep(3)}>← Adjust</button>
