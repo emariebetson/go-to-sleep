@@ -1,13 +1,15 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gt, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { sleepSessions, usageEvents, users, voices } from "@/db/schema";
+import { children, sleepSessions, usageEvents, users, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
-import { previewExcerpt, validateSessionInput } from "@/lib/sleep-session";
+import { validateSessionInput } from "@/lib/sleep-session";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
 import { classifySpeechGenerationError } from "@/lib/elevenlabs";
+import { normalizeNickname } from "@/lib/pronunciation";
+import { prepareNarration } from "@/lib/session-narration";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -49,6 +51,7 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     const user = await requireApiUser(request);
     const input = validateSessionInput(await readJsonObject(request, 24_000));
+    const narration = prepareNarration(input);
     sessionId = input.requestId;
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) return jsonNoStore({ error: "ElevenLabs is not connected yet. Add its API key to generate audio." }, { status: 503 });
@@ -75,7 +78,7 @@ export async function POST(request: Request) {
         id: previewUsageId,
         userId: user.userId,
         type: "audio_preview",
-        units: previewExcerpt(input.script).length,
+        units: narration.preview.length,
         metadata: { provider: "elevenlabs", narrationKind: input.narrationKind },
         createdAt: previewCreatedAt,
       }).onConflictDoNothing().returning({ id: usageEvents.id }).get();
@@ -88,7 +91,7 @@ export async function POST(request: Request) {
         await db.delete(usageEvents).where(eq(usageEvents.id, previewUsageId));
         return jsonNoStore({ error: "You’ve reached the preview limit. Try again in about an hour." }, { status: 429 });
       }
-      const response = await generateSpeech(apiKey, providerVoiceId, previewExcerpt(input.script));
+      const response = await generateSpeech(apiKey, providerVoiceId, narration.preview);
       if (!response.ok) {
         const detail = await response.text();
         const failure = classifySpeechGenerationError(response.status, detail);
@@ -113,6 +116,8 @@ export async function POST(request: Request) {
       voiceId: ownedVoice?.id || null,
       title,
       script: input.script,
+      pronunciation: input.pronunciation,
+      frequencyLayers: JSON.stringify(input.frequencies),
       scriptMode: input.scriptMode,
       contentType: input.contentType,
       narrationKind: input.narrationKind,
@@ -147,7 +152,7 @@ export async function POST(request: Request) {
     creditReserved = true;
     await db.update(sleepSessions).set({ status: "generating" }).where(eq(sleepSessions.id, sessionId));
 
-    const response = await generateSpeech(apiKey, providerVoiceId, input.script);
+    const response = await generateSpeech(apiKey, providerVoiceId, narration.full);
     if (!response.ok) {
       const detail = await response.text();
       const failure = classifySpeechGenerationError(response.status, detail);
@@ -157,6 +162,28 @@ export async function POST(request: Request) {
       return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
     }
     const audio = await response.arrayBuffer();
+    const childSavedAt = new Date();
+    const child = await db.insert(children).values({
+      id: crypto.randomUUID(),
+      userId: user.userId,
+      nickname: input.childName,
+      normalizedNickname: normalizeNickname(input.childName),
+      pronunciation: input.pronunciation || null,
+      ageMonths: input.ageMonths,
+      bedtimeChallenge: input.challenge,
+      createdAt: childSavedAt,
+      updatedAt: childSavedAt,
+    }).onConflictDoUpdate({
+      target: [children.userId, children.normalizedNickname],
+      set: {
+        nickname: input.childName,
+        pronunciation: input.pronunciation || null,
+        ageMonths: input.ageMonths,
+        bedtimeChallenge: input.challenge,
+        updatedAt: childSavedAt,
+      },
+    }).returning({ id: children.id }).get();
+    if (!child) throw new Error("The child settings could not be saved.");
     const runtime = env as unknown as RuntimeEnv;
     const audioKey = `audio/${user.userId}/${sessionId}.mp3`;
 
@@ -164,13 +191,13 @@ export async function POST(request: Request) {
       await runtime.AUDIO.put(audioKey, audio, { httpMetadata: { contentType: "audio/mpeg" }, customMetadata: { userId: user.userId, sessionId } });
       storedAudioKey = audioKey;
       const completedAt = new Date();
-      await db.update(sleepSessions).set({ status: "ready", audioKey, providerRequestId: response.headers.get("request-id"), completedAt }).where(eq(sleepSessions.id, sessionId));
+      await db.update(sleepSessions).set({ status: "ready", childId: child.id, audioKey, providerRequestId: response.headers.get("request-id"), completedAt }).where(eq(sleepSessions.id, sessionId));
       await db.insert(usageEvents).values({ id: crypto.randomUUID(), userId: user.userId, sessionId, type: "audio_generation", units: input.script.length, metadata: { provider: "elevenlabs" }, createdAt: completedAt });
       creditReserved = false;
       return jsonNoStore({ sessionId, audioUrl: `/api/audio/${sessionId}` });
     }
 
-    await db.update(sleepSessions).set({ status: "ready", completedAt: new Date() }).where(eq(sleepSessions.id, sessionId));
+    await db.update(sleepSessions).set({ status: "ready", childId: child.id, completedAt: new Date() }).where(eq(sleepSessions.id, sessionId));
     creditReserved = false;
     return new Response(audio, { headers: { "content-type": "audio/mpeg", "cache-control": "private, no-store", "content-disposition": `inline; filename="${sessionId}.mp3"` } });
   } catch (error) {
