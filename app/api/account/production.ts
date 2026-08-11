@@ -18,6 +18,9 @@ import {
   jobs,
   mediaAssets,
   sleepSessions,
+  storyExperiences,
+  storyPersistStagingObjects,
+  storyWorkerCheckpoints,
   voiceReplacements,
   voices,
 } from "@/db/schema";
@@ -34,7 +37,7 @@ const QUIESCENCE_MS = 2 * 60 * 1000;
 const STALE_WORK_MS = 15 * 60 * 1000;
 const INVENTORY_ROWS_PER_PAGE = 20;
 const INVENTORY_REFERENCES_PER_ATTEMPT = 50;
-const INVENTORY_STAGES = ["billing_accounts", "billing_subscriptions", "voices", "voice_replacements", "media", "sessions", "exports", "export_parts", "export_metadata_pages", "generation", "reconciliations"] as const;
+const INVENTORY_STAGES = ["billing_accounts", "billing_subscriptions", "voices", "voice_replacements", "media", "story_checkpoints", "story_staging", "sessions", "exports", "export_parts", "export_metadata_pages", "generation", "reconciliations"] as const;
 type InventoryStage = typeof INVENTORY_STAGES[number];
 type InventoryKind = typeof accountDeletionItems.$inferInsert.kind;
 
@@ -114,7 +117,9 @@ async function deleteProviderVoice(providerVoiceId: string) {
 async function advanceDeletionInventory(record: typeof accountDeletionOperations.$inferSelect, attemptToken: string) {
   const db = getDb();
   const householdId = record.householdId!;
-  let stage = (INVENTORY_STAGES.includes(record.inventoryStage as InventoryStage) ? record.inventoryStage : INVENTORY_STAGES[0]) as InventoryStage;
+  const storyCheckpointTableExists = Boolean((await env.DB.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='story_worker_checkpoints' LIMIT 1").all()).results[0]);
+  const activeStages: readonly InventoryStage[] = storyCheckpointTableExists ? INVENTORY_STAGES : INVENTORY_STAGES.filter((item) => item !== "story_checkpoints" && item !== "story_staging");
+  let stage = (activeStages.includes(record.inventoryStage as InventoryStage) ? record.inventoryStage : activeStages[0]) as InventoryStage;
   let cursor = record.inventoryCursor;
   let referenceBudget = INVENTORY_REFERENCES_PER_ATTEMPT;
   const refreshing = record.stage === "refresh_inventory";
@@ -155,6 +160,12 @@ async function advanceDeletionInventory(record: typeof accountDeletionOperations
         eq(mediaAssets.ownerUserId, record.userId!), ...(cursor ? [gt(mediaAssets.id, cursor)] : []),
       )).orderBy(asc(mediaAssets.id)).limit(limit + 1).all();
       references = rows.slice(0, limit).flatMap((row) => typeof row.storageKey === "string" ? [{ kind: "storage_key" as const, reference: row.storageKey }] : []);
+    } else if (stage === "story_checkpoints") {
+      rows = await db.select({ cursor: storyWorkerCheckpoints.id, storageKey: storyWorkerCheckpoints.storageKey }).from(storyWorkerCheckpoints).innerJoin(storyExperiences, and(eq(storyWorkerCheckpoints.storyId, storyExperiences.id), eq(storyWorkerCheckpoints.householdId, storyExperiences.householdId))).where(and(eq(storyExperiences.requestedByUserId, record.userId!), ...(cursor ? [gt(storyWorkerCheckpoints.id, cursor)] : []))).orderBy(asc(storyWorkerCheckpoints.id)).limit(limit + 1).all();
+      references = rows.slice(0, limit).flatMap((row) => typeof row.storageKey === "string" ? [{ kind: "storage_key" as const, reference: row.storageKey }] : []);
+    } else if (stage === "story_staging") {
+      rows = await db.select({ cursor: storyPersistStagingObjects.id, storageKey: storyPersistStagingObjects.storageKey }).from(storyPersistStagingObjects).innerJoin(storyExperiences, and(eq(storyPersistStagingObjects.storyId, storyExperiences.id), eq(storyPersistStagingObjects.householdId, storyExperiences.householdId))).where(and(eq(storyExperiences.requestedByUserId, record.userId!), ne(storyPersistStagingObjects.status, "deleted"), ...(cursor ? [gt(storyPersistStagingObjects.id, cursor)] : []))).orderBy(asc(storyPersistStagingObjects.id)).limit(limit + 1).all();
+      references = rows.slice(0, limit).map((row) => ({ kind: "storage_key" as const, reference: String(row.storageKey) }));
     } else if (stage === "sessions") {
       rows = await db.select({ cursor: sleepSessions.id, id: sleepSessions.id, householdId: sleepSessions.householdId, audioKey: sleepSessions.audioKey }).from(sleepSessions).where(and(
         eq(sleepSessions.userId, record.userId!), ...(cursor ? [gt(sleepSessions.id, cursor)] : []),
@@ -225,8 +236,8 @@ async function advanceDeletionInventory(record: typeof accountDeletionOperations
     const pageRows = rows.slice(0, limit);
     const hasMore = forcedHasMore ?? rows.length > limit;
     const nextCursor = forcedNextCursor !== undefined ? forcedNextCursor : hasMore ? pageRows.at(-1)?.cursor || cursor : null;
-    const stageIndex = INVENTORY_STAGES.indexOf(stage);
-    const nextStage = hasMore ? stage : INVENTORY_STAGES[stageIndex + 1];
+    const stageIndex = activeStages.indexOf(stage);
+    const nextStage = hasMore ? stage : activeStages[stageIndex + 1];
     const now = new Date();
     const statements = references.map((item) => db.insert(accountDeletionItems).values({
       id: `account-item:${crypto.randomUUID()}`,

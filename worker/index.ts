@@ -14,6 +14,7 @@ interface Env {
   NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT?: string;
   NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY?: string;
   NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION?: string;
+  NEARYOU_ENABLE_STORY?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -62,20 +63,26 @@ const worker = {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     const task2cEnabled = nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(env as unknown as Record<string, string | undefined>));
     const migrationReconciliationEnabled = env.NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION === "true";
-    if (!task2cEnabled && !migrationReconciliationEnabled) return;
+    const storyEnabled = env.NEARYOU_ENABLE_STORY === "true";
+    if (!task2cEnabled && !migrationReconciliationEnabled && !storyEnabled) return;
     ctx.waitUntil((async () => {
-      const [{ reconcileHouseholdExports }, { reconcilePendingSessionDeletions, reconcilePendingDeletionReconciliations }, { reconcilePendingAccountDeletions }, { reconcileLegacyReadyMedia }] = await Promise.all([
-        import("@/lib/nearsleep-export"),
-        import("@/lib/nearsleep-deletion-reconciliation"),
-        import("@/app/api/account/production"),
-        import("@/lib/nearsleep-storage-reconciliation"),
-      ]);
-      await reconcileLegacyReadyMedia({ bucket: env.AUDIO as never, limit: 2 });
-      if (!task2cEnabled) return;
-      await reconcileHouseholdExports({ bucket: env.AUDIO as never, limit: 10 });
-      await reconcilePendingSessionDeletions({ bucket: env.AUDIO, limit: 10 });
-      await reconcilePendingDeletionReconciliations({ bucket: env.AUDIO, limit: 10, actionLimit: 2 });
-      await reconcilePendingAccountDeletions(10);
+      if (task2cEnabled || migrationReconciliationEnabled) {
+        const [{ reconcileHouseholdExports }, { reconcilePendingSessionDeletions, reconcilePendingDeletionReconciliations }, { reconcilePendingAccountDeletions }, { reconcileLegacyReadyMedia }] = await Promise.all([
+          import("@/lib/nearsleep-export"), import("@/lib/nearsleep-deletion-reconciliation"), import("@/app/api/account/production"), import("@/lib/nearsleep-storage-reconciliation"),
+        ]);
+        await reconcileLegacyReadyMedia({ bucket: env.AUDIO as never, limit: 2 });
+        if (task2cEnabled) { await reconcileHouseholdExports({ bucket: env.AUDIO as never, limit: 10 }); await reconcilePendingSessionDeletions({ bucket: env.AUDIO, limit: 10 }); await reconcilePendingDeletionReconciliations({ bucket: env.AUDIO, limit: 10, actionLimit: 2 }); await reconcilePendingAccountDeletions(10); }
+      }
+      if (storyEnabled) {
+        const [{ advanceNextNearStoryStage, reconcileExhaustedNearStoryJobs, reconcileStoryCheckpointCleanup }, { reconcilePendingStoryDeletions }, { getDb }, { nearStoryActivationState }, { eq }] = await Promise.all([
+          import("@/lib/nearstory-stage-worker"), import("@/lib/nearstory-deletion"), import("@/db"), import("@/db/schema"), import("drizzle-orm"),
+        ]);
+        const heartbeat = new Date(); await getDb().update(nearStoryActivationState).set({ workerHeartbeatAt: heartbeat, checkedAt: heartbeat }).where(eq(nearStoryActivationState.id, "parent-beta"));
+        await advanceNextNearStoryStage();
+        await reconcileExhaustedNearStoryJobs(5);
+        await reconcileStoryCheckpointCleanup(20);
+        await reconcilePendingStoryDeletions({ bucket: env.AUDIO, limit: 5 });
+      }
     })());
   },
 };

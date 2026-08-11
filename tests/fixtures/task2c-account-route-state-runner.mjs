@@ -7,6 +7,7 @@ const migrations = [
   "0004_salty_sugar_man.sql", "0005_pronunciation_frequency_layers.sql", "0006_nearyou_shared_foundation.sql",
   "0007_nearsleep_production_upgrade.sql", "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql",
   "0010_child_profile_pronunciation.sql", "0011_household_billing_accounts.sql", "0012_nearsleep_library_privacy.sql",
+  "0013_nearstory_parent_beta.sql",
 ];
 
 class D1Statement {
@@ -70,6 +71,7 @@ Object.assign(process.env, {
   NEARYOU_ENABLE_USAGE_RESERVATIONS: "true",
   NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT: "true",
   NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY: "false",
+  NEARYOU_ENABLE_STORY: "true",
   STRIPE_SECRET_KEY: "sk_test_task2c",
   STRIPE_TEST_MODE_ONLY: "true",
   ELEVENLABS_API_KEY: "eleven-task2c",
@@ -227,6 +229,21 @@ for (let index = 0; index < 12; index += 1) {
   r2.objects.set(key, bytes);
   storageKeys.push(key);
 }
+
+const storyCheckpointKey = `households/${encodeURIComponent(personalHousehold)}/stories/account-story/checkpoints/speech-0-account-attempt.mp3`;
+const storyCheckpointBytes = new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]);
+database.prepare("INSERT INTO voices (id,user_id,household_id,provider_voice_id,name,status,consent_attested_at,created_at) VALUES ('account_story_voice','local-preview',?,'provider_account_story','Story voice','ready',?,?)").run(personalHousehold, now, now);
+database.prepare("INSERT INTO voice_consents (id,household_id,voice_id,adult_user_id,consent_version,scope,status,evidence,attested_at) VALUES ('account_story_consent',?,'account_story_voice','local-preview','voice-v2-live-phrase','adult_self_private_narration','active_verified','{}',?)").run(personalHousehold, now);
+database.prepare("UPDATE voices SET current_consent_id='account_story_consent' WHERE id='account_story_voice'").run();
+database.prepare("INSERT INTO voice_consent_leases (id,household_id,voice_id,consent_id,consent_version,status,expires_at,created_at) VALUES ('account_story_lease',?,'account_story_voice','account_story_consent','voice-v2-live-phrase','active',?,?)").run(personalHousehold, now + 30 * 60_000, now);
+database.prepare("INSERT INTO jobs (id,household_id,requested_by_user_id,type,status,idempotency_key,request_hash,input,attempts,created_at,updated_at) VALUES ('account_story_job',?,'local-preview','story_audio','queued','account-story-idem','account-story-hash','{}',0,?,?)").run(personalHousehold, now, now);
+database.prepare("INSERT INTO usage_reservations (id,household_id,user_id,entitlement_id,operation,quantity,weight_milliunits,idempotency_key,request_hash,status,consent_lease_id,created_at,updated_at) VALUES ('account_story_usage',?,'local-preview','entitlement:legacy:local-preview','story_audio_generation',5,5000,'story-usage:account-story-idem','account-story-hash','reserved','account_story_lease',?,?)").run(personalHousehold, now, now);
+database.prepare("INSERT INTO story_experiences (id,household_id,requested_by_user_id,child_profile_id,voice_id,consent_id,consent_version,consent_lease_id,mode,duration_minutes,plan,status,job_id,reservation_id,provider_budget_hold_ids,idempotency_key,request_hash,created_at,updated_at) VALUES ('account_story',?,'local-preview','dark_child','account_story_voice','account_story_consent','voice-v2-live-phrase','account_story_lease','bedtime',5,'{}','queued','account_story_job','account_story_usage','[]','account-story-idem','account-story-hash',?,?)").run(personalHousehold, now, now);
+database.prepare("UPDATE jobs SET status='running',worker_attempt_token='account-attempt-token-1234567890',worker_lease_expires_at=?,attempts=1,started_at=? WHERE id='account_story_job'").run(now + 10 * 60_000, now);
+database.prepare("INSERT INTO story_worker_checkpoints (id,household_id,story_id,attempt_token,stage,ordinal,payload,storage_key,byte_size,checksum,status,created_at,updated_at) VALUES ('account_story_checkpoint',?,'account_story','account-attempt-token-1234567890','speech',0,'{}',?,?,?,'ready',?,?)").run(personalHousehold, storyCheckpointKey, storyCheckpointBytes.byteLength, "c".repeat(64), now, now);
+r2.objects.set(storyCheckpointKey, storyCheckpointBytes);
+database.prepare("UPDATE voices SET status='deleted',deleted_at=? WHERE id='account_story_voice'").run(now);
+process.env.NEARYOU_ENABLE_STORY = "false";
 
 database.prepare("INSERT INTO voices (id,user_id,household_id,provider_voice_id,name,status,consent_attested_at,created_at,deleted_at) VALUES ('ordinary_deleted_voice','local-preview',?,'provider_ordinary_voice','Ordinary deleted voice','deleted',?,?,?)").run(personalHousehold, now, now, now);
 database.prepare("INSERT INTO deletion_reconciliations (id,scope,scope_id,status,storage_keys,provider_references,error_code,created_at,updated_at) VALUES ('voice-delete:ordinary_deleted_voice','voice','ordinary_deleted_voice','cleanup_pending','[]','[\"provider_ordinary_voice\"]','provider_cleanup_retry',?,?)").run(now - 10_000, now - 10_000);
@@ -398,6 +415,7 @@ assert.equal(database.prepare("SELECT owner_user_id AS ownerUserId FROM househol
 assert.deepEqual({ ...database.prepare("SELECT created_by_user_id AS createdByUserId,name FROM playlists WHERE id='former_shared_playlist'").get() }, { createdByUserId: "guest-one", name: "Shared bedtime" });
 assert.equal(database.prepare("SELECT COUNT(*) AS value FROM users WHERE id='guest-one'").get().value, 1);
 assert.ok(storageKeys.every((key) => !r2.objects.has(key)));
+assert.equal(await r2.head(storyCheckpointKey), null, "account erasure must HEAD-verify removal of intermediate Story audio");
 assert.ok(bulkReconciliationKeys.every((key) => !r2.objects.has(key)));
 assert.ok(d1.maxBatchSize <= 51, `bounded D1 batch exceeded: ${d1.maxBatchSize}`);
 assert.equal(await r2.head(formerKey), null);

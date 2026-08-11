@@ -137,6 +137,14 @@ export function nearSleepLibraryPrivacyEnabled(flags: FeatureFlags) {
   return nearSleepProductionEnabled(flags) && flags.nearSleepLibraryPrivacy;
 }
 
+export function nearStoryParentBetaFlagsEnabled(flags: FeatureFlags) {
+  return nearSleepLibraryPrivacyEnabled(flags)
+    && flags.story
+    && flags.asyncMediaJobs
+    && flags.usageReservations
+    && flags.requireVerifiedVoiceConsent;
+}
+
 export const FEATURE_FLAGS = featureFlagsFromEnv({});
 export const VOICE_CONSENT_VERSION = "voice-v1";
 export const VOICE_CONSENT_ATTESTATION = "I confirm this is my voice and I consent to private narration in my household.";
@@ -170,14 +178,13 @@ export function roleCan(role: HouseholdRole, capability: HouseholdCapability) {
 export type JobType = "nearsleep_audio" | "story_audio" | "archive_transcription" | "media_export";
 
 export function jobTypeEnabled(type: JobType, flags: FeatureFlags) {
-  // Worker claiming and an entitlement-scoped atomic reservation have not shipped yet.
-  // Keep creation fail-closed even if an environment is accidentally preconfigured.
-  const atomicReservationImplemented = false;
-  if (!atomicReservationImplemented) return false;
+  // Story must be enqueued through /api/v1/stories so allowance, spend,
+  // consent lease, and the story row are committed as one transaction.
+  if (type === "story_audio" || type === "nearsleep_audio") return false;
+  // Other generic job types do not yet have an atomic product-specific enqueue path.
   if (!flags.foundationApi || !flags.asyncMediaJobs || !flags.usageReservations) return false;
-  if (type === "story_audio") return flags.story;
   if (type === "archive_transcription" || type === "media_export") return flags.legacyArchive;
-  return type === "nearsleep_audio";
+  return false;
 }
 
 type EntitlementGrant = {
@@ -258,7 +265,7 @@ export type UsageOperation =
 export const USAGE_RULES: Record<UsageOperation, { milliunitsPerUnit: number; unit: string }> = {
   nearsleep_audio_generation: { milliunitsPerUnit: 1_000, unit: "generation" },
   nearsleep_audio_preview: { milliunitsPerUnit: 100, unit: "preview" },
-  story_audio_generation: { milliunitsPerUnit: 1_250, unit: "generation" },
+  story_audio_generation: { milliunitsPerUnit: 1_000, unit: "narration_minute" },
   archive_transcription_minute: { milliunitsPerUnit: 50, unit: "minute" },
   playback: { milliunitsPerUnit: 0, unit: "play" },
 };

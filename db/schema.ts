@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
+import { foreignKey, index, integer, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable(
   "users",
@@ -179,6 +179,7 @@ export const childProfiles = sqliteTable(
   (table) => [
     uniqueIndex("child_profiles_legacy_child_idx").on(table.legacyChildId),
     uniqueIndex("child_profiles_household_nickname_idx").on(table.householdId, table.normalizedNickname),
+    uniqueIndex("child_profiles_household_id_idx").on(table.householdId, table.id),
   ],
 );
 
@@ -221,6 +222,7 @@ export const voices = sqliteTable(
     uniqueIndex("voices_household_user_live_idx").on(table.householdId, table.userId)
       .where(sql`${table.householdId} IS NOT NULL AND ${table.status} IN ('processing', 'ready')`),
     uniqueIndex("voices_household_creation_request_idx").on(table.householdId, table.creationRequestId),
+    uniqueIndex("voices_household_id_idx").on(table.householdId, table.id),
   ],
 );
 
@@ -244,6 +246,7 @@ export const voiceConsents = sqliteTable(
     uniqueIndex("voice_consents_active_voice_idx").on(table.voiceId)
       .where(sql`${table.voiceId} IS NOT NULL AND ${table.status} = 'active_verified'`),
     index("voice_consents_household_status_idx").on(table.householdId, table.status),
+    uniqueIndex("voice_consents_household_id_idx").on(table.householdId, table.id),
   ],
 );
 
@@ -321,7 +324,7 @@ export const voiceConsentLeases = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     finalizedAt: integer("finalized_at", { mode: "timestamp_ms" }),
   },
-  (table) => [index("voice_consent_leases_consent_status_idx").on(table.consentId, table.status)],
+  (table) => [index("voice_consent_leases_consent_status_idx").on(table.consentId, table.status), uniqueIndex("voice_consent_leases_household_id_idx").on(table.householdId, table.id)],
 );
 
 export const sleepSessions = sqliteTable(
@@ -457,6 +460,7 @@ export const usageReservations = sqliteTable(
   },
   (table) => [
     uniqueIndex("usage_reservations_household_idempotency_idx").on(table.householdId, table.idempotencyKey),
+    uniqueIndex("usage_reservations_household_id_idx").on(table.householdId, table.id),
     index("usage_reservations_household_status_created_idx").on(table.householdId, table.status, table.createdAt),
   ],
 );
@@ -544,6 +548,7 @@ export const mediaAssets = sqliteTable(
     uniqueIndex("media_assets_storage_key_idx").on(table.storageKey),
     uniqueIndex("media_assets_legacy_session_idx").on(table.legacySessionId),
     index("media_assets_household_created_idx").on(table.householdId, table.createdAt),
+    uniqueIndex("media_assets_household_id_idx").on(table.householdId, table.id),
   ],
 );
 
@@ -612,6 +617,8 @@ export const jobs = sqliteTable(
     errorCode: text("error_code"),
     progressPercent: integer("progress_percent").notNull().default(0),
     progressStage: text("progress_stage").notNull().default("queued"),
+    workerAttemptToken: text("worker_attempt_token"),
+    workerLeaseExpiresAt: integer("worker_lease_expires_at", { mode: "timestamp_ms" }),
     reservationId: text("reservation_id").references(() => usageReservations.id, { onDelete: "set null" }),
     consentId: text("consent_id").references(() => voiceConsents.id, { onDelete: "set null" }),
     consentVersion: text("consent_version"),
@@ -622,7 +629,287 @@ export const jobs = sqliteTable(
   },
   (table) => [
     uniqueIndex("jobs_household_idempotency_idx").on(table.householdId, table.idempotencyKey),
+    uniqueIndex("jobs_household_id_idx").on(table.householdId, table.id),
     index("jobs_household_status_created_idx").on(table.householdId, table.status, table.createdAt),
+    index("jobs_story_dispatch_idx").on(table.type, table.status, table.workerLeaseExpiresAt, table.createdAt),
+  ],
+);
+
+export const storyExperiences = sqliteTable(
+  "story_experiences",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+    childProfileId: text("child_profile_id").notNull().references(() => childProfiles.id, { onDelete: "restrict" }),
+    voiceId: text("voice_id").notNull().references(() => voices.id, { onDelete: "restrict" }),
+    consentId: text("consent_id").notNull().references(() => voiceConsents.id, { onDelete: "restrict" }),
+    consentVersion: text("consent_version").notNull(),
+    consentLeaseId: text("consent_lease_id").notNull().references(() => voiceConsentLeases.id, { onDelete: "restrict" }),
+    mode: text("mode").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    plan: text("plan", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    rightsActorUserId: text("rights_actor_user_id").references(() => users.id, { onDelete: "restrict" }),
+    rightsVersion: text("rights_version"),
+    rightsCanonicalUrl: text("rights_canonical_url"),
+    rightsAttestedAt: integer("rights_attested_at", { mode: "timestamp_ms" }),
+    status: text("status", { enum: ["queued", "processing", "review_required", "completed", "failed", "canceled", "delete_pending", "deleted"] }).notNull().default("queued"),
+    highestPlayedSegment: integer("highest_played_segment").notNull().default(-1),
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    reservationId: text("reservation_id").references(() => usageReservations.id, { onDelete: "set null" }),
+    providerBudgetHoldIds: text("provider_budget_hold_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    mediaAssetId: text("media_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("story_experiences_household_request_idx").on(table.householdId, table.idempotencyKey),
+    uniqueIndex("story_experiences_household_id_idx").on(table.householdId, table.id),
+    index("story_experiences_household_status_idx").on(table.householdId, table.status, table.createdAt),
+    foreignKey({ columns: [table.householdId, table.requestedByUserId], foreignColumns: [householdMembers.householdId, householdMembers.userId] }),
+    foreignKey({ columns: [table.householdId, table.childProfileId], foreignColumns: [childProfiles.householdId, childProfiles.id] }),
+    foreignKey({ columns: [table.householdId, table.voiceId], foreignColumns: [voices.householdId, voices.id] }),
+    foreignKey({ columns: [table.householdId, table.consentId], foreignColumns: [voiceConsents.householdId, voiceConsents.id] }),
+    foreignKey({ columns: [table.householdId, table.consentLeaseId], foreignColumns: [voiceConsentLeases.householdId, voiceConsentLeases.id] }),
+    foreignKey({ columns: [table.householdId, table.jobId], foreignColumns: [jobs.householdId, jobs.id] }).onDelete("cascade"),
+    foreignKey({ columns: [table.householdId, table.reservationId], foreignColumns: [usageReservations.householdId, usageReservations.id] }).onDelete("cascade"),
+    foreignKey({ columns: [table.householdId, table.mediaAssetId], foreignColumns: [mediaAssets.householdId, mediaAssets.id] }).onDelete("cascade"),
+  ],
+);
+
+export const storyWorkerCheckpoints = sqliteTable(
+  "story_worker_checkpoints",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    attemptToken: text("attempt_token").notNull(),
+    stage: text("stage", { enum: ["writer", "moderation", "speech", "effect", "mix"] }).notNull(),
+    ordinal: integer("ordinal").notNull().default(-1),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    storageKey: text("storage_key"),
+    byteSize: integer("byte_size"),
+    checksum: text("checksum"),
+    status: text("status", { enum: ["staging", "ready"] }).notNull().default("staging"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("story_worker_checkpoint_stage_idx").on(table.storyId, table.stage, table.ordinal),
+    foreignKey({ columns: [table.householdId, table.storyId], foreignColumns: [storyExperiences.householdId, storyExperiences.id] }),
+  ],
+);
+
+export const storyPersistStagingObjects = sqliteTable(
+  "story_persist_staging_objects",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    attemptToken: text("attempt_token").notNull(),
+    role: text("role", { enum: ["segment", "final"] }).notNull(),
+    ordinal: integer("ordinal"),
+    storageKey: text("storage_key").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    checksum: text("checksum").notNull(),
+    status: text("status", { enum: ["staging", "published", "deleted"] }).notNull().default("staging"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("story_persist_staging_attempt_role_idx").on(table.storyId, table.attemptToken, table.role, table.ordinal),
+    uniqueIndex("story_persist_staging_key_idx").on(table.storageKey),
+    foreignKey({ columns: [table.householdId, table.storyId], foreignColumns: [storyExperiences.householdId, storyExperiences.id] }),
+  ],
+);
+
+export const storySegments = sqliteTable(
+  "story_segments",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    branchKey: text("branch_key").notNull().default("root"),
+    ordinal: integer("ordinal").notNull(),
+    purpose: text("purpose").notNull(),
+    narration: text("narration"),
+    status: text("status", { enum: ["queued", "processing", "ready", "failed", "superseded"] }).notNull().default("queued"),
+    planVersion: text("plan_version").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    writerModel: text("writer_model"),
+    writerRequestId: text("writer_request_id"),
+    moderationModel: text("moderation_model"),
+    moderationRequestId: text("moderation_request_id"),
+    moderationVerdict: text("moderation_verdict", { enum: ["safe", "unsafe"] }),
+    ttsModel: text("tts_model"),
+    ttsRequestId: text("tts_request_id"),
+    mediaAssetId: text("media_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+    startMs: integer("start_ms"),
+    endMs: integer("end_ms"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("story_segments_story_branch_ordinal_idx").on(table.storyId, table.branchKey, table.ordinal),
+    foreignKey({ columns: [table.householdId, table.storyId], foreignColumns: [storyExperiences.householdId, storyExperiences.id] }),
+    foreignKey({ columns: [table.householdId, table.mediaAssetId], foreignColumns: [mediaAssets.householdId, mediaAssets.id] }).onDelete("cascade"),
+  ],
+);
+
+export const storyDeletionOperations = sqliteTable(
+  "story_deletion_operations",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status", { enum: ["inventory_pending", "cleanup_pending", "cleanup_verified", "failed", "completed"] }).notNull().default("inventory_pending"),
+    storageKeys: text("storage_keys", { mode: "json" }).$type<string[]>().notNull().default([]),
+    attemptToken: text("attempt_token"),
+    attemptExpiresAt: integer("attempt_expires_at", { mode: "timestamp_ms" }),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("story_deletion_household_request_idx").on(table.householdId, table.idempotencyKey),
+    uniqueIndex("story_deletion_household_id_idx").on(table.householdId, table.id),
+    uniqueIndex("story_deletion_story_live_idx").on(table.householdId, table.storyId).where(sql`${table.status} <> 'completed'`),
+    foreignKey({ columns: [table.householdId, table.storyId], foreignColumns: [storyExperiences.householdId, storyExperiences.id] }),
+  ],
+);
+
+export const storyMediaBindings = sqliteTable(
+  "story_media_bindings",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    mediaAssetId: text("media_asset_id").notNull().references(() => mediaAssets.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["segment", "final"] }).notNull(),
+    branchKey: text("branch_key").notNull().default("root"),
+    ordinal: integer("ordinal"),
+    status: text("status", { enum: ["processing", "ready", "deleted"] }).notNull().default("processing"),
+    attemptToken: text("attempt_token").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("story_media_asset_idx").on(table.mediaAssetId),
+    uniqueIndex("story_media_role_idx").on(table.storyId, table.branchKey, table.role, table.ordinal),
+    uniqueIndex("story_media_final_idx").on(table.storyId, table.branchKey).where(sql`${table.role} = 'final'`),
+    foreignKey({ columns: [table.householdId, table.storyId], foreignColumns: [storyExperiences.householdId, storyExperiences.id] }),
+    foreignKey({ columns: [table.householdId, table.mediaAssetId], foreignColumns: [mediaAssets.householdId, mediaAssets.id] }),
+  ],
+);
+
+export const storyProviderBudgetHolds = sqliteTable(
+  "story_provider_budget_holds",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    branchKey: text("branch_key").notNull().default("root"),
+    provider: text("provider", { enum: ["openai", "elevenlabs"] }).notNull(),
+    operation: text("operation", { enum: ["story_writing", "story_output_moderation", "story_speech", "story_sfx"] }).notNull(),
+    maxMicrocents: integer("max_microcents").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    providerSpendReservationId: text("provider_spend_reservation_id").references(() => providerSpendReservations.id, { onDelete: "set null" }),
+    status: text("status", { enum: ["reserved", "claimed", "settled", "released"] }).notNull().default("reserved"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("story_provider_holds_story_operation_idx").on(table.storyId, table.branchKey, table.operation),
+    uniqueIndex("story_provider_holds_household_id_idx").on(table.householdId, table.id),
+    foreignKey({ columns: [table.householdId, table.storyId], foreignColumns: [storyExperiences.householdId, storyExperiences.id] }),
+    foreignKey({ columns: [table.householdId, table.userId], foreignColumns: [householdMembers.householdId, householdMembers.userId] }),
+  ],
+);
+
+export const storyBranchRequests = sqliteTable(
+  "story_branch_requests",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    storyId: text("story_id").notNull().references(() => storyExperiences.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+    direction: text("direction").notNull(),
+    afterSegment: integer("after_segment").notNull(),
+    requestHash: text("request_hash").notNull(),
+    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "restrict" }),
+    reservationId: text("reservation_id").notNull().references(() => usageReservations.id, { onDelete: "restrict" }),
+    consentLeaseId: text("consent_lease_id").notNull().references(() => voiceConsentLeases.id, { onDelete: "restrict" }),
+    moderationReceiptId: text("moderation_receipt_id").notNull().references(() => storyModerationReceipts.id, { onDelete: "restrict" }),
+    reservedMinutes: integer("reserved_minutes").notNull(),
+    status: text("status", { enum: ["queued", "processing", "applied", "rejected", "failed"] }).notNull().default("queued"),
+    moderationProvenance: text("moderation_provenance", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    foreignKey({ columns: [table.householdId, table.jobId], foreignColumns: [jobs.householdId, jobs.id] }),
+    foreignKey({ columns: [table.householdId, table.reservationId], foreignColumns: [usageReservations.householdId, usageReservations.id] }),
+    foreignKey({ columns: [table.householdId, table.consentLeaseId], foreignColumns: [voiceConsentLeases.householdId, voiceConsentLeases.id] }),
+    foreignKey({ columns: [table.householdId, table.moderationReceiptId], foreignColumns: [storyModerationReceipts.householdId, storyModerationReceipts.id] }),
+  ],
+);
+
+export const storySoundAssets = sqliteTable(
+  "story_sound_assets",
+  {
+    id: text("id").primaryKey(),
+    cacheKey: text("cache_key").notNull(),
+    descriptor: text("descriptor").notNull(),
+    provenance: text("provenance").notNull(),
+    licensePolicyVersion: text("license_policy_version").notNull(),
+    provider: text("provider").notNull(),
+    providerRequestId: text("provider_request_id"),
+    storageKey: text("storage_key"),
+    checksum: text("checksum"),
+    byteSize: integer("byte_size"),
+    attemptToken: text("attempt_token"),
+    attemptExpiresAt: integer("attempt_expires_at", { mode: "timestamp_ms" }),
+    status: text("status", { enum: ["processing", "ready", "failed", "deleted"] }).notNull().default("processing"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [uniqueIndex("story_sound_assets_cache_idx").on(table.cacheKey)],
+);
+
+export const nearStoryActivationState = sqliteTable("nearstory_activation_state", {
+  id: text("id").primaryKey(),
+  status: text("status", { enum: ["pending", "ready"] }).notNull().default("pending"),
+  migrationVersion: text("migration_version").notNull(),
+  workerHeartbeatAt: integer("worker_heartbeat_at", { mode: "timestamp_ms" }),
+  checkedAt: integer("checked_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const storyModerationReceipts = sqliteTable(
+  "story_moderation_receipts",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+    requestHash: text("request_hash").notNull(),
+    verdict: text("verdict", { enum: ["safe", "unsafe"] }).notNull(),
+    model: text("model").notNull(),
+    providerRequestId: text("provider_request_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("story_moderation_receipts_household_id_idx").on(table.householdId, table.id),
+    foreignKey({ columns: [table.householdId, table.requestedByUserId], foreignColumns: [householdMembers.householdId, householdMembers.userId] }),
   ],
 );
 

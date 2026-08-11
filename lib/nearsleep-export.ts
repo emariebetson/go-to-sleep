@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   childProfiles,
@@ -12,6 +12,10 @@ import {
   playlistItems,
   playlists,
   sleepSessions,
+  storyBranchRequests,
+  storyExperiences,
+  storyMediaBindings,
+  storySegments,
   voiceConsents,
 } from "@/db/schema";
 import { canonicalRequestHash, portableConsentEvidence, sha256Hex } from "./nearsleep-library";
@@ -267,6 +271,27 @@ export async function advanceHouseholdExport(input: { exportId: string; househol
           )).orderBy(asc(bedtimeQueueItems.id)).limit(pageLimit + 1).all();
         hasMore = rows.length > pageLimit;
         items = rows.slice(0, pageLimit);
+        nextStage = process.env.NEARYOU_ENABLE_STORY === "true" ? "stories" : "sessions";
+      } else if (kind === "stories") {
+        const rows = await db.select({ id: storyExperiences.id, childProfileId: storyExperiences.childProfileId, voiceId: storyExperiences.voiceId, consentId: storyExperiences.consentId, consentVersion: storyExperiences.consentVersion, mode: storyExperiences.mode, durationMinutes: storyExperiences.durationMinutes, plan: storyExperiences.plan, rightsActorUserId: storyExperiences.rightsActorUserId, rightsVersion: storyExperiences.rightsVersion, rightsCanonicalUrl: storyExperiences.rightsCanonicalUrl, rightsAttestedAt: storyExperiences.rightsAttestedAt, status: storyExperiences.status, createdAt: storyExperiences.createdAt, completedAt: storyExperiences.completedAt })
+          .from(storyExperiences).where(and(eq(storyExperiences.householdId, input.householdId), lte(storyExperiences.createdAt, cutoff), ne(storyExperiences.status, "deleted"), ...(after ? [gt(storyExperiences.id, after)] : []))).orderBy(asc(storyExperiences.id)).limit(pageLimit + 1).all();
+        hasMore = rows.length > pageLimit;
+        items = await Promise.all(rows.slice(0, pageLimit).map(async (story) => ({ ...story,
+          segments: await db.select({ branchKey: storySegments.branchKey, ordinal: storySegments.ordinal, purpose: storySegments.purpose, narration: storySegments.narration, status: storySegments.status, planVersion: storySegments.planVersion, promptVersion: storySegments.promptVersion, writerModel: storySegments.writerModel, writerRequestId: storySegments.writerRequestId, moderationModel: storySegments.moderationModel, moderationRequestId: storySegments.moderationRequestId, moderationVerdict: storySegments.moderationVerdict, ttsModel: storySegments.ttsModel, ttsRequestId: storySegments.ttsRequestId, mediaAssetId: storySegments.mediaAssetId }).from(storySegments).where(and(eq(storySegments.householdId, input.householdId), eq(storySegments.storyId, story.id))).orderBy(asc(storySegments.branchKey), asc(storySegments.ordinal)).all(),
+          branches: await db.select({ id: storyBranchRequests.id, direction: storyBranchRequests.direction, afterSegment: storyBranchRequests.afterSegment, status: storyBranchRequests.status, moderationReceiptId: storyBranchRequests.moderationReceiptId, moderationProvenance: storyBranchRequests.moderationProvenance, createdAt: storyBranchRequests.createdAt }).from(storyBranchRequests).where(and(eq(storyBranchRequests.householdId, input.householdId), eq(storyBranchRequests.storyId, story.id))).orderBy(asc(storyBranchRequests.createdAt)).all(),
+        })));
+        nextStage = "story_media";
+      } else if (kind === "story_media") {
+        const page = await db.select({
+          id: sql<string>`${storyMediaBindings.id}`.as("story_binding_id"), storyId: sql<string>`${storyMediaBindings.storyId}`.as("story_id"), role: sql<string>`${storyMediaBindings.role}`.as("story_media_role"), branchKey: sql<string>`${storyMediaBindings.branchKey}`.as("story_branch_key"), ordinal: sql<number | null>`${storyMediaBindings.ordinal}`.as("story_ordinal"),
+          mediaAssetId: sql<string>`${mediaAssets.id}`.as("story_media_asset_id"), contentTypeMedia: sql<string | null>`${mediaAssets.contentType}`.as("story_content_type"), byteSize: sql<number | null>`${mediaAssets.byteSize}`.as("story_byte_size"), checksum: sql<string | null>`${mediaAssets.checksum}`.as("story_checksum"), storageKey: sql<string | null>`${mediaAssets.storageKey}`.as("story_storage_key"),
+          storageReservationStatus: sql<string | null>`${householdStorageReservations.status}`.as("story_storage_status"), reservedByteSize: sql<number | null>`${householdStorageReservations.byteSize}`.as("story_reserved_bytes"), createdAt: sql<Date>`${storyMediaBindings.createdAt}`.as("story_created_at"),
+        }).from(storyMediaBindings).innerJoin(mediaAssets, and(eq(storyMediaBindings.mediaAssetId, mediaAssets.id), eq(mediaAssets.householdId, input.householdId), eq(mediaAssets.status, "ready"), eq(mediaAssets.private, true), isNull(mediaAssets.deletedAt)))
+          .leftJoin(householdStorageReservations, and(eq(householdStorageReservations.mediaAssetId, mediaAssets.id), eq(householdStorageReservations.householdId, input.householdId)))
+          .where(and(eq(storyMediaBindings.householdId, input.householdId), eq(storyMediaBindings.status, "ready"), lte(storyMediaBindings.createdAt, cutoff), ...(after ? [gt(storyMediaBindings.id, after)] : []))).orderBy(asc(storyMediaBindings.id)).limit(pageLimit + 1).all();
+        sessions = page.slice(0, pageLimit) as typeof sessions; hasMore = page.length > pageLimit;
+        const currentExportId = record.id; const firstPartPosition = record.inventoryCount;
+        items = sessions.map((session, index) => ({ ...Object.fromEntries(Object.entries(session).filter(([key]) => !["storageKey", "storageReservationStatus", "reservedByteSize", "contentTypeMedia"].includes(key))), mediaPartId: `${currentExportId}:part:${String(firstPartPosition + index).padStart(8, "0")}` }));
         nextStage = "sessions";
       } else if (kind === "sessions") {
         const page = await db.select({
@@ -490,6 +515,7 @@ export async function advanceHouseholdExport(input: { exportId: string; househol
       ] as unknown as Parameters<typeof db.batch>[0]);
     }
   } catch (error) {
+    console.error("Household export reconciliation failed", { exportId, code: error instanceof Error ? error.message : "unknown" });
     const code = error instanceof Error && ["export_source_missing", "export_checksum_mismatch", "export_size_mismatch", "export_checksum_reconciliation_required"].includes(error.message) ? error.message : "export_retry_required";
     await db.update(householdExports).set({ status: "failed", attemptToken: null, attemptExpiresAt: null, errorCode: code, updatedAt: new Date() }).where(and(
       eq(householdExports.id, exportId), eq(householdExports.status, "running"), eq(householdExports.attemptToken, attemptToken),

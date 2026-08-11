@@ -8,6 +8,7 @@ import { reconcileHouseholdExports } from "@/lib/nearsleep-export";
 import { jsonNoStore } from "@/lib/http";
 import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled } from "@/lib/nearyou-foundation";
 import { reconcileLegacyReadyMedia } from "@/lib/nearsleep-storage-reconciliation";
+import { reconcilePendingStoryDeletions } from "@/lib/nearstory-deletion";
 
 type AudioBucket = Parameters<typeof reconcilePendingSessionDeletions>[0]["bucket"] & Parameters<typeof reconcileHouseholdExports>[0]["bucket"];
 
@@ -43,5 +44,6 @@ export async function POST(request: Request) {
   const sessionsAdvanced = await reconcilePendingSessionDeletions({ bucket, limit: 10 });
   const cleanupAdvanced = await reconcilePendingDeletionReconciliations({ bucket, limit: 10, actionLimit: 2 });
   const accountsAdvanced = await reconcilePendingAccountDeletions(10);
-  return jsonNoStore({ storageReconciliation, exportsAdvanced, sessionsAdvanced, cleanupAdvanced, accountsAdvanced, heartbeatAt, schedulerRunId });
+  const storiesDeleted = process.env.NEARYOU_ENABLE_STORY === "true" ? await reconcilePendingStoryDeletions({ bucket, limit: 10 }) : 0;
+  return jsonNoStore({ storageReconciliation, exportsAdvanced, sessionsAdvanced, cleanupAdvanced, accountsAdvanced, storiesDeleted, heartbeatAt, schedulerRunId });
 }

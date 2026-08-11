@@ -5,14 +5,17 @@ import { SignOutButton } from "./SignOutButton";
 
 type AppShellProps = {
   children: React.ReactNode;
-  active: "studio" | "library" | "account" | "admin";
+  active: "studio" | "stories" | "library" | "account" | "admin";
 };
 
 export async function AppShell({ children, active }: AppShellProps) {
   const user = await getAppUser();
   const showAdmin = Boolean(user && isAdmin(user));
+  const { storyReady } = await import("@/app/api/v1/stories/production");
+  const showStories = await storyReady().catch(() => false);
   const links = [
     ["studio", "/studio", "Create a bedtime"],
+    ...(showStories ? [["stories", "/stories", "Create a story"] as const] : []),
     ["library", "/library", "My nights"],
     ["account", "/account", "Voice & account"],
   ] as const;
