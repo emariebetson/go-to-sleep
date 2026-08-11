@@ -92,6 +92,18 @@ test("private billing routes enforce origin and authentication before database a
   }
 });
 
+test("pronunciation guesses require an authenticated parent", async () => {
+  const worker = await loadWorker();
+  const runtime = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) }, DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] } };
+  const context = { waitUntil() {}, passThroughOnException() {} };
+  const response = await worker.fetch(new Request("http://localhost/api/pronunciation", {
+    method: "POST",
+    headers: { origin: "http://localhost", "content-type": "application/json" },
+    body: JSON.stringify({ nickname: "Lachy" }),
+  }), runtime, context);
+  assert.equal(response.status, 401);
+});
+
 test("Stripe requests pin the current API and identify Nearnight checkout", async () => {
   const stripeSource = await readFile(new URL("../lib/stripe.ts", import.meta.url), "utf8");
   const checkoutSource = await readFile(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8");
