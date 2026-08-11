@@ -1,6 +1,6 @@
 # Pronunciation and Frequency Layers Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Automatically suggest an editable child-name pronunciation, apply it only at the TTS boundary, and add up to three persistent, locally generated Solfeggio playback layers.
 
@@ -39,7 +39,7 @@
 - Produces: `parseStoredFrequencyLayers(value: unknown): SolfeggioFrequency[]`
 - Produces: `frequencyGainPerOscillator(layerCount: number): number`
 
-- [ ] **Step 1: Write the failing behavior tests**
+- [x] **Step 1: Write the failing behavior tests**
 
 ```js
 import assert from "node:assert/strict";
@@ -75,7 +75,7 @@ test("stored layers fail closed and per-oscillator gain bounds the sum", () => {
 });
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [x] **Step 2: Run the new test and verify RED**
 
 Run:
 
@@ -85,13 +85,13 @@ node --test tests/pronunciation-frequency.test.mjs
 
 Expected: FAIL because `lib/pronunciation.ts` and `lib/frequency-layers.ts` do not exist.
 
-- [ ] **Step 3: Implement the focused helpers**
+- [x] **Step 3: Implement the focused helpers**
 
 `applyPronunciation` must escape regex metacharacters, use Unicode letter/number boundaries, replace case-insensitively, and return the original text when any required input is empty. `cleanNickname` removes angle brackets/control characters, collapses whitespace, and caps output at 32 characters. `cleanPronunciation` applies compatible cleanup with a 64-character cap. `normalizeNickname` lowercases `cleanNickname(value)` for the user-scoped lookup key.
 
 `validateFrequencyLayers` requires an array, rejects a fourth entry, duplicates, non-integers, and values outside the enumerated list. `parseStoredFrequencyLayers` catches JSON/validation errors and returns `[]`. `frequencyGainPerOscillator` returns `0` for no layers and `0.018 / clampedCount` for one to three layers.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run:
 
@@ -101,7 +101,7 @@ node --test tests/pronunciation-frequency.test.mjs
 
 Expected: all pronunciation/frequency helper tests pass.
 
-- [ ] **Step 5: Commit the domain layer**
+- [x] **Step 5: Commit the domain layer**
 
 ```bash
 git add lib/pronunciation.ts lib/frequency-layers.ts tests/pronunciation-frequency.test.mjs
@@ -126,7 +126,7 @@ git commit -m "feat: add pronunciation and frequency rules"
 - Extends: `children` with `normalizedNickname` and `pronunciation`.
 - Extends: `sleepSessions` with `pronunciation` and `frequencyLayers` snapshot columns.
 
-- [ ] **Step 1: Write failing request-contract tests**
+- [x] **Step 1: Write failing request-contract tests**
 
 ```js
 import assert from "node:assert/strict";
@@ -166,7 +166,7 @@ test("session input rejects a fourth or unsupported layer", () => {
 });
 ```
 
-- [ ] **Step 2: Run the request-contract test and verify RED**
+- [x] **Step 2: Run the request-contract test and verify RED**
 
 Run:
 
@@ -176,7 +176,7 @@ node_modules/.bin/tsx --test tests/sleep-session-input.test.mjs
 
 Expected: FAIL because the current parser drops pronunciation and frequencies.
 
-- [ ] **Step 3: Extend the schema and validator**
+- [x] **Step 3: Extend the schema and validator**
 
 Use these Drizzle fields and indexes:
 
@@ -195,7 +195,7 @@ Add `pronunciation_guess` to the TypeScript `usageEvents.type` enum so the authe
 
 Declare `tsx` version `4.22.1` as a direct dev dependency and change the test runner portion of `npm test` to `tsx --test tests/*.test.mjs`. This lets Node resolve the repository's established extensionless TypeScript imports in direct module tests.
 
-- [ ] **Step 4: Generate and inspect the additive migration**
+- [x] **Step 4: Generate and inspect the additive migration**
 
 Run:
 
@@ -205,7 +205,7 @@ node_modules/.bin/drizzle-kit generate --name pronunciation_frequency_layers
 
 The generated SQL must add the four columns and user-scoped unique index without dropping or rebuilding existing tables. Existing children may keep a null normalized nickname; new writes populate it. Existing sleep sessions receive `''` and `'[]'` defaults.
 
-- [ ] **Step 5: Run the focused tests and typecheck**
+- [x] **Step 5: Run the focused tests and typecheck**
 
 Run:
 
@@ -216,7 +216,7 @@ node_modules/.bin/tsc --noEmit --incremental false
 
 Expected: focused tests and typecheck pass.
 
-- [ ] **Step 6: Commit persistence and validation**
+- [x] **Step 6: Commit persistence and validation**
 
 ```bash
 git add db/schema.ts drizzle lib/sleep-session.ts package.json package-lock.json tests/sleep-session-input.test.mjs
@@ -237,7 +237,7 @@ git commit -m "feat: persist pronunciation and frequency settings"
 - Produces: `requestPronunciationGuess(nickname: string, apiKey: string, fetcher?: typeof fetch): Promise<string>`.
 - Route: `POST /api/pronunciation` with `{ nickname: string }`, returning `{ pronunciation: string }` or a no-store 4xx/503 error.
 
-- [ ] **Step 1: Write failing provider-boundary tests**
+- [x] **Step 1: Write failing provider-boundary tests**
 
 ```js
 import assert from "node:assert/strict";
@@ -255,7 +255,7 @@ test("pronunciation guessing rejects empty or malformed provider output", async 
 });
 ```
 
-- [ ] **Step 2: Run the provider test and verify RED**
+- [x] **Step 2: Run the provider test and verify RED**
 
 Run:
 
@@ -265,11 +265,11 @@ node_modules/.bin/tsx --test tests/pronunciation-guess.test.mjs
 
 Expected: FAIL because `lib/pronunciation-guess.ts` does not exist.
 
-- [ ] **Step 3: Implement the provider helper**
+- [x] **Step 3: Implement the provider helper**
 
 Send a bounded request to `https://api.openai.com/v1/responses` using `OPENAI_MODEL || "gpt-5-mini"`, `max_output_tokens: 32`, and instructions that request exactly one plain-English phonetic respelling, prohibit IPA/explanations, and treat the nickname as untrusted data. Parse `output_text` or the first `output_text` content item, run it through `cleanPronunciation`, and reject empty output, HTML-like provider output, multi-line explanations, or output longer than 64 characters.
 
-- [ ] **Step 4: Implement the authenticated route**
+- [x] **Step 4: Implement the authenticated route**
 
 The route order is:
 
@@ -283,7 +283,7 @@ await ensureUser(user);
 
 Insert a `pronunciation_guess` usage event, count the signed-in user's events in the last hour, delete the just-inserted event and return 429 when the count exceeds 20, and only then call OpenAI. If `OPENAI_API_KEY` is absent or the provider fails, return a generic no-store 503 without provider details or secrets. The client will treat this as non-blocking.
 
-- [ ] **Step 5: Add an unauthenticated route-boundary test**
+- [x] **Step 5: Add an unauthenticated route-boundary test**
 
 Extend the built-worker test to send a same-origin POST without a session:
 
@@ -300,7 +300,7 @@ const response = await worker.fetch(
 assert.equal(response.status, 401);
 ```
 
-- [ ] **Step 6: Run focused tests and production build**
+- [x] **Step 6: Run focused tests and production build**
 
 Run:
 
@@ -313,7 +313,7 @@ node --test tests/rendered-html.test.mjs
 
 Expected: helper tests, typecheck, build, and route boundary test pass.
 
-- [ ] **Step 7: Commit automated pronunciation guessing**
+- [x] **Step 7: Commit automated pronunciation guessing**
 
 ```bash
 git add lib/pronunciation-guess.ts app/api/pronunciation/route.ts tests/pronunciation-guess.test.mjs tests/rendered-html.test.mjs
@@ -334,7 +334,7 @@ git commit -m "feat: suggest nickname pronunciation"
 - Produces: `prepareNarration(input: Pick<SessionInput, "script" | "childName" | "pronunciation">): { full: string; preview: string }`.
 - Produces: saved `children` row linked by `sleep_sessions.child_id` for full generations.
 
-- [ ] **Step 1: Add a failing narration-boundary test**
+- [x] **Step 1: Add a failing narration-boundary test**
 
 Create `tests/session-narration.test.mjs`:
 
@@ -360,7 +360,7 @@ node_modules/.bin/tsx --test tests/session-narration.test.mjs
 
 Expected: FAIL because `lib/session-narration.ts` does not exist.
 
-- [ ] **Step 2: Wire one server-owned narration string**
+- [x] **Step 2: Wire one server-owned narration string**
 
 Implement `prepareNarration` with `applyPronunciation` and `previewExcerpt`, then immediately after request validation derive:
 
@@ -370,11 +370,11 @@ const narration = prepareNarration(input);
 
 Use `narration.preview` for preview TTS and `narration.full` for full TTS. Continue storing `input.script`, never either narration-only value, in `sleep_sessions.script`.
 
-- [ ] **Step 3: Upsert the user's child for full saves**
+- [x] **Step 3: Upsert the user's child for full saves**
 
 Before inserting a full sleep session, upsert by `[children.userId, children.normalizedNickname]` using `normalizeNickname(input.childName)`. Write nickname, pronunciation or null, age, bedtime challenge, and timestamps; return the child ID and set `sleep_sessions.childId`. Also snapshot `input.pronunciation` and `JSON.stringify(input.frequencies)` on the session. The conflict target and every lookup include the authenticated user ID.
 
-- [ ] **Step 4: Run focused tests, typecheck, and build**
+- [x] **Step 4: Run focused tests, typecheck, and build**
 
 Run:
 
@@ -386,7 +386,7 @@ node_modules/.bin/vinext build
 
 Expected: tests, typecheck, and build pass.
 
-- [ ] **Step 5: Commit the TTS and persistence wiring**
+- [x] **Step 5: Commit the TTS and persistence wiring**
 
 ```bash
 git add lib/session-narration.ts app/api/sessions/route.ts tests/session-narration.test.mjs
@@ -412,7 +412,7 @@ git commit -m "feat: apply saved pronunciation to narration"
 - Extends: `StudioData` with `pronunciation: string` and `frequencies: SolfeggioFrequency[]`.
 - Extends: `SleepPlayerProps` with `frequencies?: readonly number[]`.
 
-- [ ] **Step 1: Write failing race-condition tests**
+- [x] **Step 1: Write failing race-condition tests**
 
 ```js
 import assert from "node:assert/strict";
@@ -426,7 +426,7 @@ test("a guess applies only to the unchanged nickname and edit version", () => {
 });
 ```
 
-- [ ] **Step 2: Run the race test and verify RED**
+- [x] **Step 2: Run the race test and verify RED**
 
 Run:
 
@@ -436,23 +436,23 @@ node --test tests/studio-pronunciation.test.mjs
 
 Expected: FAIL because the helper does not exist.
 
-- [ ] **Step 3: Implement the helper and nickname-blur automation**
+- [x] **Step 3: Implement the helper and nickname-blur automation**
 
 Track a pronunciation manual-edit version in a ref and the active request in an `AbortController` ref. Nickname changes clear only an automatically supplied guess; pronunciation input changes increment the manual version. On nickname blur, abort the older request, record nickname/version, show “Finding our best guess…”, POST to `/api/pronunciation`, and apply the returned value only when `shouldApplyPronunciationGuess` returns true. Failure clears the loading text without blocking Continue. Provide a “Guess again” button that clears the manual state and explicitly repeats the request.
 
 Before UI wiring, add `tests/audio-layers.test.mjs` with fake Web Audio nodes that assert every supported oscillator starts as a sine wave, total gain remains bounded, and cleanup stops/disconnects every created node. Verify RED while `lib/audio-layers.ts` is missing, then implement the two lifecycle functions and verify GREEN.
 
-- [ ] **Step 4: Add the accessible fields and frequency choices**
+- [x] **Step 4: Add the accessible fields and frequency choices**
 
 Place **Pronounced like** next to **Baby’s nickname**, with `maxLength={64}`, `placeholder="LOCK-ee"`, helper copy, and a polite live region. Render the nine `SOLFEGGIO_OPTIONS` as native checkboxes with the approved descriptions. Disable unselected boxes at three selections, leave selected boxes enabled, and show: “Choose up to three. These descriptions reflect traditional associations, not proven medical or sleep benefits. Keep the volume comfortable.”
 
 Changing pronunciation or frequency selection calls `clearGeneratedAudio()` so a parent must regenerate the preview before saving changed settings.
 
-- [ ] **Step 5: Extend `SleepPlayer` with robust oscillator lifecycle**
+- [x] **Step 5: Extend `SleepPlayer` with robust oscillator lifecycle**
 
 On audio play, start the existing base sound plus one sine oscillator per validated frequency. Each oscillator uses `frequencyGainPerOscillator(count)`, connects through a shared gain node, and is stored in a ref. `stopSound` stops/disconnects the noise source, all oscillators, and all gain nodes. A failed/unavailable AudioContext leaves the HTML audio narration playing. Effects clean up on unmount and when `src`, `sound`, or `frequencies` change.
 
-- [ ] **Step 6: Pass layers into both studio players and add responsive styles**
+- [x] **Step 6: Pass layers into both studio players and add responsive styles**
 
 Use:
 
@@ -463,7 +463,7 @@ Use:
 
 Add compact checkbox-card, selected, disabled, helper-row, and two-column pronunciation-field styles to `app/globals.css`, collapsing to one column at the existing mobile breakpoint.
 
-- [ ] **Step 7: Run focused tests, lint, typecheck, and build**
+- [x] **Step 7: Run focused tests, lint, typecheck, and build**
 
 Run:
 
@@ -476,7 +476,7 @@ node_modules/.bin/vinext build
 
 Expected: focused tests, lint, typecheck, and build pass.
 
-- [ ] **Step 8: Commit the studio and player UI**
+- [x] **Step 8: Commit the studio and player UI**
 
 ```bash
 git add lib/audio-layers.ts lib/studio-pronunciation.ts tests/audio-layers.test.mjs tests/studio-pronunciation.test.mjs app/studio/SleepStudio.tsx components/SleepPlayer.tsx app/globals.css
@@ -496,7 +496,7 @@ git commit -m "feat: add pronunciation and tone controls"
 - Consumes: `parseStoredFrequencyLayers` and the session snapshot from Tasks 1–4.
 - Produces: `formatFrequencyLabel(layers: readonly SolfeggioFrequency[]): string` in `lib/frequency-layers.ts`.
 
-- [ ] **Step 1: Add failing storage and presentation assertions**
+- [x] **Step 1: Add failing storage and presentation assertions**
 
 Add cases showing `null`, `"[]"`, malformed JSON, a fourth frequency, duplicates, and unsupported values all return `[]` without throwing. Add these label assertions:
 
@@ -508,11 +508,11 @@ assert.equal(formatFrequencyLabel([174, 528]), "174 + 528 Hz");
 
 Run the test and verify RED because `formatFrequencyLabel` does not exist, then implement it with the validated numeric values.
 
-- [ ] **Step 2: Restore layers in My nights**
+- [x] **Step 2: Restore layers in My nights**
 
 For every session, parse `session.frequencyLayers` with `parseStoredFrequencyLayers`, pass the result to `SleepPlayer`, and include a concise label such as `174 + 528 Hz` only when layers exist. Legacy/malformed values render voice/base-sound playback without tones.
 
-- [ ] **Step 3: Apply the migration to the isolated local D1 database**
+- [x] **Step 3: Apply the migration to the isolated local D1 database**
 
 Run:
 
@@ -522,7 +522,7 @@ node_modules/.bin/wrangler d1 migrations apply site-creator-d1 --local --config 
 
 Expected: migration 0005 applies successfully without touching the remote database.
 
-- [ ] **Step 4: Run the complete automated verification suite**
+- [x] **Step 4: Run the complete automated verification suite**
 
 Run:
 
@@ -536,7 +536,7 @@ git diff --check
 
 Expected: lint, typecheck, production build, every test, and whitespace validation pass with zero failures.
 
-- [ ] **Step 5: Run a signed-in browser smoke test**
+- [x] **Step 5: Run a signed-in browser smoke test**
 
 Start the local app and verify this exact flow without exposing credentials:
 
@@ -547,7 +547,7 @@ Start the local app and verify this exact flow without exposing credentials:
 5. Save the bedtime, open My nights, and confirm the selected frequency label and replay behavior persist.
 6. Confirm browser console and network panels show no unhandled errors or secret values.
 
-- [ ] **Step 6: Commit library restoration and verification updates**
+- [x] **Step 6: Commit library restoration and verification updates**
 
 ```bash
 git add app/library/page.tsx tests/pronunciation-frequency.test.mjs docs/superpowers/plans/2026-08-11-pronunciation-and-frequency-layers.md

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyPronunciation, cleanNickname, cleanPronunciation, normalizeNickname } from "../lib/pronunciation.ts";
-import { frequencyGainPerOscillator, parseStoredFrequencyLayers, validateFrequencyLayers } from "../lib/frequency-layers.ts";
+import { formatFrequencyLabel, frequencyGainPerOscillator, parseStoredFrequencyLayers, validateFrequencyLayers } from "../lib/frequency-layers.ts";
 
 test("pronunciation substitution changes standalone nickname occurrences only", () => {
   assert.equal(
@@ -35,7 +35,17 @@ test("frequency validation accepts only three distinct supported layers", () => 
 test("stored layers fail closed and per-oscillator gain bounds the sum", () => {
   assert.deepEqual(parseStoredFrequencyLayers("[174,528]"), [174, 528]);
   assert.deepEqual(parseStoredFrequencyLayers("not json"), []);
+  assert.deepEqual(parseStoredFrequencyLayers(null), []);
+  assert.deepEqual(parseStoredFrequencyLayers("[174,174]"), []);
+  assert.deepEqual(parseStoredFrequencyLayers("[174,285,396,417]"), []);
+  assert.deepEqual(parseStoredFrequencyLayers("[440]"), []);
   assert.equal(frequencyGainPerOscillator(0), 0);
   assert.equal(frequencyGainPerOscillator(1), 0.018);
   assert.ok(frequencyGainPerOscillator(3) * 3 <= 0.018);
+});
+
+test("frequency labels describe only selected valid layers", () => {
+  assert.equal(formatFrequencyLabel([]), "");
+  assert.equal(formatFrequencyLabel([174]), "174 Hz");
+  assert.equal(formatFrequencyLabel([174, 528]), "174 + 528 Hz");
 });

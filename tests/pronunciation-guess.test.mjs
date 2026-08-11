@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requestPronunciationGuess } from "../lib/pronunciation-guess.ts";
+import { localPronunciationGuess, requestPronunciationGuess } from "../lib/pronunciation-guess.ts";
+
+test("local pronunciation exceptions handle known ambiguous nicknames without provider spend", () => {
+  assert.equal(localPronunciationGuess("Lachy"), "LOCK-ee");
+  assert.equal(localPronunciationGuess("  LACHY  "), "LOCK-ee");
+  assert.equal(localPronunciationGuess("UnlistedName"), "");
+});
 
 test("pronunciation guessing returns one cleaned readable respelling", async () => {
   const fakeFetch = async () => new Response(JSON.stringify({ output_text: "LOCK-ee\n" }), { status: 200 });

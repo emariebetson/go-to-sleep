@@ -9,6 +9,14 @@ function responseText(payload: ResponsesPayload) {
   return payload.output_text || payload.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text || "";
 }
 
+const LOCAL_PRONUNCIATION_EXCEPTIONS: Record<string, string> = {
+  lachy: "LOCK-ee",
+};
+
+export function localPronunciationGuess(nickname: string) {
+  return LOCAL_PRONUNCIATION_EXCEPTIONS[cleanNickname(nickname).toLocaleLowerCase("en-US")] || "";
+}
+
 export async function requestPronunciationGuess(nickname: string, apiKey: string, fetcher: typeof fetch = fetch) {
   const safeNickname = cleanNickname(nickname);
   if (!safeNickname) throw new Error("Enter a nickname before requesting a pronunciation.");

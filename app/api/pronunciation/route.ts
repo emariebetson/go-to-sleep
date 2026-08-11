@@ -2,7 +2,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import { requireApiUser } from "@/lib/auth";
 import { assertSameOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
 import { cleanNickname, normalizeNickname } from "@/lib/pronunciation";
-import { requestPronunciationGuess } from "@/lib/pronunciation-guess";
+import { localPronunciationGuess, requestPronunciationGuess } from "@/lib/pronunciation-guess";
 
 const MAX_GUESSES_PER_HOUR = 20;
 
@@ -25,6 +25,9 @@ export async function POST(request: Request) {
       .where(and(eq(children.userId, user.userId), eq(children.normalizedNickname, normalizeNickname(nickname))))
       .get();
     if (saved?.pronunciation) return jsonNoStore({ pronunciation: saved.pronunciation, saved: true });
+
+    const localGuess = localPronunciationGuess(nickname);
+    if (localGuess) return jsonNoStore({ pronunciation: localGuess, local: true });
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return jsonNoStore({ error: "Automatic pronunciation guessing is temporarily unavailable." }, { status: 503 });

@@ -41,3 +41,8 @@ export function frequencyGainPerOscillator(layerCount: number) {
   if (!Number.isFinite(layerCount) || layerCount <= 0) return 0;
   return 0.018 / Math.min(3, Math.max(1, Math.floor(layerCount)));
 }
+
+export function formatFrequencyLabel(layers: readonly SolfeggioFrequency[]) {
+  const frequencies = validateFrequencyLayers(layers);
+  return frequencies.length ? `${frequencies.join(" + ")} Hz` : "";
+}
