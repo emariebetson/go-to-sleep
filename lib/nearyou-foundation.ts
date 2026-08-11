@@ -78,9 +78,19 @@ export const PLAN_CATALOG = {
 
 export type PlanId = keyof typeof PLAN_CATALOG;
 
+export function nearSleepNarratorPolicy(planId: PlanId, standardNarratorOverride = false) {
+  return {
+    // Free deliberately uses a catalog narrator. It never creates or stores a
+    // private voice clone, so deleting a voice cannot reset a provider-funded trial.
+    standardNarratorAvailable: planId === "nearsleep_free" || standardNarratorOverride,
+    privateVoiceCloneAllowed: planId !== "nearsleep_free",
+  };
+}
+
 export type FeatureFlags = {
   foundationApi: boolean;
   productionUpgradeFoundation: boolean;
+  nearSleepProduction: boolean;
   legacyNearsleepRoutes: boolean;
   story: boolean;
   legacyArchive: boolean;
@@ -100,6 +110,7 @@ export function featureFlagsFromEnv(environment: Record<string, string | undefin
   return {
     foundationApi: enabled(environment.NEARYOU_ENABLE_FOUNDATION_API),
     productionUpgradeFoundation: enabled(environment.NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION),
+    nearSleepProduction: enabled(environment.NEARYOU_ENABLE_NEARSLEEP_PRODUCTION),
     legacyNearsleepRoutes: true,
     story: enabled(environment.NEARYOU_ENABLE_STORY),
     legacyArchive: enabled(environment.NEARYOU_ENABLE_LEGACY_ARCHIVE),
@@ -110,6 +121,14 @@ export function featureFlagsFromEnv(environment: Record<string, string | undefin
     posthumousSynthesis: false,
     stripeLiveMode: false,
   };
+}
+
+export function nearSleepProductionEnabled(flags: FeatureFlags) {
+  return flags.foundationApi
+    && flags.productionUpgradeFoundation
+    && flags.nearSleepProduction
+    && flags.usageReservations
+    && flags.requireVerifiedVoiceConsent;
 }
 
 export const FEATURE_FLAGS = featureFlagsFromEnv({});
@@ -165,10 +184,18 @@ type EntitlementGrant = {
   updatedAt: Date | number;
 };
 
-export function resolveEffectiveEntitlement(grants: EntitlementGrant[]) {
+export function resolveEffectiveEntitlement(grants: EntitlementGrant[], now = new Date()) {
+  const nowMs = now.getTime();
   const selected = [...grants]
-    .filter((grant) => grant.status === "active" || grant.status === "grace")
+    .filter((grant) => {
+      if (grant.status !== "active" && grant.status !== "grace") return false;
+      const validFrom = new Date(grant.validFrom).getTime();
+      const validUntil = grant.validUntil === null ? null : new Date(grant.validUntil).getTime();
+      return Number.isFinite(validFrom) && validFrom <= nowMs && (validUntil === null || validUntil > nowMs);
+    })
     .sort((left, right) => {
+      const paidDifference = Number(right.planId !== "nearsleep_free") - Number(left.planId !== "nearsleep_free");
+      if (paidDifference) return paidDifference;
       const statusDifference = Number(right.status === "active") - Number(left.status === "active");
       if (statusDifference) return statusDifference;
       return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();

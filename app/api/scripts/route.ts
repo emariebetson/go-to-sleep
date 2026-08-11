@@ -3,8 +3,13 @@ import { requireApiUser } from "@/lib/auth";
 import { assertSameOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
 import { curatedScript, personalizedScript, validateScriptInput } from "@/lib/sleep-script";
 import { resolveYouTubeSource } from "@/lib/youtube-source";
+import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
 
 export async function POST(request: Request) {
+  if (featureFlagsFromEnv(process.env).nearSleepProduction) {
+    const { postProductionScript } = await import("./production");
+    return postProductionScript(request);
+  }
   try {
     assertSameOrigin(request);
     const user = await requireApiUser(request);

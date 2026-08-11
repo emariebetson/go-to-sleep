@@ -1,4 +1,4 @@
-import { normalizeNickname } from "./pronunciation";
+import { cleanPronunciation, normalizeNickname } from "./pronunciation";
 import { VOICE_CONSENT_ATTESTATION, VOICE_CONSENT_VERSION, type JobType } from "./nearyou-foundation";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -67,6 +67,7 @@ export function parseChildProfileInput(body: Record<string, unknown>) {
     requestId: requiredUuid(body.requestId, "requestId"),
     nickname,
     normalizedNickname: normalizeNickname(nickname),
+    pronunciation: cleanPronunciation(body.pronunciation),
     ageMonths,
     bedtimeChallenge: optionalText(body.bedtimeChallenge, "bedtimeChallenge", 240),
   };

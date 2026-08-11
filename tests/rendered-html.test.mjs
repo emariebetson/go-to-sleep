@@ -119,7 +119,7 @@ test("pronunciation guesses require an authenticated parent", async () => {
 test("Stripe requests pin the current API and identify Nearnight checkout", async () => {
   const stripeSource = await readFile(new URL("../lib/stripe.ts", import.meta.url), "utf8");
   const checkoutSource = await readFile(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8");
-  assert.match(stripeSource, /2026-07-29\.dahlia/);
+  assert.match(stripeSource, /2026-06-24\.dahlia/);
   assert.match(stripeSource, /"stripe-version"/);
   assert.match(checkoutSource, /integration_identifier:\s*"nearnight_checkout_[a-z]{8}"/);
 });

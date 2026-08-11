@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readJsonObject, readLimitedBytes } from "../lib/http.ts";
+import { assertSameOrigin, assertTrustedMutationOrigin, readJsonObject, readLimitedBytes } from "../lib/http.ts";
 
 function streamingRequest(chunks) {
   return new Request("https://example.test/upload", {
@@ -40,4 +40,11 @@ test("JSON limits cancel chunked bodies as soon as the cap is crossed", async ()
   });
   await assert.rejects(() => readJsonObject(request, 8), (error) => error instanceof Response && error.status === 413);
   assert.equal(pulls, 1);
+});
+
+test("production mutation provenance is same-origin and fails closed when missing", () => {
+  assert.doesNotThrow(() => assertTrustedMutationOrigin(new Request("https://example.test/action", { headers: { origin: "https://example.test", "sec-fetch-site": "same-origin" } })));
+  assert.throws(() => assertTrustedMutationOrigin(new Request("https://example.test/action")), (error) => error instanceof Response && error.status === 403);
+  assert.throws(() => assertTrustedMutationOrigin(new Request("https://example.test/action", { headers: { origin: "https://attacker.test", "sec-fetch-site": "cross-site" } })), (error) => error instanceof Response && error.status === 403);
+  assert.doesNotThrow(() => assertSameOrigin(new Request("https://example.test/legacy")));
 });

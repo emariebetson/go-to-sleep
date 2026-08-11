@@ -6,11 +6,15 @@ import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore } from "@/lib/http";
 import { stripeDelete } from "@/lib/stripe";
+import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 type AudioBucket = { delete(keys: string | string[]): Promise<void> };
 
 export async function DELETE(request: Request) {
   try {
+    if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+      return jsonNoStore({ error: "Account deletion is temporarily unavailable during the protected media-cleanup migration." }, { status: 503 });
+    }
     assertSameOrigin(request);
     const user = await requireApiUser(request);
     await ensureUser(user);

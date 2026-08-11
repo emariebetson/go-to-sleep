@@ -6,11 +6,16 @@ import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readLimitedBytes } from "@/lib/http";
 import { classifyVoiceCreationError } from "@/lib/elevenlabs";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
+import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 const ELEVENLABS = "https://api.elevenlabs.io/v1";
 
 export async function GET(request: Request) {
   try {
+    if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+      const { getProductionVoices } = await import("./production");
+      return getProductionVoices(request);
+    }
     const user = await requireApiUser(request);
     await ensureUser(user);
     const voice = await getDb().select({ providerVoiceId: voices.providerVoiceId, name: voices.name })
@@ -26,6 +31,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+      const { postProductionVoice } = await import("./production");
+      return postProductionVoice(request);
+    }
     assertSameOrigin(request);
     const user = await requireApiUser(request);
     const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -106,6 +115,10 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+      const { deleteProductionVoice } = await import("./production");
+      return deleteProductionVoice(request);
+    }
     assertSameOrigin(request);
     const user = await requireApiUser(request);
     const { householdId } = await ensureUser(user);

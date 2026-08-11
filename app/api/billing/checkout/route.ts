@@ -5,8 +5,13 @@ import { bestEffortEnsureUser } from "@/lib/data";
 import { assertSameOrigin, jsonNoStore, publicAppOrigin } from "@/lib/http";
 import { stripePost } from "@/lib/stripe";
 import { isExistingSubscriptionStatus } from "@/lib/stripe-events";
+import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 export async function POST(request: Request) {
+  if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+    const { postProductionCheckout } = await import("./production");
+    return postProductionCheckout(request);
+  }
   try {
     assertSameOrigin(request);
     const user = await requireApiUser(request);

@@ -1,9 +1,11 @@
 import { fetchProviderWithRetries } from "./provider-guard";
 import { fetchWithTimeout } from "./http";
 import { canonicalYouTubeUrl, type YouTubeSource } from "./youtube-source";
+import { canonicalGenerationFingerprint } from "./nearsleep-live";
 
 export type ScriptInput = {
   requestId?: string;
+  childId?: string;
   childName: string;
   ageMonths: string;
   challenge: string;
@@ -13,6 +15,7 @@ export type ScriptInput = {
   scriptMode: "curated" | "personalized";
   contentType: "story" | "sleep-hypnosis";
   sourceUrl: string;
+  sourceRightsAttested?: boolean;
   source?: YouTubeSource | null;
 };
 
@@ -49,13 +52,23 @@ export function validateScriptInput(input: Partial<ScriptInput>): ScriptInput {
   if (!childName) throw new Error("A baby nickname is required.");
   const requestId = input.requestId === undefined ? undefined : String(input.requestId).trim().toLowerCase();
   if (requestId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestId)) throw new Error("A valid script request ID is required.");
-  const age = Math.max(0, Math.min(24, Number.parseInt(input.ageMonths || "0", 10) || 0));
+  const age = Math.max(0, Math.min(96, Number.parseInt(input.ageMonths || "0", 10) || 0));
   for (const key of Object.keys(allowed) as Array<keyof typeof allowed>) {
     if (!allowed[key].includes((input[key] || "") as never)) throw new Error(`Invalid ${key}.`);
   }
   const sourceUrl = canonicalYouTubeUrl(input.sourceUrl);
   if (sourceUrl && input.scriptMode !== "personalized") throw new Error("YouTube inspiration requires personalized writing.");
-  return { requestId, childName, ageMonths: String(age), challenge: input.challenge!, theme: input.theme!, duration: input.duration!, style: input.style!, scriptMode: input.scriptMode!, contentType: input.contentType!, sourceUrl };
+  const childId = input.childId === undefined ? undefined : String(input.childId).trim();
+  if (childId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9:_-]{2,119}$/.test(childId)) throw new Error("Select a valid local child profile.");
+  return { requestId, childId, childName, ageMonths: String(age), challenge: input.challenge!, theme: input.theme!, duration: input.duration!, style: input.style!, scriptMode: input.scriptMode!, contentType: input.contentType!, sourceUrl, sourceRightsAttested: input.sourceRightsAttested === true };
+}
+
+export async function prepareProductionScriptClaim(raw: Partial<ScriptInput>) {
+  const input = validateScriptInput(raw);
+  if (!input.requestId) throw new Error("A stable script request ID is required.");
+  if (!input.childId) throw new Error("Select a canonical child profile.");
+  if (input.sourceUrl && !input.sourceRightsAttested) throw new Error("Confirm that you have permission to use the linked title and channel as inspiration.");
+  return { input, requestId: input.requestId, fingerprint: await canonicalGenerationFingerprint(input) };
 }
 
 export function curatedScript(input: ScriptInput) {

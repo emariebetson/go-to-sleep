@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allowanceWeightForNarration,
+  narrationSavePolicy,
   allowanceWeightForScript,
   classifyReservationFailure,
   executeConservativelyAccountedProviderCall,
   finalizeProviderSpend,
   providerSpendEstimateMicrocents,
+  nearSleepEntitlementIsCurrent,
   reserveHouseholdAllowance,
 } from "../lib/usage-reservations.ts";
 
@@ -20,6 +22,19 @@ test("customer allowance stays separate from provider spend and follows the hous
   assert.equal(allowanceWeightForNarration("nearyou_plus", "preview", 10), 0);
   assert.equal(allowanceWeightForNarration("nearyou_plus", "save", 5), 5000);
   assert.equal(allowanceWeightForNarration("nearyou_plus", "save", 20), 20000);
+});
+
+test("script provider work is blocked when the selected duration cannot be saved", () => {
+  assert.deepEqual(narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 1_000 }, 5), {
+    allowedDurations: [5],
+    requiredMilliunits: 1_000,
+  });
+  assert.throws(() => narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 1_000 }, 10), /five-minute/);
+  assert.throws(() => narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 0 }, 5), /allowance_exhausted/);
+  assert.deepEqual(narrationSavePolicy({ planId: "nearyou_plus", remainingMilliunits: 15_000 }, 15), {
+    allowedDurations: [5, 10, 15, 20],
+    requiredMilliunits: 15_000,
+  });
 });
 
 test("provider spend estimates are positive bounded integers for guarded operations", () => {
@@ -54,6 +69,17 @@ test("zero-weight customer allowance operations are no-ops before database acces
     weightMilliunits: -1,
     requestFingerprint: "request_2",
   }), /invalid_usage_reservation/);
+});
+
+test("zero-weight script and preview work still requires a current NearSleep entitlement", () => {
+  const now = new Date("2026-08-11T12:00:00.000Z");
+  const active = { planId: "nearsleep_free", status: "active", validFrom: new Date("2026-08-01T00:00:00.000Z"), validUntil: null };
+  assert.equal(nearSleepEntitlementIsCurrent(active, now), true);
+  assert.equal(nearSleepEntitlementIsCurrent({ ...active, status: "grace" }, now), true);
+  assert.equal(nearSleepEntitlementIsCurrent({ ...active, status: "inactive" }, now), false);
+  assert.equal(nearSleepEntitlementIsCurrent({ ...active, validFrom: new Date("2026-08-12T00:00:00.000Z") }, now), false);
+  assert.equal(nearSleepEntitlementIsCurrent({ ...active, validUntil: new Date("2026-08-10T00:00:00.000Z") }, now), false);
+  assert.equal(nearSleepEntitlementIsCurrent({ ...active, planId: "unknown" }, now), false);
 });
 
 test("provider work starts only after a durable charge commitment and ignores telemetry failures", async () => {

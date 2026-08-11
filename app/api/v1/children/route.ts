@@ -1,14 +1,16 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { childProfiles } from "@/db/schema";
 import { apiV1Failure, badRequest, requireHouseholdContext } from "@/lib/api-v1-context";
 import { parseChildProfileInput } from "@/lib/api-v1-input";
-import { assertSameOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
+import { assertTrustedMutationOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
 import { loadEffectiveHouseholdEntitlement } from "@/lib/household-entitlements";
+import { loadSelectableChildProfiles } from "@/lib/nearsleep-selectors";
 
 const publicChild = {
   id: childProfiles.id,
   nickname: childProfiles.nickname,
+  pronunciation: childProfiles.pronunciation,
   ageMonths: childProfiles.ageMonths,
   bedtimeChallenge: childProfiles.bedtimeChallenge,
   createdAt: childProfiles.createdAt,
@@ -18,10 +20,16 @@ const publicChild = {
 export async function GET(request: Request) {
   try {
     const { householdId } = await requireHouseholdContext(request, "child:read");
-    const records = await getDb().select(publicChild).from(childProfiles)
-      .where(and(eq(childProfiles.householdId, householdId), isNull(childProfiles.archivedAt)))
-      .orderBy(desc(childProfiles.updatedAt)).all();
-    return jsonNoStore({ apiVersion: "v1", children: records });
+    const records = await loadSelectableChildProfiles(householdId);
+    return jsonNoStore({ apiVersion: "v1", children: records.map((record) => ({
+      id: record.id,
+      nickname: record.nickname,
+      pronunciation: record.pronunciation,
+      ageMonths: record.ageMonths,
+      bedtimeChallenge: record.bedtimeChallenge,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    })) });
   } catch (error) {
     return apiV1Failure(error, "Child profiles could not be loaded.");
   }
@@ -29,7 +37,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    assertSameOrigin(request);
+    assertTrustedMutationOrigin(request);
     const { householdId } = await requireHouseholdContext(request, "child:write");
     let input;
     try { input = parseChildProfileInput(await readJsonObject(request, 4_000)); } catch (error) { return error instanceof Response ? error : badRequest(error); }
@@ -37,12 +45,13 @@ export async function POST(request: Request) {
     const existing = await db.select({ ...publicChild, normalizedNickname: childProfiles.normalizedNickname })
       .from(childProfiles).where(and(eq(childProfiles.id, input.requestId), eq(childProfiles.householdId, householdId))).get();
     if (existing) {
-      if (existing.normalizedNickname !== input.normalizedNickname || existing.ageMonths !== input.ageMonths || existing.bedtimeChallenge !== input.bedtimeChallenge) {
+      if (existing.normalizedNickname !== input.normalizedNickname || existing.pronunciation !== input.pronunciation || existing.ageMonths !== input.ageMonths || existing.bedtimeChallenge !== input.bedtimeChallenge) {
         return jsonNoStore({ error: "That request ID is already associated with different child-profile data." }, { status: 409 });
       }
       const child = {
         id: existing.id,
         nickname: existing.nickname,
+        pronunciation: existing.pronunciation,
         ageMonths: existing.ageMonths,
         bedtimeChallenge: existing.bedtimeChallenge,
         createdAt: existing.createdAt,
@@ -64,6 +73,7 @@ export async function POST(request: Request) {
       householdId,
       nickname: input.nickname,
       normalizedNickname: input.normalizedNickname,
+      pronunciation: input.pronunciation,
       ageMonths: input.ageMonths,
       bedtimeChallenge: input.bedtimeChallenge,
       createdAt: now,
@@ -72,12 +82,13 @@ export async function POST(request: Request) {
     if (inserted) return jsonNoStore({ apiVersion: "v1", child: inserted }, { status: 201 });
     const conflicted = await db.select({ ...publicChild, normalizedNickname: childProfiles.normalizedNickname })
       .from(childProfiles).where(and(eq(childProfiles.id, input.requestId), eq(childProfiles.householdId, householdId))).get();
-    if (!conflicted || conflicted.normalizedNickname !== input.normalizedNickname || conflicted.ageMonths !== input.ageMonths || conflicted.bedtimeChallenge !== input.bedtimeChallenge) {
+    if (!conflicted || conflicted.normalizedNickname !== input.normalizedNickname || conflicted.pronunciation !== input.pronunciation || conflicted.ageMonths !== input.ageMonths || conflicted.bedtimeChallenge !== input.bedtimeChallenge) {
       return jsonNoStore({ error: "That request ID is already associated with different child-profile data." }, { status: 409 });
     }
     const child = {
       id: conflicted.id,
       nickname: conflicted.nickname,
+      pronunciation: conflicted.pronunciation,
       ageMonths: conflicted.ageMonths,
       bedtimeChallenge: conflicted.bedtimeChallenge,
       createdAt: conflicted.createdAt,

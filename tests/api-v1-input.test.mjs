@@ -40,10 +40,11 @@ test("household invitations allow only non-owner adult roles", () => {
 });
 
 test("child profile input is adult-managed and idempotent", () => {
-  assert.deepEqual(parseChildProfileInput({ requestId, nickname: "  Mia  ", ageMonths: 18 }), {
+  assert.deepEqual(parseChildProfileInput({ requestId, nickname: "  Mia  ", pronunciation: " MEE-ah ", ageMonths: 18 }), {
     requestId,
     nickname: "Mia",
     normalizedNickname: "mia",
+    pronunciation: "MEE-ah",
     ageMonths: 18,
     bedtimeChallenge: null,
   });

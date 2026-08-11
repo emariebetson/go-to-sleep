@@ -1,15 +1,14 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { adultOnboardingAcceptances } from "@/db/schema";
-import { requireApiUser } from "@/lib/auth";
-import { ensureUser } from "@/lib/data";
+import { requireHouseholdContext } from "@/lib/api-v1-context";
 import {
   ADULT_ONBOARDING_ATTESTATION,
   ADULT_ONBOARDING_VERSION,
   parseAdultOnboardingAcceptance,
 } from "@/lib/adult-voice-verification";
-import { assertSameOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
-import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
+import { assertTrustedMutationOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
+import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 function upgradeDisabled() {
   return !featureFlagsFromEnv(process.env).productionUpgradeFoundation;
@@ -17,9 +16,9 @@ function upgradeDisabled() {
 
 export async function GET(request: Request) {
   try {
-    if (upgradeDisabled()) return jsonNoStore({ error: "The production upgrade foundation is not enabled." }, { status: 404 });
-    const user = await requireApiUser(request);
-    const { householdId } = await ensureUser(user);
+    const flags = featureFlagsFromEnv(process.env);
+    if (!flags.productionUpgradeFoundation) return jsonNoStore({ error: "The production upgrade foundation is not enabled." }, { status: 404 });
+    const { householdId, user } = await requireHouseholdContext(request, "voice:consent");
     const acceptance = await getDb().select({
       id: adultOnboardingAcceptances.id,
       version: adultOnboardingAcceptances.version,
@@ -32,6 +31,7 @@ export async function GET(request: Request) {
     return jsonNoStore({
       version: ADULT_ONBOARDING_VERSION,
       attestation: ADULT_ONBOARDING_ATTESTATION,
+      productionMode: nearSleepProductionEnabled(flags),
       accepted: Boolean(acceptance),
       acceptance: acceptance || null,
     });
@@ -44,9 +44,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     if (upgradeDisabled()) return jsonNoStore({ error: "The production upgrade foundation is not enabled." }, { status: 404 });
-    assertSameOrigin(request);
-    const user = await requireApiUser(request);
-    const { householdId } = await ensureUser(user);
+    assertTrustedMutationOrigin(request);
+    const { householdId, user } = await requireHouseholdContext(request, "voice:consent");
     let input;
     try { input = parseAdultOnboardingAcceptance(await readJsonObject(request, 4_000)); } catch (error) {
       if (error instanceof Response) return error;

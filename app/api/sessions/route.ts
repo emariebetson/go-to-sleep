@@ -36,6 +36,10 @@ async function generateSpeech(apiKey: string, providerVoiceId: string, text: str
 }
 
 export async function POST(request: Request) {
+  if (featureFlagsFromEnv(process.env).nearSleepProduction) {
+    const { postProductionSession } = await import("./production");
+    return postProductionSession(request);
+  }
   let sessionId = "";
   let creditReserved = false;
   let reservedUserId = "";
@@ -207,13 +211,14 @@ export async function POST(request: Request) {
       legacyChildId: child.id,
       nickname: input.childName,
       normalizedNickname: normalizeNickname(input.childName),
+      pronunciation: input.pronunciation,
       ageMonths: input.ageMonths,
       bedtimeChallenge: input.challenge,
       createdAt: childSavedAt,
       updatedAt: childSavedAt,
     }).onConflictDoUpdate({
       target: [childProfiles.householdId, childProfiles.normalizedNickname],
-      set: { legacyChildId: child.id, nickname: input.childName, ageMonths: input.ageMonths, bedtimeChallenge: input.challenge, updatedAt: childSavedAt },
+      set: { legacyChildId: child.id, nickname: input.childName, pronunciation: input.pronunciation, ageMonths: input.ageMonths, bedtimeChallenge: input.challenge, updatedAt: childSavedAt },
     });
     await db.update(children).set({ householdId, profileId: childProfileId }).where(eq(children.id, child.id));
     const runtime = env as unknown as RuntimeEnv;

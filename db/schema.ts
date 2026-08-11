@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable(
@@ -168,6 +169,7 @@ export const childProfiles = sqliteTable(
     legacyChildId: text("legacy_child_id").references(() => children.id, { onDelete: "set null" }),
     nickname: text("nickname").notNull(),
     normalizedNickname: text("normalized_nickname").notNull(),
+    pronunciation: text("pronunciation").notNull().default(""),
     ageMonths: integer("age_months"),
     bedtimeChallenge: text("bedtime_challenge"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -202,6 +204,7 @@ export const voices = sqliteTable(
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     householdId: text("household_id").references(() => households.id, { onDelete: "cascade" }),
     currentConsentId: text("current_consent_id").references((): AnySQLiteColumn => voiceConsents.id, { onDelete: "set null" }),
+    creationRequestId: text("creation_request_id"),
     providerVoiceId: text("provider_voice_id").notNull(),
     name: text("name").notNull(),
     status: text("status", { enum: ["processing", "ready", "failed", "deleted"] })
@@ -215,6 +218,9 @@ export const voices = sqliteTable(
     index("voices_user_idx").on(table.userId),
     uniqueIndex("voices_provider_idx").on(table.providerVoiceId),
     index("voices_household_status_idx").on(table.householdId, table.status),
+    uniqueIndex("voices_household_user_live_idx").on(table.householdId, table.userId)
+      .where(sql`${table.householdId} IS NOT NULL AND ${table.status} IN ('processing', 'ready')`),
+    uniqueIndex("voices_household_creation_request_idx").on(table.householdId, table.creationRequestId),
   ],
 );
 
@@ -234,7 +240,9 @@ export const voiceConsents = sqliteTable(
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
   },
   (table) => [
-    uniqueIndex("voice_consents_voice_version_idx").on(table.voiceId, table.consentVersion),
+    index("voice_consents_voice_version_idx").on(table.voiceId, table.consentVersion),
+    uniqueIndex("voice_consents_active_voice_idx").on(table.voiceId)
+      .where(sql`${table.voiceId} IS NOT NULL AND ${table.status} = 'active_verified'`),
     index("voice_consents_household_status_idx").on(table.householdId, table.status),
   ],
 );
@@ -335,6 +343,8 @@ export const sleepSessions = sqliteTable(
     sourceTitle: text("source_title"),
     consentId: text("consent_id").references(() => voiceConsents.id, { onDelete: "set null" }),
     consentVersion: text("consent_version"),
+    consentLeaseId: text("consent_lease_id").references(() => voiceConsentLeases.id, { onDelete: "set null" }),
+    allowanceReservationId: text("allowance_reservation_id").references((): AnySQLiteColumn => usageReservations.id, { onDelete: "set null" }),
     theme: text("theme").notNull(),
     style: text("style").notNull(),
     backgroundSound: text("background_sound").notNull(),
@@ -355,6 +365,8 @@ export const sleepSessions = sqliteTable(
   (table) => [
     index("sessions_user_created_idx").on(table.userId, table.createdAt),
     index("sessions_status_idx").on(table.status),
+    index("sessions_consent_lease_idx").on(table.consentLeaseId),
+    index("sessions_allowance_reservation_idx").on(table.allowanceReservationId),
   ],
 );
 
@@ -370,6 +382,7 @@ export const entitlements = sqliteTable(
     remainingMilliunits: integer("remaining_milliunits").notNull(),
     legacyCreditsRemaining: integer("legacy_credits_remaining"),
     externalRef: text("external_ref"),
+    billingPeriodStart: integer("billing_period_start"),
     validFrom: integer("valid_from", { mode: "timestamp_ms" }).notNull(),
     validUntil: integer("valid_until", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -612,5 +625,75 @@ export const jobs = sqliteTable(
 export const stripeEvents = sqliteTable("stripe_events", {
   id: text("id").primaryKey(),
   type: text("type").notNull(),
+  eventCreatedAt: integer("event_created_at").notNull().default(0),
+  status: text("status", { enum: ["processing", "completed", "failed"] }).notNull().default("processing"),
+  errorCode: text("error_code"),
+  attemptToken: text("attempt_token"),
   processedAt: integer("processed_at", { mode: "timestamp_ms" }).notNull(),
+  // Drizzle's timestamp mode expects a Date in TypeScript, but this database
+  // default is the numeric Unix-epoch sentinel added by migration 0008.
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(0 as unknown as Date),
 });
+
+export const householdBillingAccounts = sqliteTable(
+  "household_billing_accounts",
+  {
+    householdId: text("household_id").primaryKey().references(() => households.id, { onDelete: "cascade" }),
+    customerId: text("customer_id"),
+    subscriptionId: text("subscription_id"),
+    priceId: text("price_id"),
+    status: text("status").notNull().default("free"),
+    subscriptionEventCreatedAt: integer("subscription_event_created_at"),
+    checkoutPendingAt: integer("checkout_pending_at", { mode: "timestamp_ms" }),
+    checkoutOperationId: text("checkout_operation_id"),
+    checkoutSessionId: text("checkout_session_id"),
+    checkoutSessionUrl: text("checkout_session_url"),
+    checkoutPriceId: text("checkout_price_id"),
+    checkoutStatus: text("checkout_status", { enum: ["creating", "open", "completed", "expired"] }),
+    checkoutExpiresAt: integer("checkout_expires_at", { mode: "timestamp_ms" }),
+    lastCreditedInvoiceId: text("last_credited_invoice_id"),
+    lastCreditedPeriodStart: integer("last_credited_period_start"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("household_billing_customer_idx").on(table.customerId),
+    uniqueIndex("household_billing_subscription_idx").on(table.subscriptionId),
+    uniqueIndex("household_billing_checkout_session_idx").on(table.checkoutSessionId),
+  ],
+);
+
+export const householdBillingSubscriptions = sqliteTable(
+  "household_billing_subscriptions",
+  {
+    subscriptionId: text("subscription_id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    customerId: text("customer_id").notNull(),
+    priceId: text("price_id"),
+    status: text("status").notNull(),
+    eventCreatedAt: integer("event_created_at"),
+    supersededAt: integer("superseded_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("household_billing_subscriptions_household_idx").on(table.householdId, table.updatedAt)],
+);
+
+export const deletionReconciliations = sqliteTable(
+  "deletion_reconciliations",
+  {
+    id: text("id").primaryKey(),
+    scope: text("scope", { enum: ["voice", "session", "account"] }).notNull(),
+    scopeId: text("scope_id").notNull(),
+    status: text("status", { enum: ["cleanup_pending", "cleanup_verified", "failed", "completed"] }).notNull().default("cleanup_pending"),
+    storageKeys: text("storage_keys", { mode: "json" }).$type<string[]>().notNull().default([]),
+    providerReferences: text("provider_references", { mode: "json" }).$type<string[]>().notNull().default([]),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("deletion_reconciliations_scope_status_idx").on(table.scope, table.scopeId, table.status),
+  ],
+);

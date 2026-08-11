@@ -4,6 +4,7 @@ import { jsonNoStore } from "@/lib/http";
 import { checkoutBinding, paidInvoice, subscriptionInvoice, subscriptionUpdate } from "@/lib/stripe-events";
 import { stripeEventMatchesMode } from "@/lib/stripe-config";
 import { readLimitedText, verifyStripeSignature } from "@/lib/stripe-signature";
+import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 type StripeEvent = { id: string; type: string; created: number; livemode: boolean; data: { object: Record<string, unknown> } };
 
@@ -30,6 +31,10 @@ export async function POST(request: Request) {
   }
   if (!event.id || !event.type || !Number.isFinite(event.created) || typeof event.livemode !== "boolean" || !event.data?.object) return new Response("Invalid event", { status: 400 });
   if (!stripeEventMatchesMode(event.livemode, process.env.STRIPE_TEST_MODE_ONLY === "true")) return new Response("Live events are not accepted", { status: 400 });
+  if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+    const { handleProductionStripeEvent } = await import("./production");
+    return handleProductionStripeEvent(event);
+  }
   const expectedPriceId = process.env.STRIPE_PRICE_PLUS_MONTHLY || "";
   if (BILLING_EVENTS.has(event.type) && !/^price_[A-Za-z0-9]+$/.test(expectedPriceId)) return new Response("Billing is not configured", { status: 503 });
   const { getDb } = await import("@/db");

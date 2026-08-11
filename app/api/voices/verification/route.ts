@@ -1,8 +1,7 @@
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { adultOnboardingAcceptances, voiceReplacements, voices, voiceVerificationChallenges } from "@/db/schema";
-import { requireApiUser } from "@/lib/auth";
-import { ensureUser } from "@/lib/data";
+import { adultOnboardingAcceptances, deletionReconciliations, voiceReplacements, voices, voiceVerificationChallenges } from "@/db/schema";
+import { requireHouseholdContext } from "@/lib/api-v1-context";
 import {
   ADULT_ONBOARDING_VERSION,
   VERIFIED_VOICE_CONSENT_VERSION,
@@ -14,8 +13,9 @@ import {
   verificationTranscriptContainsPhrase,
   voiceChallengePhraseHash,
 } from "@/lib/adult-voice-verification";
-import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject, readLimitedBytes } from "@/lib/http";
+import { assertTrustedMutationOrigin, fetchWithTimeout, jsonNoStore, readJsonObject, readLimitedBytes } from "@/lib/http";
 import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
+import { loadVoiceCloneEligibility } from "@/lib/nearsleep-selectors";
 import {
   classifyReservationFailure,
   executeConservativelyAccountedProviderCall,
@@ -26,6 +26,7 @@ import {
   recordProviderSuccess,
   reserveProviderSpend,
 } from "@/lib/usage-reservations";
+import { failedProviderCloneCanBeRetired, retireFailedProviderClone } from "@/lib/voice-clone-cleanup";
 
 const ELEVENLABS = "https://api.elevenlabs.io/v1";
 
@@ -87,9 +88,14 @@ export async function POST(request: Request) {
   let replacementActivated = false;
   try {
     if (!featureFlagsFromEnv(process.env).productionUpgradeFoundation) return jsonNoStore({ error: "The production upgrade foundation is not enabled." }, { status: 404 });
-    assertSameOrigin(request);
-    const user = await requireApiUser(request);
-    const { householdId } = await ensureUser(user);
+    assertTrustedMutationOrigin(request);
+    const { householdId, user } = await requireHouseholdContext(request, "voice:consent");
+    const currentPlanEligibility = await loadVoiceCloneEligibility(householdId);
+    if (!currentPlanEligibility.allowed) return jsonNoStore({
+      error: "NearSleep Free uses the standard non-cloned narrator. Upgrade before creating or re-verifying a private voice.",
+      code: currentPlanEligibility.reason,
+      standardNarratorAvailable: true,
+    }, { status: 402 });
     const contentType = request.headers.get("content-type") || "";
     if (contentType.toLowerCase().startsWith("multipart/form-data;")) {
       const openAiKey = process.env.OPENAI_API_KEY;
@@ -139,9 +145,14 @@ export async function POST(request: Request) {
       claimedAttempts = claimed.attempts;
 
       const ownedVoice = await db.select({ id: voices.id, name: voices.name, providerVoiceId: voices.providerVoiceId, currentConsentId: voices.currentConsentId }).from(voices).where(and(
-        eq(voices.id, challenge.voiceId), eq(voices.householdId, householdId), eq(voices.userId, user.userId), eq(voices.status, "ready"),
+        eq(voices.id, challenge.voiceId), eq(voices.householdId, householdId), eq(voices.userId, user.userId), inArray(voices.status, ["processing", "ready"]),
       )).get();
       if (!ownedVoice?.currentConsentId) throw jsonNoStore({ error: "Voice profile not found." }, { status: 404 });
+      const claimedEligibility = await loadVoiceCloneEligibility(householdId, ownedVoice.id);
+      if (!claimedEligibility.allowed) throw jsonNoStore({
+        error: "This voice is unavailable under the household’s current plan. No recording was sent to a provider.",
+        code: claimedEligibility.reason,
+      }, { status: 402 });
       replacementId = `voice-replacement:${challenge.id}`;
       try {
         await db.insert(voiceReplacements).values({
@@ -152,7 +163,7 @@ export async function POST(request: Request) {
           adultUserId: user.userId,
           originalProviderVoiceId: ownedVoice.providerVoiceId,
           originalConsentId: ownedVoice.currentConsentId,
-          consentId: `verified-consent:${challenge.voiceId}:${VERIFIED_VOICE_CONSENT_VERSION}`,
+          consentId: `verified-consent:${challenge.voiceId}:${challenge.id}:${VERIFIED_VOICE_CONSENT_VERSION}`,
           consentVersion: VERIFIED_VOICE_CONSENT_VERSION,
           status: "processing",
           createdAt: new Date(),
@@ -238,34 +249,28 @@ export async function POST(request: Request) {
         previousProviderVoiceId: ownedVoice.providerVoiceId,
         replacementProviderVoiceId,
       });
-      try {
-        const providerCreated = await db.update(voiceReplacements).set({
+      const providerCreated = await db.update(voiceReplacements).set({
           replacementProviderVoiceId,
           evidence,
           status: "provider_created",
           updatedAt: verifiedAt,
-        }).where(and(eq(voiceReplacements.id, replacementId), eq(voiceReplacements.status, "processing"))).returning({ id: voiceReplacements.id }).get();
-        if (!providerCreated) throw new Error("voice_replacement_claim_lost");
-        const activated = await db.update(voiceReplacements).set({ status: "activating", updatedAt: verifiedAt }).where(and(
+      }).where(and(eq(voiceReplacements.id, replacementId), eq(voiceReplacements.status, "processing"))).returning({ id: voiceReplacements.id }).get();
+      if (!providerCreated) throw new Error("voice_replacement_claim_lost");
+      const activated = await db.update(voiceReplacements).set({ status: "activating", updatedAt: verifiedAt }).where(and(
           eq(voiceReplacements.id, replacementId),
           eq(voiceReplacements.status, "provider_created"),
-          sql`EXISTS (SELECT 1 FROM voices WHERE voices.id = ${voiceReplacements.voiceId} AND voices.status = 'ready' AND voices.provider_voice_id = ${voiceReplacements.originalProviderVoiceId} AND voices.current_consent_id = ${voiceReplacements.originalConsentId})`,
-        )).returning({ id: voiceReplacements.id }).get();
-        if (!activated) throw new Error("voice_activation_cas_failed");
-        replacementActivated = true;
-        const activation = await db.select({ status: voiceReplacements.status }).from(voiceReplacements).where(eq(voiceReplacements.id, replacementId)).get();
-        if (activation?.status !== "cleanup_pending") throw new Error("voice_activation_incomplete");
-      } catch (error) {
-        if (!replacementActivated) {
-          await deleteProviderVoice(elevenLabsKey, replacementProviderVoiceId);
-          replacementProviderVoiceId = "";
-        }
-        throw error;
-      }
+          sql`EXISTS (SELECT 1 FROM voices WHERE voices.id = ${voiceReplacements.voiceId} AND voices.status IN ('processing','ready') AND voices.provider_voice_id = ${voiceReplacements.originalProviderVoiceId} AND voices.current_consent_id = ${voiceReplacements.originalConsentId})`,
+      )).returning({ id: voiceReplacements.id }).get();
+      if (!activated) throw new Error("voice_activation_cas_failed");
+      replacementActivated = true;
+      const activation = await db.select({ status: voiceReplacements.status }).from(voiceReplacements).where(eq(voiceReplacements.id, replacementId)).get();
+      if (activation?.status !== "cleanup_pending") throw new Error("voice_activation_incomplete");
       claimedChallengeId = "";
       replacementProviderVoiceId = "";
-      let retired = false;
-      try { retired = await deleteProviderVoice(elevenLabsKey, ownedVoice.providerVoiceId); } catch { /* durable cleanup_pending state is reconciled later */ }
+      let retired = ownedVoice.providerVoiceId.startsWith("pending:");
+      if (!retired) {
+        try { retired = await deleteProviderVoice(elevenLabsKey, ownedVoice.providerVoiceId); } catch { /* durable cleanup_pending state is reconciled later */ }
+      }
       if (retired) {
         await db.update(voiceReplacements).set({ status: "completed", completedAt: new Date(), updatedAt: new Date() }).where(and(eq(voiceReplacements.id, replacementId), eq(voiceReplacements.status, "cleanup_pending")));
       }
@@ -282,10 +287,17 @@ export async function POST(request: Request) {
       db.select({ id: adultOnboardingAcceptances.id }).from(adultOnboardingAcceptances).where(and(
         eq(adultOnboardingAcceptances.householdId, householdId), eq(adultOnboardingAcceptances.adultUserId, user.userId), eq(adultOnboardingAcceptances.version, ADULT_ONBOARDING_VERSION),
       )).get(),
-      db.select({ id: voices.id }).from(voices).where(and(eq(voices.id, input.voiceId), eq(voices.householdId, householdId), eq(voices.userId, user.userId), eq(voices.status, "ready"))).get(),
+      db.select({ id: voices.id }).from(voices).where(and(
+        eq(voices.id, input.voiceId), eq(voices.householdId, householdId), eq(voices.userId, user.userId), inArray(voices.status, ["processing", "ready"]),
+      )).get(),
     ]);
     if (!onboarding) return jsonNoStore({ error: "Complete the current adult caregiver onboarding before verifying a voice." }, { status: 403 });
     if (!voice) return jsonNoStore({ error: "Voice profile not found." }, { status: 404 });
+    const challengeEligibility = await loadVoiceCloneEligibility(householdId, voice.id);
+    if (!challengeEligibility.allowed) return jsonNoStore({
+      error: "This voice is unavailable under the household’s current plan.",
+      code: challengeEligibility.reason,
+    }, { status: 402 });
     const generated = createVoiceChallengePhrase();
     const now = new Date();
     const inserted = await db.insert(voiceVerificationChallenges).values({
@@ -304,7 +316,49 @@ export async function POST(request: Request) {
   } catch (error) {
     if (transcriptionSpendId) await finalizeProviderSpend(transcriptionSpendId, "released").catch(() => undefined);
     if (cloneSpendId) await finalizeProviderSpend(cloneSpendId, "released").catch(() => undefined);
-    if (replacementProviderVoiceId && process.env.ELEVENLABS_API_KEY) await deleteProviderVoice(process.env.ELEVENLABS_API_KEY, replacementProviderVoiceId).catch(() => undefined);
+    let replacementCanBeRetired = false;
+    if (replacementProviderVoiceId && replacementId && !replacementActivated) {
+      try {
+        const [replacementState, voiceState] = await Promise.all([
+          getDb().select({ status: voiceReplacements.status }).from(voiceReplacements).where(eq(voiceReplacements.id, replacementId)).get(),
+          getDb().select({ providerVoiceId: voices.providerVoiceId }).from(voices)
+            .innerJoin(voiceReplacements, eq(voices.id, voiceReplacements.voiceId))
+            .where(eq(voiceReplacements.id, replacementId)).get(),
+        ]);
+        replacementCanBeRetired = failedProviderCloneCanBeRetired({
+          replacementActivated,
+          replacementProviderVoiceId,
+          currentVoiceProviderVoiceId: voiceState?.providerVoiceId,
+          replacementStatus: replacementState?.status,
+        });
+      } catch { /* ambiguous activation state must never delete a possibly-current clone */ }
+    }
+    if (replacementCanBeRetired && replacementProviderVoiceId && process.env.ELEVENLABS_API_KEY) {
+      const providerVoiceId = replacementProviderVoiceId;
+      const cleanupId = `voice-replacement-delete:${replacementId || claimedChallengeId}`;
+      const cleanup = await retireFailedProviderClone({
+        providerVoiceId,
+        deleteProviderVoice: (id) => deleteProviderVoice(process.env.ELEVENLABS_API_KEY!, id),
+        persistCleanup: async (id) => {
+          const now = new Date();
+          await getDb().batch([
+            getDb().update(voiceReplacements).set({ replacementProviderVoiceId: id, errorCode: "activation_cleanup_pending", updatedAt: now }).where(eq(voiceReplacements.id, replacementId)),
+            getDb().insert(deletionReconciliations).values({
+              id: cleanupId,
+              scope: "voice",
+              scopeId: replacementId || claimedChallengeId,
+              status: "cleanup_pending",
+              storageKeys: [],
+              providerReferences: [id],
+              errorCode: "voice_replacement_activation_failed",
+              createdAt: now,
+              updatedAt: now,
+            }).onConflictDoNothing(),
+          ]);
+        },
+      }).catch(() => ({ cleanupPending: true as const }));
+      if (!cleanup.cleanupPending) replacementProviderVoiceId = "";
+    }
     if (replacementId && !replacementActivated) {
       try { await getDb().update(voiceReplacements).set({ status: "failed", errorCode: sql`COALESCE(${voiceReplacements.errorCode}, 'verification_failed')`, updatedAt: new Date() }).where(and(eq(voiceReplacements.id, replacementId), sql`${voiceReplacements.status} IN ('processing','provider_created','activating')`)); } catch { /* challenge remains fail-closed below */ }
     }

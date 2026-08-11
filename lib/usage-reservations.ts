@@ -6,6 +6,7 @@ import {
   usageReservations,
 } from "@/db/schema";
 import type { ProviderName } from "@/lib/provider-guard";
+import { PLAN_CATALOG, type PlanId } from "@/lib/nearyou-foundation";
 
 export type GenerationScriptMode = "curated" | "personalized";
 export type GenerationMode = "preview" | "save";
@@ -25,6 +26,56 @@ export function allowanceWeightForNarration(planId: string, generationMode: Gene
   if (planId === "nearsleep_plus_legacy") return 1_000;
   if (!["nearyou_plus", "nearyou_family", "nearlegacy"].includes(planId)) throw new Error("Narration plan is invalid.");
   return durationMinutes * 1_000;
+}
+
+export function narrationSavePolicy(entitlement: { planId: string; remainingMilliunits: number }, durationMinutes: number) {
+  const allowedDurations = entitlement.planId === "nearsleep_free" ? [5] : [5, 10, 15, 20];
+  let requiredMilliunits;
+  try {
+    requiredMilliunits = allowanceWeightForNarration(entitlement.planId, "save", durationMinutes);
+  } catch (error) {
+    if (entitlement.planId === "nearsleep_free") throw new Error("allowance_exhausted: NearSleep Free is limited to one five-minute saved creation.");
+    throw error;
+  }
+  if (!Number.isInteger(entitlement.remainingMilliunits) || entitlement.remainingMilliunits < requiredMilliunits) {
+    throw new Error("allowance_exhausted");
+  }
+  return { allowedDurations, requiredMilliunits };
+}
+
+export function nearSleepEntitlementIsCurrent(input: { planId: string; status: string; validFrom: Date | number; validUntil: Date | number | null }, now = new Date()) {
+  const plan = PLAN_CATALOG[input.planId as PlanId];
+  const nowMs = now.getTime();
+  return Boolean(
+    plan?.features.nearsleep
+    && (input.status === "active" || input.status === "grace")
+    && new Date(input.validFrom).getTime() <= nowMs
+    && (input.validUntil === null || new Date(input.validUntil).getTime() > nowMs),
+  );
+}
+
+export async function requireCurrentNearSleepEntitlement(householdId: string) {
+  const { getDb } = await import("@/db");
+  const now = new Date();
+  const entitlement = await getDb().select({
+    id: entitlements.id,
+    planId: entitlements.planId,
+    status: entitlements.status,
+    validFrom: entitlements.validFrom,
+    validUntil: entitlements.validUntil,
+    remainingMilliunits: entitlements.remainingMilliunits,
+  }).from(entitlements).where(and(
+    eq(entitlements.householdId, householdId),
+    inArray(entitlements.status, ["active", "grace"]),
+    lte(entitlements.validFrom, now),
+    or(isNull(entitlements.validUntil), gt(entitlements.validUntil, now)),
+  )).orderBy(
+    sql`CASE WHEN ${entitlements.planId} = 'nearsleep_free' THEN 0 ELSE 1 END DESC`,
+    sql`CASE WHEN ${entitlements.status} = 'active' THEN 1 ELSE 0 END DESC`,
+    desc(entitlements.updatedAt),
+  ).get();
+  if (!entitlement || !nearSleepEntitlementIsCurrent(entitlement, now)) throw new Error("allowance_exhausted");
+  return entitlement;
 }
 
 export function providerSpendEstimateMicrocents(provider: ProviderName, operation: "script" | "audio" | "transcription" | "voice_clone", units: number) {
@@ -77,16 +128,7 @@ export async function reserveHouseholdAllowance(input: {
     return { reservation: existing, duplicate: true };
   }
   const now = new Date();
-  const entitlement = await db.select({ id: entitlements.id, planId: entitlements.planId }).from(entitlements).where(and(
-    eq(entitlements.householdId, input.householdId),
-    inArray(entitlements.status, ["active", "grace"]),
-    lte(entitlements.validFrom, now),
-    or(isNull(entitlements.validUntil), gt(entitlements.validUntil, now)),
-  )).orderBy(desc(entitlements.updatedAt)).get();
-  if (!entitlement) throw new Error("allowance_exhausted");
-  const { PLAN_CATALOG } = await import("@/lib/nearyou-foundation");
-  const plan = PLAN_CATALOG[entitlement.planId as keyof typeof PLAN_CATALOG];
-  if (!plan?.features.nearsleep) throw new Error("allowance_exhausted");
+  const entitlement = await requireCurrentNearSleepEntitlement(input.householdId);
   const id = crypto.randomUUID();
   try {
     const inserted = await db.insert(usageReservations).values({

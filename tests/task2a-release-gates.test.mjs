@@ -7,9 +7,12 @@ const source = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "u
 test("Task 2A routes stay dark before authentication, database, or provider work", () => {
   for (const path of ["app/api/onboarding/route.ts", "app/api/voices/verification/route.ts"]) {
     const route = source(path);
-    const gate = route.indexOf("productionUpgradeFoundation");
+    const post = route.indexOf("export async function POST");
+    const handler = route.slice(post);
+    const gate = path.includes("onboarding") ? handler.indexOf("upgradeDisabled()") : handler.indexOf("productionUpgradeFoundation");
+    const auth = handler.indexOf('requireHouseholdContext(request, "voice:consent")');
     assert.ok(gate >= 0, `${path} missing production-upgrade gate`);
-    assert.ok(gate < route.indexOf("requireApiUser(request)"), `${path} authenticates before its default-off gate`);
+    assert.ok(auth > gate, `${path} authenticates before its default-off gate`);
   }
 });
 
@@ -26,7 +29,7 @@ test("verification failure paths release the verification lock and fail the clai
 test("replacement activation precedes best-effort retirement of the old provider voice", () => {
   const route = source("app/api/voices/verification/route.ts");
   const activated = route.indexOf("replacementActivated = true");
-  const retired = route.indexOf("let retired = false");
+  const retired = route.indexOf('let retired = ownedVoice.providerVoiceId.startsWith("pending:")');
   assert.ok(activated >= 0 && retired > activated);
   assert.match(route, /voices\.provider_voice_id.*originalProviderVoiceId/);
   assert.match(route, /voices\.current_consent_id.*originalConsentId/);

@@ -3,8 +3,13 @@ import { users } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { assertSameOrigin, jsonNoStore, publicAppOrigin } from "@/lib/http";
 import { stripePost } from "@/lib/stripe";
+import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 export async function POST(request: Request) {
+  if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
+    const { postProductionPortal } = await import("./production");
+    return postProductionPortal(request);
+  }
   try {
     assertSameOrigin(request);
     const user = await requireApiUser(request);

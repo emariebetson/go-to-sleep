@@ -57,6 +57,34 @@
       "when": 1786442400000,
       "tag": "0007_nearsleep_production_upgrade",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786446000000,
+      "tag": "0008_nearsleep_live_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786451755555,
+      "tag": "0009_nearsleep_audio_atomic",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786453780880,
+      "tag": "0010_child_profile_pronunciation",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1786456708542,
+      "tag": "0011_household_billing_accounts",
+      "breakpoints": true
     }
   ]
 }

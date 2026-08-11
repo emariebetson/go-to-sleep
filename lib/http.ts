@@ -26,6 +26,13 @@ export function assertSameOrigin(request: Request) {
   }
 }
 
+export function assertTrustedMutationOrigin(request: Request) {
+  if (!request.headers.get("origin")) {
+    throw jsonNoStore({ error: "A same-origin request is required." }, { status: 403 });
+  }
+  assertSameOrigin(request);
+}
+
 export async function readJsonObject(request: Request, maxBytes = 32_000) {
   const raw = new TextDecoder().decode(await readLimitedBytes(request, maxBytes));
   let parsed: unknown;
