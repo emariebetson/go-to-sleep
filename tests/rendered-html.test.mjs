@@ -92,6 +92,14 @@ test("private billing routes enforce origin and authentication before database a
   }
 });
 
+test("Stripe requests pin the current API and identify Nearnight checkout", async () => {
+  const stripeSource = await readFile(new URL("../lib/stripe.ts", import.meta.url), "utf8");
+  const checkoutSource = await readFile(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8");
+  assert.match(stripeSource, /2026-07-29\.dahlia/);
+  assert.match(stripeSource, /"stripe-version"/);
+  assert.match(checkoutSource, /integration_identifier:\s*"nearnight_checkout_[a-z]{8}"/);
+});
+
 test("Stripe webhook rejects invalid signatures and oversized payloads", async () => {
   const worker = await loadWorker();
   const runtime = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) }, DB: { prepare() { return { bind() { return this; }, run: async () => ({}), first: async () => null, all: async () => ({ results: [] }) }; }, batch: async () => [] } };

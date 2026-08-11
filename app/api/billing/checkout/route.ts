@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     try {
       const session = await stripePost("/checkout/sessions", {
         mode: "subscription",
+        integration_identifier: "nearnight_checkout_qmtxrvka",
         "line_items[0][price]": priceId,
         "line_items[0][quantity]": "1",
         customer: account?.customerId || undefined,
