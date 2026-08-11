@@ -57,7 +57,7 @@ test("saved audio authenticates with the incoming request", async () => {
   assert.match(source, /requireApiUser\(request\)/);
   assert.match(source, /parseByteRange\(request\.headers\.get\("range"\)/);
   assert.match(source, /status: range \? 206 : 200/);
-  assert.match(source, /"accept-ranges": "bytes"/);
+  assert.match(source, /(?:"accept-ranges": "bytes"|headers\.set\("accept-ranges", "bytes"\))/);
   assert.doesNotMatch(source, /GET\(_request: Request/);
 });
 

@@ -34,6 +34,11 @@ export async function POST(request: Request) {
       return jsonNoStore({ error: "This adult is already an active household member." }, { status: 409 });
     }
     if (!duplicate && (invitation.status !== "pending" || invitation.expiresAt.getTime() <= Date.now())) {
+      if (invitation.status === "pending" && invitation.expiresAt.getTime() <= Date.now()) {
+        await db.update(householdInvitations).set({ status: "expired", updatedAt: new Date() }).where(and(
+          eq(householdInvitations.id, invitation.id), eq(householdInvitations.status, "pending"),
+        ));
+      }
       return jsonNoStore({ error: "Invitation is no longer valid." }, { status: 410 });
     }
     const now = new Date();

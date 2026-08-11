@@ -357,6 +357,9 @@ export const sleepSessions = sqliteTable(
     audioKey: text("audio_key"),
     favorite: integer("favorite", { mode: "boolean" }).notNull().default(false),
     repeatMinutes: integer("repeat_minutes"),
+    deletionStatus: text("deletion_status", { enum: ["active", "delete_pending", "deleted"] }).notNull().default("active"),
+    deletionRequestedAt: integer("deletion_requested_at", { mode: "timestamp_ms" }),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     providerRequestId: text("provider_request_id"),
     errorCode: text("error_code"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -367,6 +370,7 @@ export const sleepSessions = sqliteTable(
     index("sessions_status_idx").on(table.status),
     index("sessions_consent_lease_idx").on(table.consentLeaseId),
     index("sessions_allowance_reservation_idx").on(table.allowanceReservationId),
+    index("sessions_household_library_idx").on(table.householdId, table.deletionStatus, table.status, table.createdAt),
   ],
 );
 
@@ -685,6 +689,9 @@ export const deletionReconciliations = sqliteTable(
     id: text("id").primaryKey(),
     scope: text("scope", { enum: ["voice", "session", "account"] }).notNull(),
     scopeId: text("scope_id").notNull(),
+    householdId: text("household_id").references(() => households.id, { onDelete: "cascade" }),
+    attemptToken: text("attempt_token"),
+    attemptExpiresAt: integer("attempt_expires_at", { mode: "timestamp_ms" }),
     status: text("status", { enum: ["cleanup_pending", "cleanup_verified", "failed", "completed"] }).notNull().default("cleanup_pending"),
     storageKeys: text("storage_keys", { mode: "json" }).$type<string[]>().notNull().default([]),
     providerReferences: text("provider_references", { mode: "json" }).$type<string[]>().notNull().default([]),
@@ -695,5 +702,227 @@ export const deletionReconciliations = sqliteTable(
   },
   (table) => [
     index("deletion_reconciliations_scope_status_idx").on(table.scope, table.scopeId, table.status),
+    index("deletion_reconciliations_household_status_idx").on(table.householdId, table.status, table.id),
   ],
 );
+
+export const householdStorageReservations = sqliteTable(
+  "household_storage_reservations",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    mediaAssetId: text("media_asset_id").notNull().references(() => mediaAssets.id, { onDelete: "cascade" }),
+    byteSize: integer("byte_size").notNull(),
+    status: text("status", { enum: ["reserved", "committed", "released"] }).notNull().default("reserved"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    releasedAt: integer("released_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("household_storage_media_idx").on(table.mediaAssetId),
+    index("household_storage_status_idx").on(table.householdId, table.status),
+  ],
+);
+
+export const task2cActivationState = sqliteTable("task2c_activation_state", {
+  id: text("id").primaryKey(),
+  status: text("status", { enum: ["pending", "ready"] }).notNull().default("pending"),
+  unresolvedReadyMedia: integer("unresolved_ready_media").notNull().default(0),
+  checkedAt: integer("checked_at", { mode: "timestamp_ms" }).notNull(),
+  schedulerHeartbeatAt: integer("scheduler_heartbeat_at", { mode: "timestamp_ms" }),
+  schedulerRunId: text("scheduler_run_id"),
+});
+
+export const task2cMediaIntegrity = sqliteTable("task2c_media_integrity", {
+  mediaAssetId: text("media_asset_id").primaryKey().references(() => mediaAssets.id, { onDelete: "cascade" }),
+  byteSize: integer("byte_size").notNull(),
+  checksum: text("checksum").notNull(),
+  verifiedAt: integer("verified_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const householdExports = sqliteTable(
+  "household_exports",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    snapshot: text("snapshot", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    status: text("status", { enum: ["queued", "running", "succeeded", "failed", "canceled", "expired"] }).notNull().default("queued"),
+    attemptToken: text("attempt_token"),
+    attemptExpiresAt: integer("attempt_expires_at", { mode: "timestamp_ms" }),
+    inventoryStage: text("inventory_stage").notNull().default("sessions"),
+    inventoryCursor: text("inventory_cursor"),
+    metadataPageCount: integer("metadata_page_count").notNull().default(0),
+    cursorPosition: integer("cursor_position").notNull().default(0),
+    inventoryCount: integer("inventory_count").notNull().default(0),
+    manifestStorageKey: text("manifest_storage_key"),
+    manifestByteSize: integer("manifest_byte_size"),
+    manifestChecksum: text("manifest_checksum"),
+    errorCode: text("error_code"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("household_exports_idempotency_idx").on(table.householdId, table.requestedByUserId, table.idempotencyKey),
+    index("household_exports_status_idx").on(table.householdId, table.status, table.updatedAt),
+  ],
+);
+
+export const householdExportParts = sqliteTable(
+  "household_export_parts",
+  {
+    id: text("id").primaryKey(),
+    exportId: text("export_id").notNull().references(() => householdExports.id, { onDelete: "cascade" }),
+    sourceMediaAssetId: text("source_media_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+    sourceStorageKey: text("source_storage_key").notNull(),
+    exportStorageKey: text("export_storage_key").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size"),
+    checksum: text("checksum"),
+    status: text("status", { enum: ["pending", "copied", "failed"] }).notNull().default("pending"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("household_export_parts_source_idx").on(table.exportId, table.sourceMediaAssetId),
+    uniqueIndex("household_export_parts_key_idx").on(table.exportStorageKey),
+    index("household_export_parts_status_idx").on(table.exportId, table.status, table.id),
+  ],
+);
+
+export const householdExportMetadataPages = sqliteTable(
+  "household_export_metadata_pages",
+  {
+    id: text("id").primaryKey(),
+    exportId: text("export_id").notNull().references(() => householdExports.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    kind: text("kind").notNull(),
+    storageKey: text("storage_key").notNull(),
+    itemCount: integer("item_count").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    checksum: text("checksum").notNull(),
+    status: text("status", { enum: ["pending", "ready", "expired"] }).notNull().default("pending"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("household_export_metadata_pages_position_idx").on(table.exportId, table.position),
+    uniqueIndex("household_export_metadata_pages_key_idx").on(table.storageKey),
+    index("household_export_metadata_pages_status_idx").on(table.exportId, table.status, table.position),
+  ],
+);
+
+export const householdExportDownloadConfirmations = sqliteTable(
+  "household_export_download_confirmations",
+  {
+    exportId: text("export_id").primaryKey().references(() => householdExports.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    manifestChecksum: text("manifest_checksum").notNull(),
+    artifactCount: integer("artifact_count").notNull(),
+    confirmedAt: integer("confirmed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+);
+
+export const accountReauthChallenges = sqliteTable(
+  "account_reauth_challenges",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    initialSessionId: text("initial_session_id").notNull(),
+    verifiedSessionId: text("verified_session_id"),
+    status: text("status", { enum: ["pending", "verified", "consumed", "expired"] }).notNull().default("pending"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
+    consumedAt: integer("consumed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("account_reauth_user_status_idx").on(table.userId, table.status, table.expiresAt),
+    uniqueIndex("account_reauth_verified_session_idx").on(table.verifiedSessionId),
+  ],
+);
+
+export const accountDeletionOperations = sqliteTable(
+  "account_deletion_operations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    householdId: text("household_id"),
+    subjectReceiptHash: text("subject_receipt_hash").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    reauthChallengeId: text("reauth_challenge_id").notNull(),
+    reauthSessionId: text("reauth_session_id").notNull(),
+    status: text("status", { enum: ["grace_period", "processing", "retry_required", "finalizing", "completed", "canceled"] }).notNull().default("grace_period"),
+    stage: text("stage").notNull().default("fenced"),
+    attemptToken: text("attempt_token"),
+    attemptExpiresAt: integer("attempt_expires_at", { mode: "timestamp_ms" }),
+    billingCursor: integer("billing_cursor").notNull().default(0),
+    providerCursor: integer("provider_cursor").notNull().default(0),
+    storageCursor: integer("storage_cursor").notNull().default(0),
+    quiescentAt: integer("quiescent_at", { mode: "timestamp_ms" }),
+    inventoryStage: text("inventory_stage").notNull().default("billing_accounts"),
+    inventoryCursor: text("inventory_cursor"),
+    inventoryComplete: integer("inventory_complete", { mode: "boolean" }).notNull().default(false),
+    exportPolicy: text("export_policy", { enum: ["skip", "require_completed_export"] }).notNull(),
+    graceUntil: integer("grace_until", { mode: "timestamp_ms" }).notNull(),
+    snapshot: text("snapshot", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("account_deletion_user_live_idx").on(table.userId)
+      .where(sql`${table.userId} IS NOT NULL AND ${table.status} NOT IN ('completed', 'canceled')`),
+    uniqueIndex("account_deletion_idempotency_idx").on(table.userId, table.idempotencyKey).where(sql`${table.userId} IS NOT NULL`),
+    uniqueIndex("account_deletion_receipt_idx").on(table.subjectReceiptHash),
+    index("account_deletion_status_idx").on(table.status, table.updatedAt),
+  ],
+);
+
+export const accountDeletionItems = sqliteTable(
+  "account_deletion_items",
+  {
+    id: text("id").primaryKey(),
+    operationId: text("operation_id").notNull().references(() => accountDeletionOperations.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["billing_checkout", "billing_subscription", "billing_customer", "provider_voice", "storage_key"] }).notNull(),
+    reference: text("reference").notNull(),
+    status: text("status", { enum: ["pending", "completed"] }).notNull().default("pending"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("account_deletion_items_reference_idx").on(table.operationId, table.kind, table.reference),
+    index("account_deletion_items_pending_idx").on(table.operationId, table.kind, table.status, table.id),
+  ],
+);
+
+export const accountDeletionBillingTombstones = sqliteTable(
+  "account_deletion_billing_tombstones",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    referenceHash: text("reference_hash").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("account_deletion_billing_tombstones_hash_idx").on(table.referenceHash),
+    index("account_deletion_billing_tombstones_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export const householdOwnerTransferGuards = sqliteTable("household_owner_transfer_guards", {
+  id: text("id").primaryKey(),
+  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  priorOwnerUserId: text("prior_owner_user_id").notNull(),
+  newOwnerUserId: text("new_owner_user_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});

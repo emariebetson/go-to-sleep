@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { householdInvitations, householdMembers, users } from "@/db/schema";
 import { apiV1Failure, badRequest, requireHouseholdContext } from "@/lib/api-v1-context";
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       db.select({ value: sql<number>`count(*)` }).from(householdMembers)
         .where(and(eq(householdMembers.householdId, householdId), eq(householdMembers.status, "active"))).get(),
       db.select({ value: sql<number>`count(*)` }).from(householdInvitations)
-        .where(and(eq(householdInvitations.householdId, householdId), eq(householdInvitations.status, "pending"))).get(),
+        .where(and(eq(householdInvitations.householdId, householdId), eq(householdInvitations.status, "pending"), gt(householdInvitations.expiresAt, new Date()))).get(),
     ]);
     if ((memberCount?.value || 0) + (pendingCount?.value || 0) >= entitlement.limits.members) {
       return jsonNoStore({ error: "This household has reached its member limit." }, { status: 409 });

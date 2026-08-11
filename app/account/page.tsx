@@ -7,7 +7,8 @@ import { householdBillingAccounts, users, voices } from "@/db/schema";
 import { requirePageUser } from "@/lib/auth";
 import { AccountDeleteButton, VoiceDeleteButton } from "./AccountActions";
 import { isEntitledSubscriptionStatus } from "@/lib/stripe-events";
-import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
+import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
+import { ProductionPrivacyControls } from "./ProductionPrivacyControls";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Voice & account", robots: { index: false, follow: false } };
@@ -44,7 +45,7 @@ export default async function AccountPage() {
       <span className="eyebrow">Selected household controls</span><h1 className="app-title display">Voice & account</h1><p className="muted">Billing, consent, and generation limits below apply to the household currently selected in NearYou.</p>
       <section className="panel" style={{ marginTop: 30 }}><h2>Your voice</h2>{activeVoice ? <><p className="panel-intro">“{activeVoice.name}” · {activeVoice.status} · Added {activeVoice.createdAt.toLocaleDateString()}</p><div className="consent-box"><span aria-hidden="true">✓</span><span>Only you can re-verify or revoke this adult-owned voice. Other authorized household adults may select a currently verified voice for narration.</span></div><VoiceDeleteButton /></> : <><p className="panel-intro">You do not have an active voice slot in this household.</p><Link className="btn btn-primary" href="/studio">Set up your voice</Link></>}</section>
       <section className="panel" style={{ marginTop: 20 }}><h2>Household subscription</h2><p className="panel-intro">{planName} · {billing?.status || entitlement?.status || "free"} · {allowanceLabel}</p>{canManageBilling ? <form action="/api/billing/portal" method="post"><button className="btn btn-secondary" type="submit">Manage billing with Stripe</button></form> : context.role === "owner" ? <Link className="btn btn-secondary" href="/pricing">View household plans</Link> : <p className="muted">Only the household owner can manage billing.</p>}</section>
-      <section className="panel" style={{ marginTop: 20 }}><h2>Delete account</h2><p className="panel-intro">Account deletion is temporarily unavailable during the protected media-cleanup migration. Billing management remains available above.</p><button className="btn btn-secondary" type="button" disabled>Deletion temporarily unavailable</button></section>
+      {nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(process.env)) ? <ProductionPrivacyControls role={context.role} /> : <section className="panel" style={{ marginTop: 20 }}><h2>Delete account</h2><p className="panel-intro">Account deletion is temporarily unavailable during the protected media-cleanup migration. Billing management remains available above.</p><button className="btn btn-secondary" type="button" disabled>Deletion temporarily unavailable</button></section>}
     </AppShell>;
   }
   const [account, activeVoice] = await Promise.all([

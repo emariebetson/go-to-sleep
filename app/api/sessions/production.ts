@@ -4,8 +4,10 @@ import { getDb } from "@/db";
 import {
   deletionReconciliations,
   generationOperations,
+  householdStorageReservations,
   mediaAssets,
   sleepSessions,
+  task2cMediaIntegrity,
 } from "@/db/schema";
 import { requireHouseholdContext } from "@/lib/api-v1-context";
 import { assessChildNarrationSafety, synthesizeAfterChildModeration, type RemoteModerationVerdict } from "@/lib/child-safety";
@@ -21,6 +23,7 @@ import {
   type AudioGenerationResult,
   type ParsedProductionAudioRequest,
 } from "@/lib/nearsleep-audio";
+import { sha256Hex } from "@/lib/nearsleep-library";
 import {
   acquireVoiceConsentLease,
   claimGenerationOperation,
@@ -37,7 +40,7 @@ import {
   type GenerationResultBucket,
 } from "@/lib/nearsleep-live";
 import { createDurableGenerationPostHandler, GenerationResultInvalidatedError, GenerationResultReconciliationError } from "@/lib/nearsleep-live-route";
-import { featureFlagsFromEnv, nearSleepNarratorPolicy, nearSleepProductionEnabled, type PlanId } from "@/lib/nearyou-foundation";
+import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled, nearSleepNarratorPolicy, nearSleepProductionEnabled, type PlanId } from "@/lib/nearyou-foundation";
 import { loadSelectableChildProfile } from "@/lib/nearsleep-selectors";
 import {
   allowanceWeightForNarration,
@@ -53,7 +56,7 @@ import {
   reserveProviderSpend,
 } from "@/lib/usage-reservations";
 
-type AudioObject = { text(): Promise<string>; customMetadata?: Record<string, string> };
+type AudioObject = { text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer>; customMetadata?: Record<string, string> };
 type AudioBucket = GenerationResultBucket & {
   get(key: string): Promise<AudioObject | null>;
   put(key: string, value: ArrayBuffer | Uint8Array | string, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -169,13 +172,14 @@ async function deleteOrReconcile(scopeId: string, audioKey: string, errorCode: s
   }
 }
 
-async function finalizeSavedSession(input: {
+export async function finalizeSavedSession(input: {
   sessionId: string;
   householdId: string;
   userId: string;
   childProfileId: string;
   audioKey: string;
   byteSize: number;
+  checksum?: string | null;
   providerRequestId?: string | null;
   onSessionReady?: () => void;
 }) {
@@ -193,6 +197,7 @@ async function finalizeSavedSession(input: {
     storageKey: input.audioKey,
     contentType: "audio/mpeg",
     byteSize: input.byteSize,
+    checksum: input.checksum || null,
     private: true,
     createdAt: now,
     updatedAt: now,
@@ -213,39 +218,102 @@ async function finalizeSavedSession(input: {
     || media.childProfileId !== input.childProfileId
     || media.legacySessionId !== input.sessionId
     || (media.status !== "processing" && media.status !== "ready")) throw new Error("generation_media_conflict");
-
-  const ready = await db.update(sleepSessions).set({
-    status: "ready",
-    mediaAssetId,
-    audioKey: input.audioKey,
-    ...(input.providerRequestId !== undefined ? { providerRequestId: input.providerRequestId } : {}),
-    completedAt: now,
-  }).where(and(
-    eq(sleepSessions.id, input.sessionId),
-    eq(sleepSessions.householdId, input.householdId),
-    eq(sleepSessions.userId, input.userId),
-    eq(sleepSessions.status, "generating"),
-  )).returning({ id: sleepSessions.id }).get();
-  if (!ready) {
-    const existing = await db.select({
-      status: sleepSessions.status,
-      mediaAssetId: sleepSessions.mediaAssetId,
-      audioKey: sleepSessions.audioKey,
-    }).from(sleepSessions).where(and(
-      eq(sleepSessions.id, input.sessionId),
-      eq(sleepSessions.householdId, input.householdId),
-      eq(sleepSessions.userId, input.userId),
-    )).get();
-    if (existing?.status !== "ready" || existing.mediaAssetId !== mediaAssetId || existing.audioKey !== input.audioKey) throw new Error("generation_session_finalize_conflict");
+  let durableStorageFinalization = nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(process.env));
+  if (!durableStorageFinalization) {
+    try {
+      await db.select({ id: householdStorageReservations.id }).from(householdStorageReservations).limit(1).get();
+      durableStorageFinalization = true;
+    } catch (error) {
+      let detail = "";
+      let current: unknown = error;
+      for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+        if ("message" in current && typeof current.message === "string") detail += ` ${current.message}`;
+        current = "cause" in current ? current.cause : null;
+      }
+      if (!/no such table: household_storage_reservations/i.test(detail)) throw error;
+    }
   }
+  if (!durableStorageFinalization) {
+    const ready = await db.update(sleepSessions).set({
+      status: "ready",
+      mediaAssetId,
+      audioKey: input.audioKey,
+      ...(input.providerRequestId !== undefined ? { providerRequestId: input.providerRequestId } : {}),
+      completedAt: now,
+    }).where(and(eq(sleepSessions.id, input.sessionId), eq(sleepSessions.householdId, input.householdId), eq(sleepSessions.userId, input.userId), eq(sleepSessions.status, "generating")))
+      .returning({ id: sleepSessions.id }).get();
+    if (!ready) {
+      const existing = await db.select({ status: sleepSessions.status, mediaAssetId: sleepSessions.mediaAssetId, audioKey: sleepSessions.audioKey }).from(sleepSessions).where(and(
+        eq(sleepSessions.id, input.sessionId), eq(sleepSessions.householdId, input.householdId), eq(sleepSessions.userId, input.userId),
+      )).get();
+      if (existing?.status !== "ready" || existing.mediaAssetId !== mediaAssetId || existing.audioKey !== input.audioKey) throw new Error("generation_session_finalize_conflict");
+    }
+    input.onSessionReady?.();
+    const promoted = await db.update(mediaAssets).set({ status: "ready", byteSize: input.byteSize, checksum: input.checksum || null, updatedAt: now }).where(and(
+      eq(mediaAssets.id, mediaAssetId), eq(mediaAssets.householdId, input.householdId), eq(mediaAssets.ownerUserId, input.userId), eq(mediaAssets.storageKey, input.audioKey),
+    )).returning({ id: mediaAssets.id }).get();
+    if (!promoted) throw new GenerationResultReconciliationError();
+    return mediaAssetId;
+  }
+  if (media.status === "processing") {
+    try {
+      await db.insert(householdStorageReservations).values({
+        id: `storage:${mediaAssetId}`,
+        householdId: input.householdId,
+        mediaAssetId,
+        byteSize: input.byteSize,
+        status: "reserved",
+        createdAt: now,
+        updatedAt: now,
+      }).onConflictDoNothing();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "";
+      if (detail.includes("storage_limit_reached")) throw jsonNoStore({ error: "This household has reached its private media storage limit.", code: "storage_limit_reached" }, { status: 409 });
+      if (detail.includes("storage_reconciliation_required")) throw jsonNoStore({ error: "Household storage needs reconciliation before new audio can be saved.", code: "storage_reconciliation_required" }, { status: 503 });
+      throw error;
+    }
+    const reservation = await db.select({ byteSize: householdStorageReservations.byteSize, status: householdStorageReservations.status })
+      .from(householdStorageReservations).where(and(
+        eq(householdStorageReservations.mediaAssetId, mediaAssetId),
+        eq(householdStorageReservations.householdId, input.householdId),
+      )).get();
+    if (!reservation || reservation.byteSize !== input.byteSize || (reservation.status !== "reserved" && reservation.status !== "committed")) {
+      throw new GenerationResultReconciliationError();
+    }
+    const session = await db.select({ status: sleepSessions.status, mediaAssetId: sleepSessions.mediaAssetId, audioKey: sleepSessions.audioKey })
+      .from(sleepSessions).where(and(eq(sleepSessions.id, input.sessionId), eq(sleepSessions.householdId, input.householdId), eq(sleepSessions.userId, input.userId))).get();
+    if (!session) throw new Error("generation_session_missing");
+    if (session.status === "generating") {
+      await db.batch([
+        db.update(sleepSessions).set({
+          status: "ready",
+          mediaAssetId,
+          audioKey: input.audioKey,
+          ...(input.providerRequestId !== undefined ? { providerRequestId: input.providerRequestId } : {}),
+          completedAt: now,
+        }).where(and(eq(sleepSessions.id, input.sessionId), eq(sleepSessions.householdId, input.householdId), eq(sleepSessions.userId, input.userId), eq(sleepSessions.status, "generating"))),
+        db.insert(task2cMediaIntegrity).values({ mediaAssetId, byteSize: input.byteSize, checksum: input.checksum!, verifiedAt: now }).onConflictDoNothing(),
+        db.update(mediaAssets).set({ status: "ready", byteSize: input.byteSize, checksum: input.checksum || null, updatedAt: now }).where(and(
+          eq(mediaAssets.id, mediaAssetId), eq(mediaAssets.householdId, input.householdId), eq(mediaAssets.ownerUserId, input.userId), eq(mediaAssets.storageKey, input.audioKey), eq(mediaAssets.status, "processing"),
+        )),
+      ]);
+    } else if (session.status === "ready" && session.mediaAssetId === mediaAssetId && session.audioKey === input.audioKey) {
+      await db.batch([
+        db.insert(task2cMediaIntegrity).values({ mediaAssetId, byteSize: input.byteSize, checksum: input.checksum!, verifiedAt: now }).onConflictDoNothing(),
+        db.update(mediaAssets).set({ status: "ready", byteSize: input.byteSize, checksum: input.checksum || null, updatedAt: now }).where(and(
+          eq(mediaAssets.id, mediaAssetId), eq(mediaAssets.householdId, input.householdId), eq(mediaAssets.status, "processing"),
+        )),
+      ]);
+    } else {
+      throw new Error("generation_session_finalize_conflict");
+    }
+  }
+  const finalized = await db.select({ sessionStatus: sleepSessions.status, mediaStatus: mediaAssets.status, integrityByteSize: task2cMediaIntegrity.byteSize, integrityChecksum: task2cMediaIntegrity.checksum })
+    .from(sleepSessions).innerJoin(mediaAssets, eq(sleepSessions.mediaAssetId, mediaAssets.id)).leftJoin(task2cMediaIntegrity, eq(task2cMediaIntegrity.mediaAssetId, mediaAssets.id)).where(and(
+      eq(sleepSessions.id, input.sessionId), eq(sleepSessions.householdId, input.householdId), eq(mediaAssets.id, mediaAssetId), eq(mediaAssets.householdId, input.householdId),
+    )).get();
+  if (finalized?.sessionStatus !== "ready" || finalized.mediaStatus !== "ready" || finalized.integrityByteSize !== input.byteSize || finalized.integrityChecksum !== input.checksum) throw new GenerationResultReconciliationError();
   input.onSessionReady?.();
-  const promoted = await db.update(mediaAssets).set({ status: "ready", byteSize: input.byteSize, updatedAt: now }).where(and(
-    eq(mediaAssets.id, mediaAssetId),
-    eq(mediaAssets.householdId, input.householdId),
-    eq(mediaAssets.ownerUserId, input.userId),
-    eq(mediaAssets.storageKey, input.audioKey),
-  )).returning({ id: mediaAssets.id }).get();
-  if (!promoted) throw new GenerationResultReconciliationError();
   return mediaAssetId;
 }
 
@@ -317,7 +385,7 @@ async function recoverFromDurableAudio(input: {
   const childProfileId = metadata.childProfileId || "";
   if (!Number.isSafeInteger(byteSize) || byteSize <= 0 || !childProfileId) throw new Error("invalid_generation_audio_metadata");
   if (session.status === "ready" && session.audioKey === audioKey) {
-    await finalizeSavedSession({ sessionId, householdId: input.householdId, userId: input.userId, childProfileId, audioKey, byteSize });
+    await finalizeSavedSession({ sessionId, householdId: input.householdId, userId: input.userId, childProfileId, audioKey, byteSize, checksum: metadata.checksum || null });
     return result;
   }
   if (session.status !== "generating") throw new Error("generation_session_invalid");
@@ -343,7 +411,7 @@ async function recoverFromDurableAudio(input: {
       });
     }
   }
-  await finalizeSavedSession({ sessionId, householdId: input.householdId, userId: input.userId, childProfileId, audioKey, byteSize });
+  await finalizeSavedSession({ sessionId, householdId: input.householdId, userId: input.userId, childProfileId, audioKey, byteSize, checksum: metadata.checksum || null });
   return result;
 }
 
@@ -547,6 +615,7 @@ export const postProductionSession = createDurableGenerationPostHandler<ParsedPr
       const result: AudioGenerationResult = state.sessionId
         ? { generationMode: "save", sessionId: state.sessionId, audioUrl: `/api/audio/${encodeURIComponent(state.sessionId)}` }
         : { generationMode: "preview", previewId: requestId, audioUrl: `/api/audio-preview/${encodeURIComponent(requestId)}` };
+      const checksum = await sha256Hex(new Uint8Array(audio));
       await bucket()!.put(state.audioKey, audio, {
         httpMetadata: { contentType: "audio/mpeg" },
         customMetadata: {
@@ -557,6 +626,7 @@ export const postProductionSession = createDurableGenerationPostHandler<ParsedPr
           ...(state.leaseId ? { leaseId: state.leaseId } : {}),
           childProfileId: childProfile.id,
           byteSize: String(audio.byteLength),
+          checksum,
           result: JSON.stringify(result),
         },
       });
@@ -576,6 +646,7 @@ export const postProductionSession = createDurableGenerationPostHandler<ParsedPr
           childProfileId: childProfile.id,
           audioKey: state.audioKey,
           byteSize: audio.byteLength,
+          checksum,
           providerRequestId: response.headers.get("request-id"),
           onSessionReady: () => { state.ready = true; },
         });

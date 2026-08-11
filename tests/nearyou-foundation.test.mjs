@@ -13,6 +13,7 @@ import {
   resolveLegacyEntitlement,
   roleCan,
   nearSleepProductionEnabled,
+  nearSleepLibraryPrivacyEnabled,
   weightedUsage,
 } from "../lib/nearyou-foundation.ts";
 
@@ -54,6 +55,7 @@ test("safety-gated capabilities stay disabled even when environment input reques
   assert.equal(featureFlagsFromEnv({ NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION: "true" }).productionUpgradeFoundation, true);
   assert.equal(featureFlagsFromEnv({}).nearSleepProduction, false);
   assert.equal(featureFlagsFromEnv({ NEARYOU_ENABLE_NEARSLEEP_PRODUCTION: "true" }).nearSleepProduction, true);
+  assert.equal(featureFlagsFromEnv({}).nearSleepLibraryPrivacy, false);
   assert.equal(featureFlagsFromEnv({}).requireVerifiedVoiceConsent, false);
   assert.equal(featureFlagsFromEnv({ NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT: "true" }).requireVerifiedVoiceConsent, true);
   assert.equal(featureFlagsFromEnv({ NEARYOU_ENABLE_FOUNDATION_API: "true" }).foundationApi, true);
@@ -120,6 +122,19 @@ test("NearSleep production requires every coordinated migration and enforcement 
   for (const missing of Object.keys(complete)) {
     assert.equal(nearSleepProductionEnabled(featureFlagsFromEnv({ ...complete, [missing]: "false" })), false, `${missing} must remain mandatory`);
   }
+});
+
+test("Task 2C library and deletion stays dark behind its additive migration gate", () => {
+  const complete = {
+    NEARYOU_ENABLE_FOUNDATION_API: "true",
+    NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION: "true",
+    NEARYOU_ENABLE_NEARSLEEP_PRODUCTION: "true",
+    NEARYOU_ENABLE_USAGE_RESERVATIONS: "true",
+    NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT: "true",
+    NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY: "true",
+  };
+  assert.equal(nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(complete)), true);
+  assert.equal(nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv({ ...complete, NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY: "false" })), false);
 });
 
 test("effective entitlement comes from the selected household grant", () => {

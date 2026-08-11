@@ -9,6 +9,12 @@ export type AppUser = {
   fullName: string | null;
 };
 
+export type ApiAuthContext = {
+  user: AppUser;
+  sessionId: string;
+  sessionCreatedAt: Date;
+};
+
 const previewUser: AppUser = {
   userId: "local-preview",
   email: "preview@nearnight.local",
@@ -17,8 +23,21 @@ const previewUser: AppUser = {
 };
 
 export async function getAppUser(request?: Request): Promise<AppUser | null> {
+  return (await getApiAuthContext(request))?.user || null;
+}
+
+export async function getApiAuthContext(request?: Request): Promise<ApiAuthContext | null> {
   const requestHeaders = request ? request.headers : new Headers(await headers());
-  if (!getSessionCookie(requestHeaders)) return null;
+  if (!getSessionCookie(requestHeaders)) {
+    if (process.env.NODE_ENV !== "production" && request) {
+      return {
+        user: previewUser,
+        sessionId: requestHeaders.get("x-nearyou-preview-session-id") || "preview-session",
+        sessionCreatedAt: new Date(Number(requestHeaders.get("x-nearyou-preview-session-created-at")) || Date.now()),
+      };
+    }
+    return null;
+  }
 
   const { getOAuthAuth } = await import("@/lib/oauth");
   const session = await getOAuthAuth(requestOrigin(requestHeaders)).api.getSession({ headers: requestHeaders });
@@ -26,19 +45,30 @@ export async function getAppUser(request?: Request): Promise<AppUser | null> {
 
   const displayName = session.user.name?.trim() || session.user.email;
   return {
-    userId: session.user.id,
-    displayName,
-    email: session.user.email,
-    fullName: session.user.name?.trim() || null,
+    user: {
+      userId: session.user.id,
+      displayName,
+      email: session.user.email,
+      fullName: session.user.name?.trim() || null,
+    },
+    sessionId: session.session.id,
+    sessionCreatedAt: new Date(session.session.createdAt),
   };
 }
 
 export async function requireApiUser(request: Request): Promise<AppUser> {
-  const user = await getAppUser(request);
-  if (user) return user;
+  const context = await getApiAuthContext(request);
+  if (context) return context.user;
 
-  if (process.env.NODE_ENV !== "production") return previewUser;
+  throw new Response(JSON.stringify({ error: "Please sign in to continue." }), {
+    status: 401,
+    headers: { "content-type": "application/json" },
+  });
+}
 
+export async function requireApiAuthContext(request: Request): Promise<ApiAuthContext> {
+  const context = await getApiAuthContext(request);
+  if (context) return context;
   throw new Response(JSON.stringify({ error: "Please sign in to continue." }), {
     status: 401,
     headers: { "content-type": "application/json" },

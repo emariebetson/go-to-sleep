@@ -11,7 +11,11 @@ function createOAuthAuth(baseURL: string) {
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         scope: ["openid", "email", "profile"],
-        prompt: "select_account" as const,
+        // A conservative global prompt is intentional: account-erasure step-up
+        // must force Google to authenticate again, never merely select an
+        // already signed-in account. Keep this at `login` until we can validate
+        // OIDC auth_time from a dedicated per-request flow.
+        prompt: "login" as const,
       },
     } : {}),
   };

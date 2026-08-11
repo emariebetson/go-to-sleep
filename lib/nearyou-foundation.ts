@@ -91,6 +91,7 @@ export type FeatureFlags = {
   foundationApi: boolean;
   productionUpgradeFoundation: boolean;
   nearSleepProduction: boolean;
+  nearSleepLibraryPrivacy: boolean;
   legacyNearsleepRoutes: boolean;
   story: boolean;
   legacyArchive: boolean;
@@ -111,6 +112,7 @@ export function featureFlagsFromEnv(environment: Record<string, string | undefin
     foundationApi: enabled(environment.NEARYOU_ENABLE_FOUNDATION_API),
     productionUpgradeFoundation: enabled(environment.NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION),
     nearSleepProduction: enabled(environment.NEARYOU_ENABLE_NEARSLEEP_PRODUCTION),
+    nearSleepLibraryPrivacy: enabled(environment.NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY),
     legacyNearsleepRoutes: true,
     story: enabled(environment.NEARYOU_ENABLE_STORY),
     legacyArchive: enabled(environment.NEARYOU_ENABLE_LEGACY_ARCHIVE),
@@ -129,6 +131,10 @@ export function nearSleepProductionEnabled(flags: FeatureFlags) {
     && flags.nearSleepProduction
     && flags.usageReservations
     && flags.requireVerifiedVoiceConsent;
+}
+
+export function nearSleepLibraryPrivacyEnabled(flags: FeatureFlags) {
+  return nearSleepProductionEnabled(flags) && flags.nearSleepLibraryPrivacy;
 }
 
 export const FEATURE_FLAGS = featureFlagsFromEnv({});

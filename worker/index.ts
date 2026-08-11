@@ -1,11 +1,19 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled } from "@/lib/nearyou-foundation";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   AUDIO: R2Bucket;
+  NEARYOU_ENABLE_FOUNDATION_API?: string;
+  NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION?: string;
+  NEARYOU_ENABLE_NEARSLEEP_PRODUCTION?: string;
+  NEARYOU_ENABLE_USAGE_RESERVATIONS?: string;
+  NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT?: string;
+  NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY?: string;
+  NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -50,6 +58,25 @@ const worker = {
     secured.headers.set("content-security-policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self' https://checkout.stripe.com; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'");
     if (url.protocol === "https:") secured.headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
     return secured;
+  },
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    const task2cEnabled = nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(env as unknown as Record<string, string | undefined>));
+    const migrationReconciliationEnabled = env.NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION === "true";
+    if (!task2cEnabled && !migrationReconciliationEnabled) return;
+    ctx.waitUntil((async () => {
+      const [{ reconcileHouseholdExports }, { reconcilePendingSessionDeletions, reconcilePendingDeletionReconciliations }, { reconcilePendingAccountDeletions }, { reconcileLegacyReadyMedia }] = await Promise.all([
+        import("@/lib/nearsleep-export"),
+        import("@/lib/nearsleep-deletion-reconciliation"),
+        import("@/app/api/account/production"),
+        import("@/lib/nearsleep-storage-reconciliation"),
+      ]);
+      await reconcileLegacyReadyMedia({ bucket: env.AUDIO as never, limit: 2 });
+      if (!task2cEnabled) return;
+      await reconcileHouseholdExports({ bucket: env.AUDIO as never, limit: 10 });
+      await reconcilePendingSessionDeletions({ bucket: env.AUDIO, limit: 10 });
+      await reconcilePendingDeletionReconciliations({ bucket: env.AUDIO, limit: 10, actionLimit: 2 });
+      await reconcilePendingAccountDeletions(10);
+    })());
   },
 };
 

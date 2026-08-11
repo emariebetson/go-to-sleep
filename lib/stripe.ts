@@ -8,7 +8,7 @@ function stripeHeaders(secret: string) {
   return { authorization: `Bearer ${secret}`, "stripe-version": STRIPE_API_VERSION };
 }
 
-export async function stripePost(path: string, values: Record<string, string | undefined>, options: { idempotencyKey?: string } = {}) {
+export async function stripePost(path: string, values: Record<string, string | undefined>, options: { idempotencyKey?: string; notFoundIsSuccess?: boolean } = {}) {
   const secret = process.env.STRIPE_SECRET_KEY;
   if (!secret) throw new Error("Stripe is not configured.");
   if (!stripeSecretMatchesMode(secret, process.env.STRIPE_TEST_MODE_ONLY === "true")) throw new Error("Stripe test-mode configuration is required.");
@@ -18,6 +18,7 @@ export async function stripePost(path: string, values: Record<string, string | u
   if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
   const response = await fetchWithTimeout(`${STRIPE_API}${path}`, { method: "POST", headers, body });
   const payload = await response.json() as { id?: string; url?: string; expires_at?: number; status?: string; error?: { message?: string } };
+  if (response.status === 404 && options.notFoundIsSuccess) return payload;
   if (!response.ok) throw new Error(payload.error?.message || "Stripe rejected the request.");
   return payload;
 }
@@ -43,7 +44,7 @@ export async function stripeDelete(path: string) {
   if (!secret) throw new Error("Stripe is not configured.");
   if (!stripeSecretMatchesMode(secret, process.env.STRIPE_TEST_MODE_ONLY === "true")) throw new Error("Stripe test-mode configuration is required.");
   const response = await fetchWithTimeout(`${STRIPE_API}${path}`, { method: "DELETE", headers: stripeHeaders(secret) });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 404) {
     const payload = await response.json() as { error?: { message?: string } };
     throw new Error(payload.error?.message || "Stripe rejected the cancellation.");
   }

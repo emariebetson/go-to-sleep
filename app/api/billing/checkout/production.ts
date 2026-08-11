@@ -1,11 +1,70 @@
 import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
 import { getDb } from "@/db";
-import { entitlements, householdBillingAccounts } from "@/db/schema";
+import { accountDeletionBillingTombstones, accountDeletionItems, accountDeletionOperations, entitlements, householdBillingAccounts } from "@/db/schema";
 import { requireHouseholdContext } from "@/lib/api-v1-context";
 import { assertTrustedMutationOrigin, jsonNoStore, publicAppOrigin, readLimitedBytes } from "@/lib/http";
 import { requireCurrentAdultOnboarding } from "@/lib/nearsleep-live";
 import { parseStripeCheckoutSelection, stripeCheckoutPrice } from "@/lib/stripe-entitlements";
 import { stripePost, validateStripeCheckoutResponse } from "@/lib/stripe";
+import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled } from "@/lib/nearyou-foundation";
+import { sha256Hex } from "@/lib/nearsleep-library";
+
+async function persistCheckoutCleanup(householdId: string, checkoutSessionId: string) {
+  if (!nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(process.env))) return null;
+  const db = getDb();
+  const operation = await db.select({ id: accountDeletionOperations.id }).from(accountDeletionOperations).where(and(
+    eq(accountDeletionOperations.householdId, householdId),
+    inArray(accountDeletionOperations.status, ["grace_period", "processing", "retry_required", "finalizing"]),
+  )).get();
+  if (!operation) return null;
+  const now = new Date();
+  await db.insert(accountDeletionItems).values({
+    id: `account-item:${crypto.randomUUID()}`,
+    operationId: operation.id,
+    kind: "billing_checkout",
+    reference: checkoutSessionId,
+    status: "pending",
+    createdAt: now,
+    updatedAt: now,
+  }).onConflictDoNothing();
+  return db.select({ id: accountDeletionItems.id }).from(accountDeletionItems).where(and(
+    eq(accountDeletionItems.operationId, operation.id),
+    eq(accountDeletionItems.kind, "billing_checkout"),
+    eq(accountDeletionItems.reference, checkoutSessionId),
+  )).get();
+}
+
+export async function expireFencedCheckout(householdId: string, operationId: string, checkoutSessionId: string, reason: string) {
+  let cleanup: { id: string } | null | undefined;
+  try { cleanup = await persistCheckoutCleanup(householdId, checkoutSessionId); } catch { cleanup = null; }
+  try {
+    await stripePost(`/checkout/sessions/${encodeURIComponent(checkoutSessionId)}/expire`, {}, {
+      idempotencyKey: `${reason}-${householdId}-${operationId}`,
+      notFoundIsSuccess: true,
+    });
+    if (!nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(process.env))) return;
+    const completedAt = new Date();
+    const referenceHash = await sha256Hex(new TextEncoder().encode(checkoutSessionId));
+    const tombstone = getDb().insert(accountDeletionBillingTombstones).values({
+      id: `billing-tombstone:${referenceHash}`,
+      kind: "billing_checkout",
+      referenceHash,
+      createdAt: completedAt,
+      expiresAt: new Date(completedAt.getTime() + 2 * 365 * 24 * 60 * 60 * 1000),
+    }).onConflictDoNothing();
+    if (cleanup) {
+      await getDb().batch([
+        tombstone,
+        getDb().update(accountDeletionItems).set({ status: "completed", completedAt, updatedAt: completedAt }).where(and(
+          eq(accountDeletionItems.id, cleanup.id), eq(accountDeletionItems.status, "pending"),
+        )),
+      ] as unknown as Parameters<ReturnType<typeof getDb>["batch"]>[0]);
+    } else await tombstone;
+  } catch {
+    // The pending account-deletion item is the durable retry record. The
+    // deletion finalizer aborts while it remains pending.
+  }
+}
 
 export async function postProductionCheckout(request: Request) {
   try {
@@ -122,7 +181,8 @@ export async function postProductionCheckout(request: Request) {
         "subscription_data[metadata][checkout_operation_id]": operationId,
     }, { idempotencyKey: `checkout-${householdId}-${operationId}` });
     const session = validateStripeCheckoutResponse(rawSession);
-    const persisted = await db.update(householdBillingAccounts).set({
+    let persisted;
+    try { persisted = await db.update(householdBillingAccounts).set({
         checkoutSessionId: session.id,
         checkoutSessionUrl: session.url,
         checkoutStatus: "open",
@@ -134,10 +194,17 @@ export async function postProductionCheckout(request: Request) {
         eq(householdBillingAccounts.checkoutPriceId, plan.priceId),
         inArray(householdBillingAccounts.checkoutStatus, ["creating", "open"]),
         or(isNull(householdBillingAccounts.checkoutSessionId), eq(householdBillingAccounts.checkoutSessionId, session.id)),
-    )).returning({ id: householdBillingAccounts.householdId }).get();
+    )).returning({ id: householdBillingAccounts.householdId }).get(); }
+    catch (error) {
+      await expireFencedCheckout(householdId, operationId, session.id, "checkout-fence-expire");
+      throw error;
+    }
     // Keep the stable operation claim when Stripe or this write fails. A retry
     // uses the same provider idempotency key and cannot open a second Checkout.
-    if (!persisted) throw new Error("checkout_session_state_conflict");
+    if (!persisted) {
+      await expireFencedCheckout(householdId, operationId, session.id, "checkout-conflict-expire");
+      throw new Error("checkout_session_state_conflict");
+    }
     return Response.redirect(session.url, 303);
   } catch (error) {
     if (error instanceof Response) return error;

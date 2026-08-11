@@ -4,12 +4,13 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { startFrequencyLayers, stopFrequencyLayers, type ActiveFrequencyLayers } from "@/lib/audio-layers";
 import { parseStoredFrequencyLayers } from "@/lib/frequency-layers";
 import { SleepVisualizer } from "@/components/SleepVisualizer";
+import { repeatDeadlineForState } from "@/lib/task2c-client-state";
 
-type SleepPlayerProps = { src: string; sound: string; frequencies?: readonly number[] };
+type SleepPlayerProps = { src: string; sound: string; frequencies?: readonly number[]; repeatMinutes?: number | null };
 type AmbientSoundGraph = { source: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode };
 const PLAYER_START_EVENT = "nearnight:player-start";
 
-export function SleepPlayer({ src, sound, frequencies = [] }: SleepPlayerProps) {
+export function SleepPlayer({ src, sound, frequencies = [], repeatMinutes = null }: SleepPlayerProps) {
   const playerId = useId();
   const contextRef = useRef<AudioContext | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -19,6 +20,7 @@ export function SleepPlayer({ src, sound, frequencies = [] }: SleepPlayerProps) 
   const playingLayersRef = useRef(false);
   const playbackEpochRef = useRef(0);
   const pendingStartRef = useRef(false);
+  const repeatDeadlineRef = useRef<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [mediaPaused, setMediaPaused] = useState(true);
   const [visualizerOpen, setVisualizerOpen] = useState(false);
@@ -84,7 +86,10 @@ export function SleepPlayer({ src, sound, frequencies = [] }: SleepPlayerProps) 
   }
 
   const frequencyKey = frequencies.join(",");
-  useEffect(() => { stopSound(); }, [frequencyKey, sound, src, stopSound]);
+  useEffect(() => { stopSound(); repeatDeadlineRef.current = null; }, [frequencyKey, sound, src, stopSound]);
+  useEffect(() => {
+    repeatDeadlineRef.current = repeatDeadlineForState(Date.now(), repeatMinutes, audioRef.current?.paused === false);
+  }, [repeatMinutes]);
   useEffect(() => {
     const stopOtherPlayer = (event: Event) => {
       if ((event as CustomEvent<string>).detail !== playerId) audioRef.current?.pause();
@@ -106,14 +111,24 @@ export function SleepPlayer({ src, sound, frequencies = [] }: SleepPlayerProps) 
         onLoadStart={() => { setPlaying(false); setMediaPaused(true); setVisualizerOpen(false); setPlaybackTime({ currentTime: 0, duration: 0 }); }}
         onLoadedMetadata={(event) => setPlaybackTime({ currentTime: event.currentTarget.currentTime, duration: event.currentTarget.duration })}
         onTimeUpdate={(event) => setPlaybackTime({ currentTime: event.currentTarget.currentTime, duration: event.currentTarget.duration })}
-        onPlay={() => { window.dispatchEvent(new CustomEvent(PLAYER_START_EVENT, { detail: playerId })); setMediaPaused(false); setPlaying(true); void startSound(); }}
+        onPlay={() => { if (repeatMinutes && repeatDeadlineRef.current === null) repeatDeadlineRef.current = Date.now() + repeatMinutes * 60_000; window.dispatchEvent(new CustomEvent(PLAYER_START_EVENT, { detail: playerId })); setMediaPaused(false); setPlaying(true); void startSound(); }}
         onWaiting={() => { setPlaying(false); stopSound(); }}
         onSeeking={() => { setPlaying(false); stopSound(); }}
         onSeeked={(event) => { if (!event.currentTarget.paused) { setPlaying(true); void startSound(); } }}
         onPlaying={() => { setMediaPaused(false); setPlaying(true); void startSound(); }}
         onError={() => { setMediaPaused(true); setPlaying(false); stopSound(); }}
         onPause={() => { setMediaPaused(true); setPlaying(false); stopSound(); }}
-        onEnded={() => { setMediaPaused(true); setPlaying(false); stopSound(); }} style={{ width: "100%" }}>
+        onEnded={(event) => {
+          stopSound();
+          if (repeatDeadlineRef.current && Date.now() < repeatDeadlineRef.current) {
+            event.currentTarget.currentTime = 0;
+            void event.currentTarget.play();
+          } else {
+            repeatDeadlineRef.current = null;
+            setMediaPaused(true);
+            setPlaying(false);
+          }
+        }} style={{ width: "100%" }}>
         Your browser does not support audio playback.
       </audio>
       <button className="visualizer-launcher" ref={visualizerLauncherRef} type="button" onClick={() => setVisualizerOpen(true)}>✦ Open soothing visualizer</button>

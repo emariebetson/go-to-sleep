@@ -1,11 +1,12 @@
-import { and, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { entitlements, householdBillingAccounts, householdBillingSubscriptions, households, stripeEvents } from "@/db/schema";
+import { accountDeletionBillingTombstones, entitlements, householdBillingAccounts, householdBillingSubscriptions, households, stripeEvents } from "@/db/schema";
 import { jsonNoStore } from "@/lib/http";
-import { PLAN_CATALOG } from "@/lib/nearyou-foundation";
+import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled, PLAN_CATALOG } from "@/lib/nearyou-foundation";
 import { configuredStripePrices, stripeEntitlementStatus, stripeEntitlementValidUntil, stripeInvoiceOrderingDecision, type StripePriceBinding } from "@/lib/stripe-entitlements";
 import { checkoutBinding, expiredCheckoutBinding, paidInvoice, subscriptionInvoice, subscriptionUpdate, type SubscriptionUpdate } from "@/lib/stripe-events";
 import { stripeGet } from "@/lib/stripe";
+import { sha256Hex } from "@/lib/nearsleep-library";
 
 export type ProductionStripeEvent = {
   id: string;
@@ -17,6 +18,25 @@ export type ProductionStripeEvent = {
 
 const STALE_EVENT_CLAIM_MS = 5 * 60_000;
 const GRACE_SECONDS = 7 * 24 * 60 * 60;
+
+function stripeReference(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "id" in value && typeof value.id === "string") return value.id;
+  return null;
+}
+
+async function terminalDeletionAcknowledges(event: ProductionStripeEvent) {
+  if (!nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(process.env))) return false;
+  const object = event.data.object;
+  const references = [stripeReference(object.id), stripeReference(object.customer), stripeReference(object.subscription)].filter((value): value is string => Boolean(value));
+  if (!references.length) return false;
+  const hashes = await Promise.all(references.map((reference) => sha256Hex(new TextEncoder().encode(reference))));
+  const tombstone = await getDb().select({ id: accountDeletionBillingTombstones.id }).from(accountDeletionBillingTombstones).where(and(
+    inArray(accountDeletionBillingTombstones.referenceHash, hashes),
+    gt(accountDeletionBillingTombstones.expiresAt, new Date()),
+  )).limit(1).get();
+  return Boolean(tombstone);
+}
 
 function boundedErrorCode(error: unknown) {
   return (error instanceof Error ? error.message : "stripe_event_failed").replace(/[^a-zA-Z0-9_:-]+/g, "_").slice(0, 120) || "stripe_event_failed";
@@ -431,6 +451,7 @@ async function processFailedInvoice(event: ProductionStripeEvent, prices: Map<st
 }
 
 async function processEvent(event: ProductionStripeEvent, prices: Map<string, StripePriceBinding>) {
+  if (await terminalDeletionAcknowledges(event)) return;
   if (event.type === "checkout.session.completed") return processCheckout(event, prices);
   if (event.type === "checkout.session.expired") return processExpiredCheckout(event);
   if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"].includes(event.type)) {

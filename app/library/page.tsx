@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 import { Link } from "@/components/Link";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import { headers } from "next/headers";
 import { AppShell } from "@/components/AppShell";
 import { SleepPlayer } from "@/components/SleepPlayer";
-import { sleepSessions, users } from "@/db/schema";
+import { mediaAssets, sleepSessions, users } from "@/db/schema";
 import { requirePageUser } from "@/lib/auth";
 import { formatFrequencyLabel, parseStoredFrequencyLayers } from "@/lib/frequency-layers";
+import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled } from "@/lib/nearyou-foundation";
+import { encodeLibraryCursor } from "@/lib/nearsleep-library";
+import { ProductionLibraryControls } from "./LibraryControls";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "My nights", robots: { index: false, follow: false } };
@@ -18,6 +22,31 @@ export default async function LibraryPage() {
   const [{ getDb }, { ensureUser }] = await Promise.all([import("@/db"), import("@/lib/data")]);
   await ensureUser(user);
   const db = getDb();
+  if (nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(process.env))) {
+    const { requireHouseholdContext } = await import("@/lib/api-v1-context");
+    const context = await requireHouseholdContext(new Request("https://nearyou.invalid/library", { headers: await headers() }), "playlist:read");
+    const sessions = await db.select({
+      id: sleepSessions.id,
+      mediaAssetId: mediaAssets.id,
+      title: sleepSessions.title,
+      narrationKind: sleepSessions.narrationKind,
+      backgroundSound: sleepSessions.backgroundSound,
+      frequencyLayers: sleepSessions.frequencyLayers,
+      durationMinutes: sleepSessions.durationMinutes,
+      favorite: sleepSessions.favorite,
+      repeatMinutes: sleepSessions.repeatMinutes,
+      childProfileId: mediaAssets.childProfileId,
+      voiceId: sleepSessions.voiceId,
+      createdAt: sleepSessions.createdAt,
+    }).from(sleepSessions).innerJoin(mediaAssets, and(
+      eq(sleepSessions.mediaAssetId, mediaAssets.id), eq(mediaAssets.householdId, context.householdId), eq(mediaAssets.status, "ready"), eq(mediaAssets.private, true), isNull(mediaAssets.deletedAt),
+    )).where(and(eq(sleepSessions.householdId, context.householdId), eq(sleepSessions.status, "ready"), eq(sleepSessions.deletionStatus, "active"))).orderBy(desc(sleepSessions.createdAt), desc(sleepSessions.id)).limit(100).all();
+    return <AppShell active="library">
+      <span className="eyebrow">Selected household private library</span><h1 className="app-title display">My nights</h1><p className="muted">Favorites, repeat timers, playlists, downloads, and the bedtime queue stay private to this household.</p>
+      <ProductionLibraryControls initialSessions={sessions.map((session) => ({ ...session, createdAt: session.createdAt.getTime() }))} initialNextCursor={sessions.length === 100 ? encodeLibraryCursor({ createdAt: sessions.at(-1)!.createdAt.getTime(), id: sessions.at(-1)!.id }) : null} canManage={context.role === "owner" || context.role === "adult_manager"} />
+      <div className="panel" style={{ marginTop: 20 }}><Link className="btn btn-primary" href="/studio">Create a new bedtime</Link></div>
+    </AppShell>;
+  }
   const [account, sessions] = await Promise.all([
     db.select({ credits: users.creditsRemaining }).from(users).where(eq(users.id, user.userId)).get(),
     db.select().from(sleepSessions).where(eq(sleepSessions.userId, user.userId)).orderBy(desc(sleepSessions.createdAt)).limit(50).all(),
