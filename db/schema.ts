@@ -93,12 +93,17 @@ export const children = sqliteTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     nickname: text("nickname").notNull(),
+    normalizedNickname: text("normalized_nickname"),
+    pronunciation: text("pronunciation"),
     ageMonths: integer("age_months"),
     bedtimeChallenge: text("bedtime_challenge"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (table) => [index("children_user_idx").on(table.userId)],
+  (table) => [
+    index("children_user_idx").on(table.userId),
+    uniqueIndex("children_user_normalized_nickname_idx").on(table.userId, table.normalizedNickname),
+  ],
 );
 
 export const voices = sqliteTable(
@@ -138,6 +143,8 @@ export const sleepSessions = sqliteTable(
     theme: text("theme").notNull(),
     style: text("style").notNull(),
     backgroundSound: text("background_sound").notNull(),
+    pronunciation: text("pronunciation").notNull().default(""),
+    frequencyLayers: text("frequency_layers").notNull().default("[]"),
     durationMinutes: integer("duration_minutes").notNull(),
     status: text("status", { enum: ["queued", "generating", "ready", "failed"] })
       .notNull()
@@ -160,7 +167,7 @@ export const usageEvents = sqliteTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     sessionId: text("session_id").references(() => sleepSessions.id, { onDelete: "set null" }),
-    type: text("type", { enum: ["script_generation", "audio_preview", "audio_generation", "playback"] }).notNull(),
+    type: text("type", { enum: ["script_generation", "audio_preview", "audio_generation", "playback", "pronunciation_guess"] }).notNull(),
     units: integer("units").notNull().default(1),
     metadata: text("metadata", { mode: "json" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

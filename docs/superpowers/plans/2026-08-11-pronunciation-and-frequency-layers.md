@@ -116,6 +116,8 @@ git commit -m "feat: add pronunciation and frequency rules"
 - Modify: `db/schema.ts`
 - Create: `drizzle/0005_pronunciation_frequency_layers.sql` through `drizzle-kit generate`
 - Modify: `lib/sleep-session.ts`
+- Modify: `package.json`
+- Modify: `package-lock.json`
 - Create: `tests/sleep-session-input.test.mjs`
 
 **Interfaces:**
@@ -169,7 +171,7 @@ test("session input rejects a fourth or unsupported layer", () => {
 Run:
 
 ```bash
-node --test tests/sleep-session-input.test.mjs
+node_modules/.bin/tsx --test tests/sleep-session-input.test.mjs
 ```
 
 Expected: FAIL because the current parser drops pronunciation and frequencies.
@@ -191,6 +193,8 @@ frequencyLayers: text("frequency_layers").notNull().default("[]"),
 
 Add `pronunciation_guess` to the TypeScript `usageEvents.type` enum so the authenticated guess endpoint can enforce per-user limits. Parse `body.pronunciation` with `cleanPronunciation` and `body.frequencies` with `validateFrequencyLayers` inside `validateSessionInput`.
 
+Declare `tsx` version `4.22.1` as a direct dev dependency and change the test runner portion of `npm test` to `tsx --test tests/*.test.mjs`. This lets Node resolve the repository's established extensionless TypeScript imports in direct module tests.
+
 - [ ] **Step 4: Generate and inspect the additive migration**
 
 Run:
@@ -206,7 +210,7 @@ The generated SQL must add the four columns and user-scoped unique index without
 Run:
 
 ```bash
-node --test tests/pronunciation-frequency.test.mjs tests/sleep-session-input.test.mjs
+node_modules/.bin/tsx --test tests/pronunciation-frequency.test.mjs tests/sleep-session-input.test.mjs
 node_modules/.bin/tsc --noEmit --incremental false
 ```
 
@@ -215,7 +219,7 @@ Expected: focused tests and typecheck pass.
 - [ ] **Step 6: Commit persistence and validation**
 
 ```bash
-git add db/schema.ts drizzle lib/sleep-session.ts tests/sleep-session-input.test.mjs
+git add db/schema.ts drizzle lib/sleep-session.ts package.json package-lock.json tests/sleep-session-input.test.mjs
 git commit -m "feat: persist pronunciation and frequency settings"
 ```
 
@@ -256,7 +260,7 @@ test("pronunciation guessing rejects empty or malformed provider output", async 
 Run:
 
 ```bash
-node --test tests/pronunciation-guess.test.mjs
+node_modules/.bin/tsx --test tests/pronunciation-guess.test.mjs
 ```
 
 Expected: FAIL because `lib/pronunciation-guess.ts` does not exist.
@@ -301,7 +305,7 @@ assert.equal(response.status, 401);
 Run:
 
 ```bash
-node --test tests/pronunciation-guess.test.mjs
+node_modules/.bin/tsx --test tests/pronunciation-guess.test.mjs
 node_modules/.bin/tsc --noEmit --incremental false
 node_modules/.bin/vinext build
 node --test tests/rendered-html.test.mjs
@@ -351,7 +355,7 @@ test("preview and full narration apply pronunciation without changing the stored
 Run:
 
 ```bash
-node --test tests/session-narration.test.mjs
+node_modules/.bin/tsx --test tests/session-narration.test.mjs
 ```
 
 Expected: FAIL because `lib/session-narration.ts` does not exist.
@@ -375,7 +379,7 @@ Before inserting a full sleep session, upsert by `[children.userId, children.nor
 Run:
 
 ```bash
-node --test tests/pronunciation-frequency.test.mjs tests/sleep-session-input.test.mjs tests/session-narration.test.mjs
+node_modules/.bin/tsx --test tests/pronunciation-frequency.test.mjs tests/sleep-session-input.test.mjs tests/session-narration.test.mjs
 node_modules/.bin/tsc --noEmit --incremental false
 node_modules/.bin/vinext build
 ```
@@ -521,7 +525,7 @@ Run:
 node_modules/.bin/eslint . --ignore-pattern dist --ignore-pattern .next
 node_modules/.bin/tsc --noEmit --incremental false
 node_modules/.bin/vinext build
-node --test tests/*.test.mjs
+node_modules/.bin/tsx --test tests/*.test.mjs
 git diff --check
 ```
 

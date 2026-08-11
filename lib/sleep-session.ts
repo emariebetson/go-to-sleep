@@ -1,13 +1,17 @@
 import { canonicalYouTubeUrl } from "./youtube-source";
+import { validateFrequencyLayers, type SolfeggioFrequency } from "./frequency-layers";
+import { cleanPronunciation } from "./pronunciation";
 
 export type SessionInput = {
   requestId: string;
   childName: string;
+  pronunciation: string;
   ageMonths: number;
   challenge: "settling" | "frequent-waking" | "separation" | "overtired" | "nap-transition";
   theme: "moonlit-meadow" | "sleepy-sea" | "cloud-garden";
   durationMinutes: 5 | 10 | 15 | 20;
   sound: "soft-rain" | "brown-noise" | "none";
+  frequencies: SolfeggioFrequency[];
   style: "slow-story" | "rhythmic" | "lullaby";
   scriptMode: "curated" | "personalized";
   contentType: "story" | "sleep-hypnosis";
@@ -78,11 +82,13 @@ export function validateSessionInput(body: Record<string, unknown>): SessionInpu
   return {
     requestId,
     childName,
+    pronunciation: cleanPronunciation(body.pronunciation),
     ageMonths,
     challenge: allowedValue("challenge", body.challenge),
     theme: allowedValue("theme", body.theme),
     durationMinutes: Number(duration) as SessionInput["durationMinutes"],
     sound: allowedValue("sound", body.sound),
+    frequencies: validateFrequencyLayers(body.frequencies),
     style: allowedValue("style", body.style),
     scriptMode: allowedValue("scriptMode", body.scriptMode),
     contentType: allowedValue("contentType", body.contentType),
