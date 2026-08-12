@@ -54,11 +54,11 @@ export function applyDelta(highWater: number, rows: CutoverRow[]) {
 }
 
 type Target = { transaction(operation: (tx: { assertLease(value: { owner: string; fence: number; expiresAfter: number; highWater: number; cursor: number | null }): Promise<void>; stage(rows: CutoverRow[], fence: number): Promise<void>; tombstone(rows: CutoverRow[], fence: number): Promise<void>; checkpoint(value: { cursor: number | null; highWater: number; fence: number }): Promise<void> }) => Promise<void>): Promise<void> };
-export async function executeBackfillPage(target: Target, lease: { owner: string; fence: number; expiresAt: number }, input: { expectedOwner: string; expectedFence: number; expectedHighWater: number; expectedCursor: number | null; page: SnapshotPage }) {
-  if (lease.owner !== input.expectedOwner || lease.fence !== input.expectedFence || lease.expiresAt <= Date.now()) throw new Error("stale fence or lease");
+export async function executeBackfillPage(target: Target, lease: { owner: string; fence: number; expiresAt: number }, input: { trustedNow: number; expectedOwner: string; expectedFence: number; expectedHighWater: number; expectedCursor: number | null; page: SnapshotPage }) {
+  if (!Number.isSafeInteger(input.trustedNow) || input.trustedNow <= 0 || lease.owner !== input.expectedOwner || lease.fence !== input.expectedFence || lease.expiresAt <= input.trustedNow) throw new Error("stale fence or lease");
   validatePage(input.page, 1000, { highWater: input.expectedHighWater, cursor: input.expectedCursor });
   await target.transaction(async (tx) => {
-    await tx.assertLease({ owner: input.expectedOwner, fence: input.expectedFence, expiresAfter: Date.now(), highWater: input.expectedHighWater, cursor: input.expectedCursor });
+    await tx.assertLease({ owner: input.expectedOwner, fence: input.expectedFence, expiresAfter: input.trustedNow, highWater: input.expectedHighWater, cursor: input.expectedCursor });
     const live = input.page.rows.filter((row) => !row.deleted), deleted = input.page.rows.filter((row) => row.deleted);
     if (live.length) await tx.stage(live, lease.fence); if (deleted.length) await tx.tombstone(deleted, lease.fence);
     await tx.checkpoint({ cursor: input.page.nextCursor, highWater: input.page.highWater, fence: lease.fence });

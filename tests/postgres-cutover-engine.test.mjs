@@ -30,9 +30,9 @@ test("snapshot pages are strictly sorted, bounded, monotonic, and cursor-consist
 test("backfill transaction rejects stale fencing tokens and advances target with checkpoint atomically", async () => {
   const calls = [];
   const target = { async transaction(fn) { calls.push("begin"); await fn({ assertLease: async () => calls.push("lease"), stage: async () => calls.push("stage"), tombstone: async () => calls.push("tombstone"), checkpoint: async () => calls.push("checkpoint") }); calls.push("commit"); } };
-  await executeBackfillPage(target, { owner: "runner", fence: 7, expiresAt: Date.now() + 1000 }, { expectedOwner: "runner", expectedFence: 7, expectedHighWater: 10, expectedCursor: null, page: { highWater: 10, cursor: null, rows: [row("h", "a", "1", 1), { ...row("h", "a", "2", 2), deleted: true }], nextCursor: 2 } });
+  await executeBackfillPage(target, { owner: "runner", fence: 7, expiresAt: 2000 }, { trustedNow: 1000, expectedOwner: "runner", expectedFence: 7, expectedHighWater: 10, expectedCursor: null, page: { highWater: 10, cursor: null, rows: [row("h", "a", "1", 1), { ...row("h", "a", "2", 2), deleted: true }], nextCursor: 2 } });
   assert.deepEqual(calls, ["begin", "lease", "stage", "tombstone", "checkpoint", "commit"]);
-  await assert.rejects(() => executeBackfillPage(target, { owner: "runner", fence: 8, expiresAt: Date.now() + 1000 }, { expectedOwner: "runner", expectedFence: 7, expectedHighWater: 10, expectedCursor: null, page: { highWater: 10, cursor: null, rows: [], nextCursor: null } }), /stale fence/);
+  await assert.rejects(() => executeBackfillPage(target, { owner: "runner", fence: 8, expiresAt: 2000 }, { trustedNow: 1000, expectedOwner: "runner", expectedFence: 7, expectedHighWater: 10, expectedCursor: null, page: { highWater: 10, cursor: null, rows: [], nextCursor: null } }), /stale fence/);
 });
 
 test("deltas require contiguous monotonic sequence and preserve tombstones", () => {
