@@ -1,13 +1,5 @@
-export type MobileAuthProvider = "google" | "apple";
-
-export function availableMobileAuthProviders(platform: "ios" | "android"): MobileAuthProvider[] {
-  return platform === "ios" ? ["google", "apple"] : ["google"];
-}
-
-export function validateAuthCallback(url: URL, expectedState: string, expectedNonce: string) {
-  if (url.protocol !== "https:" || url.hostname !== "nearyou.example" || url.pathname !== "/mobile/auth/callback") throw new Error("Invalid claimed authentication link.");
-  if (!expectedState || url.searchParams.get("state") !== expectedState) throw new Error("Authentication state mismatch.");
-  const code = url.searchParams.get("code");
-  if (!code || !expectedNonce || url.searchParams.get("nonce") !== expectedNonce) throw new Error("Authentication code or nonce is missing.");
-  return code;
-}
+export type MobileAuthProvider="google"|"apple";export type PkceSession={provider:MobileAuthProvider;state:string;nonce:string;verifier:string;challenge:string;challengeMethod:"S256"};
+const b64=(bytes:Uint8Array)=>{let value="";for(const byte of bytes)value+=String.fromCharCode(byte);return btoa(value).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_")},token=/^[A-Za-z0-9_-]+$/;
+export function availableMobileAuthProviders(platform:"ios"|"android"):MobileAuthProvider[]{return platform==="ios"?["google","apple"]:["google"]}
+export async function createPkceSession(provider:MobileAuthProvider,random:(length:number)=>Uint8Array):Promise<PkceSession>{const verifierBytes=random(64),stateBytes=random(32),nonceBytes=random(32);if(verifierBytes.byteLength!==64||stateBytes.byteLength!==32||nonceBytes.byteLength!==32)throw new Error("Authentication randomness is invalid.");const verifier=b64(verifierBytes),state=b64(stateBytes),nonce=b64(nonceBytes);if(new Set([verifier,state,nonce]).size!==3||verifier.length<43||verifier.length>128||![verifier,state,nonce].every(value=>token.test(value)))throw new Error("Authentication randomness is invalid.");const challenge=b64(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier))));if(challenge.length!==43)throw new Error("Authentication challenge is invalid.");return{provider,state,nonce,verifier,challenge,challengeMethod:"S256"}}
+export function readClaimedMobileCallback(url:URL,config:{host:string;path:"/mobile/auth/callback"}){if(!/^[a-z0-9.-]+$/.test(config.host)||url.protocol!=="https:"||url.hostname!==config.host||url.pathname!==config.path)throw new Error("Invalid claimed authentication link.");const state=url.searchParams.get("state"),code=url.searchParams.get("code");if(!state||!code||!token.test(state)||code.length>4096)throw new Error("Authentication callback invalid.");return{state,code}}
