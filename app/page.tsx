@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Link } from "@/components/Link";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
+import { ProductFamily } from "@/components/ProductFamily";
 
 export const metadata: Metadata = {
   title: "Your voice, their gentlest bedtime",
@@ -29,7 +30,7 @@ export default function Home() {
               <span>Parent-operated</span><span>Voice deletion anytime</span><span>One free bedtime</span>
             </div>
           </div>
-          <div className="phone-scene" aria-label="Nearnight audio player preview">
+          <div className="phone-scene" aria-label="NearSleep audio player preview">
             <div className="orbit orbit-one" aria-hidden="true" /><div className="orbit orbit-two" aria-hidden="true" />
             <div className="star star-one" aria-hidden="true" /><div className="star star-two" aria-hidden="true" />
             <div className="phone">
@@ -66,15 +67,17 @@ export default function Home() {
           <div>
             <span className="eyebrow">Built around trust</span>
             <h2 className="display">Their comfort.<br />Your control.</h2>
-            <p className="muted">Nearnight is parent-operated and designed as a calming bedtime companion—not a monitor, medical device, or replacement for responsive care.</p>
+            <p className="muted">NearSleep is parent-operated and designed as a calming bedtime companion—not a monitor, medical device, or replacement for responsive care.</p>
             <div className="feature-list">
-              <div className="feature-item"><span className="feature-icon">◐</span><div><h3>Your voice stays yours</h3><p>Explicit voice consent, private storage, and one-tap deletion from Nearnight and the voice provider.</p></div></div>
+              <div className="feature-item"><span className="feature-icon">◐</span><div><h3>Your voice stays yours</h3><p>Explicit voice consent, private storage, and one-tap deletion from NearSleep and the voice provider.</p></div></div>
               <div className="feature-item"><span className="feature-icon">✦</span><div><h3>Guardrailed stories</h3><p>Reviewed templates and constrained personalization avoid fear, medical claims, unsafe sleep advice, and overstimulation.</p></div></div>
               <div className="feature-item"><span className="feature-icon">⌁</span><div><h3>Baby-conscious playback</h3><p>Low-volume reminders, timers, and placement guidance are shown each time a parent starts a session.</p></div></div>
             </div>
           </div>
         </div>
       </section>
+
+      <ProductFamily source="home" />
 
       <section className="section">
         <div className="container quote">
@@ -86,9 +89,9 @@ export default function Home() {
 
       <section className="section" id="pricing" style={{ background: "#f1eee6" }}>
         <div className="container">
-          <div className="section-head center"><span className="eyebrow">Simple, sustainable pricing</span><h2 className="display">Start with tonight</h2><p className="muted">One free session. Upgrade only when Nearnight earns a place in your routine.</p></div>
+          <div className="section-head center"><span className="eyebrow">Simple, sustainable pricing</span><h2 className="display">Start with tonight</h2><p className="muted">One free session. Upgrade only when NearSleep earns a place in your routine.</p></div>
           <div className="pricing-card">
-            <div className="pricing-main"><span className="eyebrow">Nearnight Plus</span><div className="price">$12 <small>/ month</small></div><p className="muted">Includes 12 new personalized sessions each month, with unlimited replays of your library.</p><Link className="btn btn-primary" href="/studio" style={{ marginTop: 20 }}>Create your free bedtime</Link><p className="pricing-note">Cancel anytime. Additional session packs available; no surprise usage bills.</p></div>
+            <div className="pricing-main"><span className="eyebrow">NearSleep Plus</span><div className="price">$12 <small>/ month</small></div><p className="muted">Includes 12 new personalized sessions each month, with unlimited replays of your library.</p><Link className="btn btn-primary" href="/studio" style={{ marginTop: 20 }}>Create your free bedtime</Link><p className="pricing-note">Cancel anytime. Additional session packs available; no surprise usage bills.</p></div>
             <div className="pricing-details"><strong>Everything parents need</strong><ul className="check-list"><li>Your private voice profile</li><li>Curated and personalized stories</li><li>5–20 minute sessions</li><li>On-device calming sound layers</li><li>Offline-ready mobile architecture</li><li>Voice and account deletion controls</li></ul></div>
           </div>
         </div>

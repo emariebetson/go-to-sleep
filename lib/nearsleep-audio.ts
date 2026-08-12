@@ -37,7 +37,7 @@ export async function parseProductionAudioRequest(body: Record<string, unknown>)
   validateNarrationDuration(prepared.full, input.durationMinutes);
   const wordCount = narration.trim().split(/\s+/).filter(Boolean).length;
   if (!assessChildNarrationSafety(narration).safe) {
-    throw new Error("The edited script contains language outside Nearnight’s safety boundaries. Please revise it before creating audio.");
+    throw new Error("The edited script contains language outside NearSleep’s safety boundaries. Please revise it before creating audio.");
   }
   const fingerprint = await canonicalGenerationFingerprint({
     input: {

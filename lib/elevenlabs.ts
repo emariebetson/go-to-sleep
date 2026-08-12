@@ -31,7 +31,7 @@ export function classifyVoiceCreationError(status: number, payload: ProviderErro
   if (cloningPlanError) {
     return {
       code: "voice_cloning_unavailable",
-      message: "Parent voice cloning is unavailable on Nearnight’s current provider plan.",
+      message: "Parent voice cloning is unavailable on NearSleep’s current provider plan.",
       httpStatus: 503,
     };
   }
@@ -61,7 +61,7 @@ export function classifySpeechGenerationError(status: number, providerBody: stri
   if ((status === 401 || status === 402) && (detail.includes("quota_exceeded") || detail.includes("exceeds your quota"))) {
     return {
       code: "provider_quota_exhausted",
-      message: "Nearnight’s ElevenLabs credits are exhausted. Add provider credits or upgrade the ElevenLabs plan, then try again.",
+      message: "NearSleep’s ElevenLabs credits are exhausted. Add provider credits or upgrade the ElevenLabs plan, then try again.",
       httpStatus: 503,
     };
   }

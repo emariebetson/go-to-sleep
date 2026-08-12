@@ -1342,3 +1342,38 @@ export const encryptedIntegrationTokens = sqliteTable(
   },
   (table) => [uniqueIndex("encrypted_integration_tokens_household_user_provider_idx").on(table.householdId, table.userId, table.provider)],
 );
+
+export const marketingWaitlistContacts = sqliteTable("marketing_waitlist_contacts", {
+  id: text("id").primaryKey(),
+  emailLookupHash: text("email_lookup_hash").notNull().unique(),
+  emailCiphertext: text("email_ciphertext").notNull(),
+  emailIv: text("email_iv").notNull(),
+  consentVersion: text("consent_version").notNull(),
+  consentedAt: integer("consented_at", { mode: "timestamp_ms" }).notNull(),
+  unsubscribedAt: integer("unsubscribed_at", { mode: "timestamp_ms" }),
+  version: integer("version").notNull().default(1),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const marketingWaitlistInterests = sqliteTable("marketing_waitlist_interests", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id").notNull().references(() => marketingWaitlistContacts.id, { onDelete: "cascade" }),
+  product: text("product", { enum: ["nearstory", "nearfamily", "nearlegacy"] }).notNull(),
+  signupSource: text("signup_source", { enum: ["home", "pricing"] }).notNull(),
+  joinedAt: integer("joined_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [uniqueIndex("marketing_waitlist_interest_contact_product_idx").on(table.contactId, table.product)]);
+
+export const marketingWaitlistSync = sqliteTable("marketing_waitlist_sync", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id").notNull().references(() => marketingWaitlistContacts.id, { onDelete: "cascade" }),
+  contactVersion: integer("contact_version").notNull(),
+  status: text("status", { enum: ["pending", "processing", "completed", "dead_letter"] }).notNull().default("pending"),
+  attemptToken: text("attempt_token"),
+  leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }),
+  errorCode: text("error_code"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [uniqueIndex("marketing_waitlist_sync_contact_version_idx").on(table.contactId, table.contactVersion), index("marketing_waitlist_sync_status_next_idx").on(table.status, table.nextAttemptAt)]);

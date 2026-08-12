@@ -21,11 +21,14 @@ async function render(path = "/") {
   }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("server-renders the Nearnight landing page", async () => {
+test("server-renders the NearSleep landing page and coming-soon product family", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Nearnight/);
+  assert.match(html, /NearSleep/);
+  assert.match(html, /NearStory/);
+  assert.match(html, /NearFamily/);
+  assert.match(html, /NearLegacy/);
   assert.match(html, /Your voice/);
   assert.match(html, /Create tonight/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
@@ -117,7 +120,7 @@ test("pronunciation guesses require an authenticated parent", async () => {
   assert.equal(response.status, 401);
 });
 
-test("Stripe requests pin the current API and identify Nearnight checkout", async () => {
+test("Stripe requests pin the current API and preserve the deployed checkout compatibility identifier", async () => {
   const stripeSource = await readFile(new URL("../lib/stripe.ts", import.meta.url), "utf8");
   const checkoutSource = await readFile(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8");
   assert.match(stripeSource, /2026-06-24\.dahlia/);

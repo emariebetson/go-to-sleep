@@ -142,7 +142,7 @@ export function SleepVisualizer({ launcherRef, open, playing, paused, currentTim
     </div>
 
     <div className="visualizer-topbar">
-      <div><span className="eyebrow">Nearnight</span><strong>Soothing visualizer</strong></div>
+      <div><span className="eyebrow">NearSleep</span><strong>Soothing visualizer</strong></div>
       <div className="visualizer-top-actions">
         {supportsDeviceFullscreen && <button className="visualizer-icon-button visualizer-fullscreen-button" type="button" onClick={() => void toggleDeviceFullscreen()} aria-label={deviceFullscreen ? "Exit device fullscreen" : "Fill device screen"}>{deviceFullscreen ? "↙" : "↗"}</button>}
         <button className="visualizer-icon-button" type="button" onClick={onClose} ref={closeRef} aria-label="Close visualizer">×</button>

@@ -11,13 +11,13 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase,
     applicationName: "NearSleep by NearYou",
-    title: { default: "Nearnight — Your voice, their gentlest bedtime", template: "%s · Nearnight" },
+    title: { default: "NearSleep — Your voice, their gentlest bedtime", template: "%s · NearSleep" },
     description: "Create calming, personalized bedtime audio for your baby in the voice they know best—yours.",
     openGraph: {
-      title: "Nearnight — Your voice, their gentlest bedtime",
+      title: "NearSleep — Your voice, their gentlest bedtime",
       description: "Personalized baby bedtime stories in a parent's familiar voice.",
       type: "website",
-      images: [{ url: new URL("/og.png", metadataBase), width: 1200, height: 630, alt: "Nearnight — Your voice. Their gentlest bedtime." }],
+      images: [{ url: new URL("/og.png", metadataBase), width: 1200, height: 630, alt: "NearSleep — Your voice. Their gentlest bedtime." }],
     },
     twitter: { card: "summary_large_image", images: [new URL("/og.png", metadataBase)] },
     other: {
