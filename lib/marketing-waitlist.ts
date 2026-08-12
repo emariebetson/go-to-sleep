@@ -4,6 +4,15 @@ export type WaitlistProduct = typeof WAITLIST_PRODUCTS[number];
 export type WaitlistSource = "home" | "pricing";
 export type SealedEmail = { ciphertext: string; iv: string };
 
+export async function ensureMarketingWaitlistSchema(database: D1Database) {
+  await database.batch([
+    database.prepare("CREATE TABLE IF NOT EXISTS marketing_waitlist_contacts (id TEXT PRIMARY KEY NOT NULL,email_lookup_hash TEXT NOT NULL UNIQUE,email_ciphertext TEXT NOT NULL,email_iv TEXT NOT NULL,consent_version TEXT NOT NULL,consented_at INTEGER NOT NULL,unsubscribed_at INTEGER,version INTEGER NOT NULL DEFAULT 1,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)"),
+    database.prepare("CREATE TABLE IF NOT EXISTS marketing_waitlist_interests (id TEXT PRIMARY KEY NOT NULL,contact_id TEXT NOT NULL REFERENCES marketing_waitlist_contacts(id) ON DELETE CASCADE,product TEXT NOT NULL,signup_source TEXT NOT NULL,joined_at INTEGER NOT NULL,UNIQUE(contact_id,product))"),
+    database.prepare("CREATE TABLE IF NOT EXISTS marketing_waitlist_sync (id TEXT PRIMARY KEY NOT NULL,contact_id TEXT NOT NULL REFERENCES marketing_waitlist_contacts(id) ON DELETE CASCADE,contact_version INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempt_token TEXT,lease_expires_at INTEGER,attempt_count INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER,error_code TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(contact_id,contact_version))"),
+    database.prepare("CREATE INDEX IF NOT EXISTS marketing_waitlist_sync_status_next_idx ON marketing_waitlist_sync(status,next_attempt_at)"),
+  ]);
+}
+
 function hexBytes(value: string) {
   if (!/^[a-f0-9]{64}$/i.test(value)) throw new Error("waitlist_configuration_unavailable");
   return Uint8Array.from(value.match(/.{2}/g)!, (part) => Number.parseInt(part, 16));

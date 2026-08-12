@@ -1,4 +1,4 @@
-CREATE TABLE `marketing_waitlist_contacts` (
+CREATE TABLE IF NOT EXISTS `marketing_waitlist_contacts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`email_lookup_hash` text NOT NULL,
 	`email_ciphertext` text NOT NULL,
@@ -11,8 +11,8 @@ CREATE TABLE `marketing_waitlist_contacts` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `marketing_waitlist_contacts_email_lookup_hash_unique` ON `marketing_waitlist_contacts` (`email_lookup_hash`);--> statement-breakpoint
-CREATE TABLE `marketing_waitlist_interests` (
+CREATE UNIQUE INDEX IF NOT EXISTS `marketing_waitlist_contacts_email_lookup_hash_unique` ON `marketing_waitlist_contacts` (`email_lookup_hash`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `marketing_waitlist_interests` (
 	`id` text PRIMARY KEY NOT NULL,
 	`contact_id` text NOT NULL,
 	`product` text NOT NULL,
@@ -21,8 +21,8 @@ CREATE TABLE `marketing_waitlist_interests` (
 	FOREIGN KEY (`contact_id`) REFERENCES `marketing_waitlist_contacts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `marketing_waitlist_interest_contact_product_idx` ON `marketing_waitlist_interests` (`contact_id`,`product`);--> statement-breakpoint
-CREATE TABLE `marketing_waitlist_sync` (
+CREATE UNIQUE INDEX IF NOT EXISTS `marketing_waitlist_interest_contact_product_idx` ON `marketing_waitlist_interests` (`contact_id`,`product`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `marketing_waitlist_sync` (
 	`id` text PRIMARY KEY NOT NULL,
 	`contact_id` text NOT NULL,
 	`contact_version` integer NOT NULL,
@@ -37,5 +37,5 @@ CREATE TABLE `marketing_waitlist_sync` (
 	FOREIGN KEY (`contact_id`) REFERENCES `marketing_waitlist_contacts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `marketing_waitlist_sync_contact_version_idx` ON `marketing_waitlist_sync` (`contact_id`,`contact_version`);--> statement-breakpoint
-CREATE INDEX `marketing_waitlist_sync_status_next_idx` ON `marketing_waitlist_sync` (`status`,`next_attempt_at`);
+CREATE UNIQUE INDEX IF NOT EXISTS `marketing_waitlist_sync_contact_version_idx` ON `marketing_waitlist_sync` (`contact_id`,`contact_version`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `marketing_waitlist_sync_status_next_idx` ON `marketing_waitlist_sync` (`status`,`next_attempt_at`);

@@ -35,4 +35,7 @@ test("0016 creates additive authoritative contacts, interests, and sync outbox",
   }
   for (const table of ["marketing_waitlist_contacts", "marketing_waitlist_interests", "marketing_waitlist_sync"]) assert.equal(database.prepare("SELECT count(*) count FROM sqlite_master WHERE type='table' AND name=?").get(table).count, 1);
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  const repeat = readFileSync(new URL("../drizzle/0016_marketing_waitlist.sql", import.meta.url), "utf8");
+  for (const statement of repeat.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) database.exec(statement);
+  assert.equal(database.prepare("SELECT count(*) count FROM marketing_waitlist_contacts").get().count, 0);
 });

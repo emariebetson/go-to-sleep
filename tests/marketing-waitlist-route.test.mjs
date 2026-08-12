@@ -11,6 +11,7 @@ test("public waitlist route is bounded, same-origin, encrypted, and atomically o
   assert.match(source, /encryptWaitlistEmail/);
   assert.match(source, /marketing_waitlist_sync/);
   assert.match(source, /env\.DB\.batch/);
+  assert.match(source, /ensureMarketingWaitlistSchema/);
   assert.doesNotMatch(source, /console\.(log|error)\([^)]*email/);
 });
 

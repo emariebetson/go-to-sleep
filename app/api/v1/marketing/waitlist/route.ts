@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { assertTrustedMutationOrigin, jsonNoStore, readJsonObject } from "@/lib/http";
-import { emailLookupHash, encryptWaitlistEmail, normalizeWaitlistInput } from "@/lib/marketing-waitlist";
+import { emailLookupHash, encryptWaitlistEmail, ensureMarketingWaitlistSchema, normalizeWaitlistInput } from "@/lib/marketing-waitlist";
 
 export async function POST(request: Request) {
   try {
@@ -8,6 +8,7 @@ export async function POST(request: Request) {
     const input = normalizeWaitlistInput(await readJsonObject(request, 4_096));
     const key = process.env.MARKETING_WAITLIST_ENCRYPTION_KEY || "";
     if (!/^[a-f0-9]{64}$/i.test(key)) return jsonNoStore({ error: "The waitlist is temporarily unavailable." }, { status: 503 });
+    await ensureMarketingWaitlistSchema(env.DB);
     const lookup = await emailLookupHash(input.email, key);
     const sealed = await encryptWaitlistEmail(input.email, key);
     const now = Date.now();
