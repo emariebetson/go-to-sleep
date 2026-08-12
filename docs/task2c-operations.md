@@ -14,3 +14,18 @@ In migration-only mode the endpoint processes at most two legacy ready-media obj
 Configure a request timeout of at least 120 seconds and allow retries with jitter. Account cleanup performs at most two 30-second provider actions and generic cleanup performs at most two 25-second actions per lease, leaving DB/R2 margin inside the two-minute lease; overlapping scheduler invocations safely observe the active lease or repeat idempotent provider/R2 deletion after a lease expires.
 
 Rollout order: deploy the migration-dark compatible application, apply 0012, enable only the reconciliation flag, run the bounded worker until the zero-unresolved readiness canary is stable, configure and verify the continuing scheduler endpoint, disable the migration-only flag, and only then enable the Task 2C product flag. Story and Legacy generation flags remain off.
+
+## NearLegacy continuation and activation
+
+Sites does not install a production cron. Before enabling NearLegacy, provision an external HTTPS scheduler to call the bounded continuation endpoint every minute:
+
+```text
+POST https://<production-host>/api/internal/nearlegacy-worker
+Authorization: Bearer <NEARYOU_LEGACY_WORKER_SECRET>
+```
+
+Use a random 32-byte-or-longer secret, a 120-second request timeout, jittered retry, and alerts on non-200 results or an archive heartbeat older than three minutes. Each invocation advances a bounded slice of upload reconciliation, evidence retention, transcription, export, deletion, and annual-plan allowance refill work. Database leases make overlapping calls safe.
+
+Deploy the private `services/legacy-media-processor` container first. Configure its HTTPS `/probe` URL and shared bearer token as `NEARYOU_LEGACY_MEDIA_PROCESSOR_URL` and `NEARYOU_LEGACY_MEDIA_PROCESSOR_TOKEN`; verify `/readyz` from the private service network. NearLegacy activation deliberately fails closed unless MFA, processor configuration, all safety flags, migration `0014`, and a fresh worker heartbeat are present.
+
+Canary sequence: call the worker manually, assert `legacy_activation_state.worker_heartbeat_at` advances, verify a one-use liveness challenge with a non-production test contributor, enqueue a short transcription, export it, verify authenticated range playback/download, revoke its consent, and confirm playback/query/export become unavailable. Keep `NEARYOU_ENABLE_LEGACY_ARCHIVE=false` until the external scheduler has maintained the heartbeat and zero dead-letter alert state for 24 hours.

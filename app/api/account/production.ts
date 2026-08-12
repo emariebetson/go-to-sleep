@@ -37,7 +37,7 @@ const QUIESCENCE_MS = 2 * 60 * 1000;
 const STALE_WORK_MS = 15 * 60 * 1000;
 const INVENTORY_ROWS_PER_PAGE = 20;
 const INVENTORY_REFERENCES_PER_ATTEMPT = 50;
-const INVENTORY_STAGES = ["billing_accounts", "billing_subscriptions", "voices", "voice_replacements", "media", "story_checkpoints", "story_staging", "sessions", "exports", "export_parts", "export_metadata_pages", "generation", "reconciliations"] as const;
+const INVENTORY_STAGES = ["billing_accounts", "billing_subscriptions", "voices", "voice_replacements", "media", "story_checkpoints", "story_staging", "legacy_uploads", "legacy_evidence", "legacy_exports", "legacy_export_parts", "legacy_deletion_items", "sessions", "exports", "export_parts", "export_metadata_pages", "generation", "reconciliations"] as const;
 type InventoryStage = typeof INVENTORY_STAGES[number];
 type InventoryKind = typeof accountDeletionItems.$inferInsert.kind;
 
@@ -117,8 +117,11 @@ async function deleteProviderVoice(providerVoiceId: string) {
 async function advanceDeletionInventory(record: typeof accountDeletionOperations.$inferSelect, attemptToken: string) {
   const db = getDb();
   const householdId = record.householdId!;
-  const storyCheckpointTableExists = Boolean((await env.DB.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='story_worker_checkpoints' LIMIT 1").all()).results[0]);
-  const activeStages: readonly InventoryStage[] = storyCheckpointTableExists ? INVENTORY_STAGES : INVENTORY_STAGES.filter((item) => item !== "story_checkpoints" && item !== "story_staging");
+  const [storyCheckpointTableExists, legacyTableExists] = await Promise.all([
+    env.DB.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='story_worker_checkpoints' LIMIT 1").all().then((result) => Boolean(result.results[0])),
+    env.DB.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='legacy_consents' LIMIT 1").all().then((result) => Boolean(result.results[0])),
+  ]);
+  const activeStages: readonly InventoryStage[] = INVENTORY_STAGES.filter((item) => (storyCheckpointTableExists || (item !== "story_checkpoints" && item !== "story_staging")) && (legacyTableExists || !item.startsWith("legacy_")));
   let stage = (activeStages.includes(record.inventoryStage as InventoryStage) ? record.inventoryStage : activeStages[0]) as InventoryStage;
   let cursor = record.inventoryCursor;
   let referenceBudget = INVENTORY_REFERENCES_PER_ATTEMPT;
@@ -166,6 +169,26 @@ async function advanceDeletionInventory(record: typeof accountDeletionOperations
     } else if (stage === "story_staging") {
       rows = await db.select({ cursor: storyPersistStagingObjects.id, storageKey: storyPersistStagingObjects.storageKey }).from(storyPersistStagingObjects).innerJoin(storyExperiences, and(eq(storyPersistStagingObjects.storyId, storyExperiences.id), eq(storyPersistStagingObjects.householdId, storyExperiences.householdId))).where(and(eq(storyExperiences.requestedByUserId, record.userId!), ne(storyPersistStagingObjects.status, "deleted"), ...(cursor ? [gt(storyPersistStagingObjects.id, cursor)] : []))).orderBy(asc(storyPersistStagingObjects.id)).limit(limit + 1).all();
       references = rows.slice(0, limit).map((row) => ({ kind: "storage_key" as const, reference: String(row.storageKey) }));
+    } else if (stage === "legacy_uploads") {
+      const result = await env.DB.prepare("SELECT id AS cursor,storage_key AS storageKey FROM legacy_upload_operations WHERE household_id=? AND status<>'deleted' AND (? IS NULL OR id>?) ORDER BY id LIMIT ?").bind(householdId, cursor, cursor, limit + 1).all();
+      rows = result.results as typeof rows;
+      references = rows.slice(0, limit).map((row) => ({ kind: "storage_key" as const, reference: String(row.storageKey) }));
+    } else if (stage === "legacy_evidence") {
+      const result = await env.DB.prepare("SELECT id AS cursor,evidence_key AS storageKey FROM legacy_consents WHERE household_id=? AND evidence_key IS NOT NULL AND (? IS NULL OR id>?) ORDER BY id LIMIT ?").bind(householdId, cursor, cursor, limit + 1).all();
+      rows = result.results as typeof rows;
+      references = rows.slice(0, limit).flatMap((row) => typeof row.storageKey === "string" ? [{ kind: "storage_key" as const, reference: row.storageKey }] : []);
+    } else if (stage === "legacy_exports") {
+      const result = await env.DB.prepare("SELECT id AS cursor,manifest_key AS storageKey FROM legacy_export_operations WHERE household_id=? AND manifest_key IS NOT NULL AND (? IS NULL OR id>?) ORDER BY id LIMIT ?").bind(householdId, cursor, cursor, limit + 1).all();
+      rows = result.results as typeof rows;
+      references = rows.slice(0, limit).flatMap((row) => typeof row.storageKey === "string" ? [{ kind: "storage_key" as const, reference: row.storageKey }] : []);
+    } else if (stage === "legacy_export_parts") {
+      const result = await env.DB.prepare("SELECT id AS cursor,storage_key AS storageKey FROM legacy_export_parts WHERE household_id=? AND (? IS NULL OR id>?) ORDER BY id LIMIT ?").bind(householdId, cursor, cursor, limit + 1).all();
+      rows = result.results as typeof rows;
+      references = rows.slice(0, limit).map((row) => ({ kind: "storage_key" as const, reference: String(row.storageKey) }));
+    } else if (stage === "legacy_deletion_items") {
+      const result = await env.DB.prepare("SELECT id AS cursor,storage_key AS storageKey FROM legacy_deletion_items WHERE household_id=? AND storage_key IS NOT NULL AND (? IS NULL OR id>?) ORDER BY id LIMIT ?").bind(householdId, cursor, cursor, limit + 1).all();
+      rows = result.results as typeof rows;
+      references = rows.slice(0, limit).flatMap((row) => typeof row.storageKey === "string" ? [{ kind: "storage_key" as const, reference: row.storageKey }] : []);
     } else if (stage === "sessions") {
       rows = await db.select({ cursor: sleepSessions.id, id: sleepSessions.id, householdId: sleepSessions.householdId, audioKey: sleepSessions.audioKey }).from(sleepSessions).where(and(
         eq(sleepSessions.userId, record.userId!), ...(cursor ? [gt(sleepSessions.id, cursor)] : []),
@@ -493,6 +516,7 @@ export async function deleteProductionAccount(request: Request) {
         if (detail.includes("fresh_reauthentication_required")) return jsonNoStore({ error: "A new, one-use Google sign-in is required before deletion." }, { status: 403 });
         if (detail.includes("account_deletion_checkout_in_progress")) return jsonNoStore({ error: "A billing checkout is still being created. Finish or expire it before deleting the account." }, { status: 409 });
         if (detail.includes("account_deletion_membership_conflict")) return jsonNoStore({ error: "Household membership changed. Transfer, leave, or remove members before retrying deletion." }, { status: 409 });
+        if (detail.includes("legacy_custody_transfer_required")) return jsonNoStore({ error: "Transfer primary custody of every NearLegacy archive to an accepted successor before deleting this account.", code: "legacy_custody_transfer_required" }, { status: 409 });
         throw error;
         }
       }

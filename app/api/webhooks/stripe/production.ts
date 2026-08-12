@@ -1,10 +1,10 @@
 import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { accountDeletionBillingTombstones, entitlements, householdBillingAccounts, householdBillingSubscriptions, households, stripeEvents } from "@/db/schema";
+import { accountDeletionBillingTombstones, annualAllowanceRefills, entitlements, householdBillingAccounts, householdBillingSubscriptions, households, stripeEvents } from "@/db/schema";
 import { jsonNoStore } from "@/lib/http";
 import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled, PLAN_CATALOG } from "@/lib/nearyou-foundation";
 import { configuredStripePrices, stripeEntitlementStatus, stripeEntitlementValidUntil, stripeInvoiceOrderingDecision, type StripePriceBinding } from "@/lib/stripe-entitlements";
-import { checkoutBinding, expiredCheckoutBinding, paidInvoice, subscriptionInvoice, subscriptionUpdate, type SubscriptionUpdate } from "@/lib/stripe-events";
+import { checkoutBinding, expiredCheckoutBinding, paidInvoice, paymentCheckoutBinding, subscriptionInvoice, subscriptionUpdate, type SubscriptionUpdate } from "@/lib/stripe-events";
 import { stripeGet } from "@/lib/stripe";
 import { sha256Hex } from "@/lib/nearsleep-library";
 
@@ -43,7 +43,7 @@ function boundedErrorCode(error: unknown) {
 }
 
 function supportedLivePrice(price: StripePriceBinding, existingGrandfathered: boolean) {
-  if (price.interval !== "month" || price.planId === "nearlegacy") return false;
+  if (price.interval === "one_time") return false;
   return !price.grandfathered || existingGrandfathered;
 }
 
@@ -279,10 +279,21 @@ async function syncSubscription(event: ProductionStripeEvent, original: Subscrip
 }
 
 async function processCheckout(event: ProductionStripeEvent, prices: Map<string, StripePriceBinding>) {
+  const payment = paymentCheckoutBinding(event.data.object, [...prices.keys()]);
+  if (payment) {
+    const paymentPrice=prices.get(payment.priceId);
+    if (!paymentPrice || paymentPrice.planId!=="archive_builder" || paymentPrice.interval!=="one_time") return;
+    const householdId=await initialHouseholdBinding(payment.userId,payment.householdId),now=new Date(event.created*1000),validUntil=new Date(now.getTime()+365*86400000);
+    await getDb().insert(householdBillingAccounts).values({householdId,status:"free",createdAt:now,updatedAt:now}).onConflictDoNothing();
+    const claimed=await getDb().update(householdBillingAccounts).set({customerId:payment.customerId,checkoutPendingAt:null,checkoutSessionId:payment.sessionId,checkoutStatus:"completed",updatedAt:now}).where(and(eq(householdBillingAccounts.householdId,householdId),eq(householdBillingAccounts.checkoutOperationId,payment.operationId),or(isNull(householdBillingAccounts.checkoutSessionId),eq(householdBillingAccounts.checkoutSessionId,payment.sessionId)))).returning({id:householdBillingAccounts.householdId}).get();
+    if(!claimed)throw new Error("stripe_archive_builder_checkout_conflict");
+    await getDb().insert(entitlements).values({id:`entitlement:stripe:${payment.paymentIntentId}`,householdId,planId:"archive_builder",source:"stripe",status:"active",allowanceMilliunits:PLAN_CATALOG.archive_builder.monthlyAllowanceMilliunits,remainingMilliunits:PLAN_CATALOG.archive_builder.monthlyAllowanceMilliunits,externalRef:payment.paymentIntentId,validFrom:now,validUntil,billingPeriodStart:event.created,createdAt:now,updatedAt:now}).onConflictDoNothing();
+    return;
+  }
   const checkout = checkoutBinding(event.data.object, [...prices.keys()]);
   if (!checkout) return;
   const price = prices.get(checkout.priceId);
-  if (!price || price.interval !== "month" || price.grandfathered || price.planId === "nearlegacy") return;
+  if (!price || price.interval === "one_time" || price.grandfathered) return;
   const householdId = await initialHouseholdBinding(checkout.userId, checkout.householdId);
   const now = new Date(event.created * 1000);
   await getDb().insert(householdBillingAccounts).values({ householdId, status: "free", createdAt: now, updatedAt: now }).onConflictDoNothing();
@@ -408,6 +419,7 @@ async function processPaidInvoice(event: ProductionStripeEvent, prices: Map<stri
     eq(entitlements.id, currentEntitlement.id),
     or(isNull(entitlements.billingPeriodStart), lt(entitlements.billingPeriodStart, invoice.periodStart)),
   ));
+  if (price.interval === "year") await getDb().insert(annualAllowanceRefills).values({ entitlementId: currentEntitlement.id, householdId: binding.householdId, anchorSeconds: invoice.periodStart, refilledThroughSeconds: invoice.periodStart, createdAt: eventTime, updatedAt: eventTime }).onConflictDoUpdate({ target: annualAllowanceRefills.entitlementId, set: { anchorSeconds: invoice.periodStart, refilledThroughSeconds: invoice.periodStart, updatedAt: eventTime } });
   await getDb().update(householdBillingAccounts).set({
     status: "active",
     subscriptionEventCreatedAt: sql`MAX(COALESCE(${householdBillingAccounts.subscriptionEventCreatedAt}, 0), ${event.created})`,

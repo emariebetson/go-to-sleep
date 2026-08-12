@@ -19,6 +19,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       updatedAt: jobs.updatedAt,
       startedAt: jobs.startedAt,
       completedAt: jobs.completedAt,
+      progressStage: jobs.progressStage,
+      progressPercent: jobs.progressPercent,
     }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.householdId, householdId))).get();
     if (!job) return jsonNoStore({ error: "Job not found." }, { status: 404 });
     return jsonNoStore({ apiVersion: "v1", job });

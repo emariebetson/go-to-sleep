@@ -74,6 +74,29 @@ export const PLAN_CATALOG = {
     features: { nearsleep: true, nearstoryParentControlled: true, nearlegacy: true, childMicrophone: false },
     limits: { children: 5, voices: 5, members: 8, narrationMinutes: 120, transcriptionMinutes: 180, storageBytes: 100_000_000_000 },
   },
+  archive_builder: {
+    id: "archive_builder",
+    product: "nearlegacy",
+    name: "Archive Builder",
+    monthlyPriceUsd: 0,
+    annualPriceUsd: null,
+    oneTimePriceUsd: 199,
+    monthlyAllowanceMilliunits: 600_000,
+    maxAdultVoices: 5,
+    features: { nearsleep: false, nearstoryParentControlled: false, nearlegacy: true, childMicrophone: false },
+    limits: { children: 5, voices: 5, members: 8, narrationMinutes: 0, transcriptionMinutes: 600, storageBytes: 100_000_000_000 },
+  },
+  archive_care: {
+    id: "archive_care",
+    product: "nearlegacy",
+    name: "Archive Care",
+    monthlyPriceUsd: 0,
+    annualPriceUsd: 59,
+    monthlyAllowanceMilliunits: 0,
+    maxAdultVoices: 5,
+    features: { nearsleep: false, nearstoryParentControlled: false, nearlegacy: true, childMicrophone: false },
+    limits: { children: 5, voices: 5, members: 8, narrationMinutes: 0, transcriptionMinutes: 0, storageBytes: 100_000_000_000 },
+  },
 } as const;
 
 export type PlanId = keyof typeof PLAN_CATALOG;
@@ -95,9 +118,11 @@ export type FeatureFlags = {
   legacyNearsleepRoutes: boolean;
   story: boolean;
   legacyArchive: boolean;
+  verifiedMediaProbe: boolean;
   asyncMediaJobs: boolean;
   usageReservations: boolean;
   requireVerifiedVoiceConsent: boolean;
+  requireLegacyMfa: boolean;
   childMicrophone: false;
   posthumousSynthesis: false;
   stripeLiveMode: false;
@@ -116,9 +141,11 @@ export function featureFlagsFromEnv(environment: Record<string, string | undefin
     legacyNearsleepRoutes: true,
     story: enabled(environment.NEARYOU_ENABLE_STORY),
     legacyArchive: enabled(environment.NEARYOU_ENABLE_LEGACY_ARCHIVE),
+    verifiedMediaProbe: enabled(environment.NEARYOU_ENABLE_VERIFIED_MEDIA_PROBE),
     asyncMediaJobs: enabled(environment.NEARYOU_ENABLE_ASYNC_MEDIA_JOBS),
     usageReservations: enabled(environment.NEARYOU_ENABLE_USAGE_RESERVATIONS),
     requireVerifiedVoiceConsent: enabled(environment.NEARYOU_REQUIRE_VERIFIED_VOICE_CONSENT),
+    requireLegacyMfa: enabled(environment.NEARYOU_REQUIRE_LEGACY_MFA),
     childMicrophone: false,
     posthumousSynthesis: false,
     stripeLiveMode: false,
@@ -145,11 +172,22 @@ export function nearStoryParentBetaFlagsEnabled(flags: FeatureFlags) {
     && flags.requireVerifiedVoiceConsent;
 }
 
+export function nearLegacyArchiveFlagsEnabled(flags: FeatureFlags) {
+  return nearSleepLibraryPrivacyEnabled(flags)
+    && flags.legacyArchive
+    && flags.asyncMediaJobs
+    && flags.usageReservations
+    && flags.requireVerifiedVoiceConsent
+    && flags.requireLegacyMfa
+    && flags.verifiedMediaProbe
+    && !flags.posthumousSynthesis;
+}
+
 export const FEATURE_FLAGS = featureFlagsFromEnv({});
 export const VOICE_CONSENT_VERSION = "voice-v1";
 export const VOICE_CONSENT_ATTESTATION = "I confirm this is my voice and I consent to private narration in my household.";
 
-export type HouseholdRole = "owner" | "adult_manager" | "listener";
+export type HouseholdRole = "owner" | "adult_manager" | "contributor" | "listener";
 export type HouseholdCapability =
   | "household:read"
   | "household:write"
@@ -163,12 +201,17 @@ export type HouseholdCapability =
   | "playlist:read"
   | "playlist:write"
   | "job:read"
-  | "job:write";
+  | "job:write"
+  | "archive:read"
+  | "archive:write"
+  | "archive:self"
+  | "archive:custody";
 
 const ROLE_CAPABILITIES: Record<HouseholdRole, ReadonlySet<HouseholdCapability>> = {
-  owner: new Set<HouseholdCapability>(["household:read", "household:write", "invitation:write", "child:read", "child:write", "voice:read", "voice:consent", "entitlement:read", "usage:read", "playlist:read", "playlist:write", "job:read", "job:write"]),
-  adult_manager: new Set<HouseholdCapability>(["household:read", "child:read", "child:write", "voice:read", "voice:consent", "entitlement:read", "usage:read", "playlist:read", "playlist:write", "job:read", "job:write"]),
-  listener: new Set<HouseholdCapability>(["household:read", "child:read", "voice:read", "playlist:read"]),
+  owner: new Set<HouseholdCapability>(["household:read", "household:write", "invitation:write", "child:read", "child:write", "voice:read", "voice:consent", "entitlement:read", "usage:read", "playlist:read", "playlist:write", "job:read", "job:write", "archive:read", "archive:write", "archive:self", "archive:custody"]),
+  adult_manager: new Set<HouseholdCapability>(["household:read", "child:read", "child:write", "voice:read", "voice:consent", "entitlement:read", "usage:read", "playlist:read", "playlist:write", "job:read", "job:write", "archive:read", "archive:write"]),
+  contributor: new Set<HouseholdCapability>(["household:read", "archive:read", "archive:self"]),
+  listener: new Set<HouseholdCapability>(["household:read", "child:read", "voice:read", "playlist:read", "archive:read"]),
 };
 
 export function roleCan(role: HouseholdRole, capability: HouseholdCapability) {

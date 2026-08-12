@@ -15,6 +15,7 @@ interface Env {
   NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY?: string;
   NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION?: string;
   NEARYOU_ENABLE_STORY?: string;
+  NEARYOU_ENABLE_LEGACY_ARCHIVE?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -64,8 +65,11 @@ const worker = {
     const task2cEnabled = nearSleepLibraryPrivacyEnabled(featureFlagsFromEnv(env as unknown as Record<string, string | undefined>));
     const migrationReconciliationEnabled = env.NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION === "true";
     const storyEnabled = env.NEARYOU_ENABLE_STORY === "true";
-    if (!task2cEnabled && !migrationReconciliationEnabled && !storyEnabled) return;
+    const legacyEnabled = env.NEARYOU_ENABLE_LEGACY_ARCHIVE === "true";
+    if (!task2cEnabled && !migrationReconciliationEnabled && !storyEnabled && !legacyEnabled) return;
     ctx.waitUntil((async () => {
+      const { advanceAnnualAllowanceRefill } = await import("@/lib/annual-allowance");
+      await advanceAnnualAllowanceRefill();
       if (task2cEnabled || migrationReconciliationEnabled) {
         const [{ reconcileHouseholdExports }, { reconcilePendingSessionDeletions, reconcilePendingDeletionReconciliations }, { reconcilePendingAccountDeletions }, { reconcileLegacyReadyMedia }] = await Promise.all([
           import("@/lib/nearsleep-export"), import("@/lib/nearsleep-deletion-reconciliation"), import("@/app/api/account/production"), import("@/lib/nearsleep-storage-reconciliation"),
@@ -82,6 +86,21 @@ const worker = {
         await reconcileExhaustedNearStoryJobs(5);
         await reconcileStoryCheckpointCleanup(20);
         await reconcilePendingStoryDeletions({ bucket: env.AUDIO, limit: 5 });
+      }
+      if (legacyEnabled) {
+        try {
+          const [{ advanceLegacyDeletion, advanceLegacyEvidenceRetention, advanceLegacyExport, advanceLegacyTranscription, reconcileLegacyUploads }, { env: workerEnv }] = await Promise.all([import("@/lib/nearlegacy-worker"), import("cloudflare:workers")]);
+          const uploads = await reconcileLegacyUploads();
+          const evidence = await advanceLegacyEvidenceRetention();
+          const transcription = await advanceLegacyTranscription();
+          const exported = await advanceLegacyExport();
+          const deletion = await advanceLegacyDeletion();
+          const heartbeat = Date.now(); await workerEnv.DB.prepare("UPDATE legacy_activation_state SET worker_heartbeat_at=?,updated_at=? WHERE id='archive'").bind(heartbeat,heartbeat).run();
+          console.info(JSON.stringify({event:"nearlegacy.scheduler.completed",heartbeat,uploads,evidence,transcription,export:exported,deletion}));
+        } catch (error) {
+          console.error(JSON.stringify({event:"nearlegacy.scheduler.failed",message:error instanceof Error?error.message:"unknown"}));
+          throw error;
+        }
       }
     })());
   },

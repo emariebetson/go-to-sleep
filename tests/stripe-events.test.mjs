@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkoutBinding, isEntitledSubscriptionStatus, isExistingSubscriptionStatus, paidInvoice, subscriptionInvoice, subscriptionUpdate } from "../lib/stripe-events.ts";
+import { checkoutBinding, isEntitledSubscriptionStatus, isExistingSubscriptionStatus, paidInvoice, paymentCheckoutBinding, subscriptionInvoice, subscriptionUpdate } from "../lib/stripe-events.ts";
 
 const expectedPrice = "price_nearnight_test";
 
@@ -12,6 +12,12 @@ test("checkout binding requires a paid subscription session", () => {
   assert.equal(checkoutBinding({ ...valid, payment_status: "unpaid" }, expectedPrice), null);
   assert.equal(checkoutBinding({ ...valid, subscription: "" }, expectedPrice), null);
   assert.equal(checkoutBinding({ ...valid, id: "" }, expectedPrice), null);
+});
+
+test("one-time Archive Builder checkout binds a paid payment intent without a subscription", () => {
+  const payment={id:"cs_builder",mode:"payment",payment_status:"paid",client_reference_id:"user_1",customer:"cus_1",payment_intent:"pi_1",metadata:{price_id:expectedPrice,household_id:"household_1",checkout_operation_id:"checkout_builder"}};
+  assert.deepEqual(paymentCheckoutBinding(payment,expectedPrice),{sessionId:"cs_builder",operationId:"checkout_builder",userId:"user_1",householdId:"household_1",customerId:"cus_1",paymentIntentId:"pi_1",priceId:expectedPrice});
+  assert.equal(paymentCheckoutBinding({...payment,payment_status:"unpaid"},expectedPrice),null);
 });
 
 test("subscription updates require the expected server-owned price", () => {

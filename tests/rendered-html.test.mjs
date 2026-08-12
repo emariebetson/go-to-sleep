@@ -75,6 +75,7 @@ test("server-renders public trust and pricing pages", async () => {
     const response = await render(path);
     assert.equal(response.status, 200, path);
   }
+  const pricingSource=await readFile(new URL("../app/pricing/page.tsx",import.meta.url),"utf8");assert.match(pricingSource,/NearLegacy/);assert.match(pricingSource,/Paid allowances refill monthly, including annual subscriptions/);assert.doesNotMatch(pricingSource,/annual checkout stays unavailable/);
 });
 
 test("private product pages require an authenticated parent", async () => {

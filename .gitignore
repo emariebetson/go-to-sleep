@@ -41,3 +41,8 @@ yarn-error.log*
 /outputs/
 /work/
 /.worktrees/
+
+# Python media-processor local artifacts
+__pycache__/
+*.py[cod]
+.venv/

@@ -38,12 +38,12 @@ export function parseOwnershipTransferInput(body: Record<string, unknown>) {
   return { newOwnerUserId };
 }
 
-export function parseInvitationInput(body: Record<string, unknown>): { requestId: string; email: string; role: "adult_manager" | "listener" } {
+export function parseInvitationInput(body: Record<string, unknown>): { requestId: string; email: string; role: "adult_manager" | "contributor" | "listener" } {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error("A valid invitation email is required.");
   const role = body.role;
-  if (role !== "adult_manager" && role !== "listener") throw new Error("Invitation role must be adult_manager or listener.");
-  return { requestId: requiredUuid(body.requestId, "requestId"), email, role: role as "adult_manager" | "listener" };
+  if (role !== "adult_manager" && role !== "contributor" && role !== "listener") throw new Error("Invitation role must be adult_manager, contributor, or listener.");
+  return { requestId: requiredUuid(body.requestId, "requestId"), email, role: role as "adult_manager" | "contributor" | "listener" };
 }
 
 export function parseInvitationAcceptanceInput(body: Record<string, unknown>) {

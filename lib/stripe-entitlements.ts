@@ -1,6 +1,6 @@
 import { PLAN_CATALOG, type PlanId } from "./nearyou-foundation";
 
-export type StripeBillingInterval = "month" | "year";
+export type StripeBillingInterval = "month" | "year" | "one_time";
 export type StripePriceBinding = {
   priceId: string;
   planId: PlanId;
@@ -17,6 +17,8 @@ const bindings = [
   ["STRIPE_PRICE_NEARYOU_FAMILY_ANNUAL", "nearyou_family", "year", false],
   ["STRIPE_PRICE_NEARLEGACY_MONTHLY", "nearlegacy", "month", false],
   ["STRIPE_PRICE_NEARLEGACY_ANNUAL", "nearlegacy", "year", false],
+  ["STRIPE_PRICE_ARCHIVE_CARE_ANNUAL", "archive_care", "year", false],
+  ["STRIPE_PRICE_ARCHIVE_BUILDER", "archive_builder", "one_time", false],
 ] as const;
 
 export function configuredStripePrices(environment: Record<string, string | undefined>) {
@@ -42,9 +44,11 @@ export function stripeCheckoutPrice(
   planId: string,
   interval: string,
 ) {
-  if (planId === "nearlegacy") throw new Error("NearLegacy checkout is not available while Legacy features are disabled.");
   if (planId === "nearsleep_plus_legacy") throw new Error("The grandfathered plan is not available for new checkout.");
-  if (!["nearyou_plus", "nearyou_family"].includes(planId) || interval !== "month") {
+  const allowed = (planId === "archive_builder" && interval === "one_time")
+    || (planId === "archive_care" && interval === "year")
+    || (["nearyou_plus", "nearyou_family", "nearlegacy"].includes(planId) && ["month", "year"].includes(interval));
+  if (!allowed) {
     throw new Error("That billing plan is not available.");
   }
   const match = [...configuredStripePrices(environment).values()].find((price) => price.planId === planId && price.interval === interval);

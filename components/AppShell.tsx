@@ -5,7 +5,7 @@ import { SignOutButton } from "./SignOutButton";
 
 type AppShellProps = {
   children: React.ReactNode;
-  active: "studio" | "stories" | "library" | "account" | "admin";
+  active: "studio" | "stories" | "legacy" | "library" | "account" | "admin";
 };
 
 export async function AppShell({ children, active }: AppShellProps) {
@@ -13,9 +13,12 @@ export async function AppShell({ children, active }: AppShellProps) {
   const showAdmin = Boolean(user && isAdmin(user));
   const { storyReady } = await import("@/app/api/v1/stories/production");
   const showStories = await storyReady().catch(() => false);
+  const { nearLegacyReady } = await import("@/app/api/v1/legacy/production");
+  const showLegacy = await nearLegacyReady().catch(() => false);
   const links = [
     ["studio", "/studio", "Create a bedtime"],
     ...(showStories ? [["stories", "/stories", "Create a story"] as const] : []),
+    ...(showLegacy ? [["legacy", "/legacy", "Family archive"] as const] : []),
     ["library", "/library", "My nights"],
     ["account", "/account", "Voice & account"],
   ] as const;

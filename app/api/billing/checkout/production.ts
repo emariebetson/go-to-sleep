@@ -103,7 +103,7 @@ export async function postProductionCheckout(request: Request) {
       db.select({ id: entitlements.id }).from(entitlements).where(and(
         eq(entitlements.householdId, householdId),
         inArray(entitlements.status, ["active", "grace"]),
-        inArray(entitlements.planId, ["nearsleep_plus_legacy", "nearyou_plus", "nearyou_family", "nearlegacy"]),
+        inArray(entitlements.planId, ["nearsleep_plus_legacy", "nearyou_plus", "nearyou_family", "nearlegacy", "archive_builder", "archive_care"]),
         lte(entitlements.validFrom, now),
         or(isNull(entitlements.validUntil), gt(entitlements.validUntil, now)),
       )).get(),
@@ -157,8 +157,9 @@ export async function postProductionCheckout(request: Request) {
     }
     if (!operationId || !expiresAt) throw new Error("checkout_operation_state_invalid");
     const origin = publicAppOrigin(request);
+    const subscriptionCheckout = plan.interval !== "one_time";
     const rawSession = await stripePost("/checkout/sessions", {
-        mode: "subscription",
+        mode: subscriptionCheckout ? "subscription" : "payment",
         integration_identifier: "nearyou_checkout_mxqjvtpa",
         "line_items[0][price]": plan.priceId,
         "line_items[0][quantity]": "1",
@@ -174,11 +175,13 @@ export async function postProductionCheckout(request: Request) {
         cancel_url: `${origin}/pricing?checkout=canceled`,
         expires_at: String(Math.floor(expiresAt.getTime() / 1000)),
         allow_promotion_codes: "true",
-        "subscription_data[metadata][user_id]": user.userId,
-        "subscription_data[metadata][household_id]": householdId,
-        "subscription_data[metadata][price_id]": plan.priceId,
-        "subscription_data[metadata][plan_id]": plan.planId,
-        "subscription_data[metadata][checkout_operation_id]": operationId,
+        ...(subscriptionCheckout ? {
+          "subscription_data[metadata][user_id]": user.userId,
+          "subscription_data[metadata][household_id]": householdId,
+          "subscription_data[metadata][price_id]": plan.priceId,
+          "subscription_data[metadata][plan_id]": plan.planId,
+          "subscription_data[metadata][checkout_operation_id]": operationId,
+        } : {}),
     }, { idempotencyKey: `checkout-${householdId}-${operationId}` });
     const session = validateStripeCheckoutResponse(rawSession);
     let persisted;

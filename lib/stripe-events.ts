@@ -10,6 +10,8 @@ export type CheckoutBinding = {
   priceId: string;
 };
 
+export type PaymentCheckoutBinding = Omit<CheckoutBinding, "subscriptionId"> & { paymentIntentId: string };
+
 export type SubscriptionUpdate = {
   userId: string;
   householdId?: string;
@@ -67,6 +69,18 @@ export function checkoutBinding(object: StripeObject, expectedPriceIds: Expected
   const subscriptionId = stripeId(object.subscription);
   return sessionId && operationId && userId && customerId && subscriptionId
     ? { sessionId, operationId, userId, ...(householdId ? { householdId } : {}), customerId, subscriptionId, priceId }
+    : null;
+}
+
+export function paymentCheckoutBinding(object: StripeObject, expectedPriceIds: ExpectedPrices): PaymentCheckoutBinding | null {
+  if (object.mode !== "payment" || object.payment_status !== "paid") return null;
+  const sessionId = stripeId(object.id), operationId = metadataValue(object, "checkout_operation_id"), priceId = metadataValue(object, "price_id");
+  if (!expectedPriceSet(expectedPriceIds).has(priceId)) return null;
+  const userId = String(object.client_reference_id || metadataValue(object, "user_id"));
+  const householdId = metadataValue(object, "household_id") || undefined;
+  const customerId = stripeId(object.customer), paymentIntentId = stripeId(object.payment_intent);
+  return sessionId && operationId && userId && customerId && paymentIntentId
+    ? { sessionId, operationId, userId, ...(householdId ? { householdId } : {}), customerId, paymentIntentId, priceId }
     : null;
 }
 

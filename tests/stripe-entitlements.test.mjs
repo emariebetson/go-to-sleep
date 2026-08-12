@@ -17,6 +17,8 @@ const environment = {
   STRIPE_PRICE_NEARYOU_FAMILY_ANNUAL: "price_family_year",
   STRIPE_PRICE_NEARLEGACY_MONTHLY: "price_archive_month",
   STRIPE_PRICE_NEARLEGACY_ANNUAL: "price_archive_year",
+  STRIPE_PRICE_ARCHIVE_CARE_ANNUAL: "price_archive_care_year",
+  STRIPE_PRICE_ARCHIVE_BUILDER: "price_archive_builder",
 };
 
 test("server-owned Stripe prices map exactly to canonical plans and allowances", () => {
@@ -39,12 +41,15 @@ test("invalid or duplicate Stripe price configuration fails closed", () => {
   assert.throws(() => configuredStripePrices({ ...environment, STRIPE_PRICE_NEARYOU_PLUS_MONTHLY: environment.STRIPE_PRICE_PLUS_MONTHLY }), /multiple plans/i);
 });
 
-test("checkout preserves existing grandfathering but disables new legacy and annual sales", () => {
+test("checkout preserves grandfathering and exposes only configured canonical intervals", () => {
   assert.throws(() => stripeCheckoutPrice(environment, "nearsleep_plus_legacy", "month"), /grandfathered plan is not available/i);
-  assert.throws(() => stripeCheckoutPrice(environment, "nearyou_plus", "year"), /not available/i);
+  assert.equal(stripeCheckoutPrice(environment, "nearyou_plus", "year").priceId, "price_plus_year");
   assert.equal(stripeCheckoutPrice(environment, "nearyou_plus", "month").priceId, "price_plus_month");
   assert.equal(stripeCheckoutPrice(environment, "nearyou_family", "month").priceId, "price_family_month");
-  assert.throws(() => stripeCheckoutPrice(environment, "nearlegacy", "month"), /not available/i);
+  assert.equal(stripeCheckoutPrice(environment, "nearlegacy", "month").priceId, "price_archive_month");
+  assert.equal(stripeCheckoutPrice(environment, "archive_care", "year").priceId, "price_archive_care_year");
+  assert.equal(stripeCheckoutPrice(environment, "archive_builder", "one_time").priceId, "price_archive_builder");
+  assert.throws(() => stripeCheckoutPrice(environment, "archive_builder", "month"), /not available/i);
 });
 
 test("checkout selection accepts only bounded URL-encoded or JSON plan fields", () => {

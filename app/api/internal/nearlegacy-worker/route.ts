@@ -1,0 +1,8 @@
+import { env } from "cloudflare:workers";
+import { jsonNoStore } from "@/lib/http";
+import { featureFlagsFromEnv, nearLegacyArchiveFlagsEnabled } from "@/lib/nearyou-foundation";
+import { advanceLegacyDeletion, advanceLegacyEvidenceRetention, advanceLegacyExport, advanceLegacyTranscription, reconcileLegacyUploads } from "@/lib/nearlegacy-worker";
+import { advanceAnnualAllowanceRefill } from "@/lib/annual-allowance";
+
+async function same(a:string,b:string){const [x,y]=await Promise.all([crypto.subtle.digest("SHA-256",new TextEncoder().encode(a)),crypto.subtle.digest("SHA-256",new TextEncoder().encode(b))]);const l=new Uint8Array(x),r=new Uint8Array(y);let d=0;for(let i=0;i<l.length;i++)d|=l[i]^r[i];return d===0;}
+export async function POST(request:Request){if(!nearLegacyArchiveFlagsEnabled(featureFlagsFromEnv(process.env)))return jsonNoStore({error:"Not found."},{status:404});const expected=process.env.NEARYOU_LEGACY_WORKER_SECRET||"",actual=(request.headers.get("authorization")||"").replace(/^Bearer /,"");if(!/^[A-Za-z0-9_-]{43,128}$/.test(expected)||!await same(actual,expected))return jsonNoStore({error:"Unauthorized."},{status:401});const annualAllowance=await advanceAnnualAllowanceRefill(),uploads=await reconcileLegacyUploads(),evidence=await advanceLegacyEvidenceRetention(),transcription=await advanceLegacyTranscription(),exported=await advanceLegacyExport(),deletion=await advanceLegacyDeletion();const now=Date.now();await env.DB.prepare("UPDATE legacy_activation_state SET worker_heartbeat_at=?,updated_at=? WHERE id='archive'").bind(now,now).run();return jsonNoStore({heartbeatAt:now,annualAllowance,uploads,evidence,deletion,export:exported,transcription});}
