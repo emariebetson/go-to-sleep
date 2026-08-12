@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalCutoverChecksum, validatePage, applyDelta, verifyCutoverEvidence, executeBackfillPage } from "../lib/postgres-cutover-engine.ts";
+import { canonicalCutoverChecksum, validatePage, applyDelta, executeBackfillPage } from "../lib/postgres-cutover-engine.ts";
 
 const row = (tenant, table, id, sequence, payload = { value: id }) => ({ tenant, table, id, sequence, payload, deleted: false });
 
@@ -40,15 +40,4 @@ test("deltas require contiguous monotonic sequence and preserve tombstones", () 
   assert.equal(result.highWater, 6); assert.equal(result.rows[0].deleted, true);
   assert.throws(() => applyDelta(4, [row("h", "a", "1", 6)]), /gap/);
   assert.throws(() => applyDelta(4, [row("h", "a", "1", 5), row("h", "a", "1", 5)]), /duplicate/);
-});
-
-test("release evidence is fresh, signed, nonce-bound, and exact", async () => {
-  const now = 1_800_000_000_000, payload = { signer: "ci-release", keyId: "kms-key-v1", releaseId: "r1", schema: "a".repeat(64), artifact: "b".repeat(64), highWater: 99, fence: 7, shadowMs: 3600000, nonce: "nonce_1234567890", issuedAt: now };
-  const secret = "s".repeat(32), body = JSON.stringify(payload), key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = Buffer.from(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))).toString("hex");
-  assert.equal(await verifyCutoverEvidence({ payload, signature }, { ...payload, secret, now, consumeNonce: async (n) => n === payload.nonce }), true);
-  await assert.rejects(() => verifyCutoverEvidence({ payload: { ...payload, issuedAt: now - 301000 }, signature }, { ...payload, secret, now, consumeNonce: async () => true }), /fresh/);
-  let consumed = false;
-  await assert.rejects(() => verifyCutoverEvidence({ payload, signature: "0".repeat(64) }, { ...payload, secret, now, consumeNonce: async () => { consumed = true; return true; } }), /signature/);
-  assert.equal(consumed, false);
 });

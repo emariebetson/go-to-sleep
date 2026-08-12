@@ -64,19 +64,3 @@ export async function executeBackfillPage(target: Target, lease: { owner: string
     await tx.checkpoint({ cursor: input.page.nextCursor, highWater: input.page.highWater, fence: lease.fence });
   });
 }
-
-function hex(bytes: ArrayBuffer) { return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join(""); }
-export async function verifyCutoverEvidence(envelope: { payload: Record<string, unknown>; signature: string }, expected: Record<string, unknown> & { secret: string; now: number; consumeNonce(nonce: string): Promise<boolean> }) {
-  const { secret, now, consumeNonce, ...fields } = expected;
-  if (encoder.encode(secret).byteLength < 32 || !Number.isSafeInteger(now) || !Number.isSafeInteger(envelope.payload.issuedAt) || Math.abs(now - Number(envelope.payload.issuedAt)) > 300_000) throw new Error("evidence is not fresh or secret is unsafe");
-  if (envelope.payload.signer !== fields.signer || envelope.payload.keyId !== fields.keyId) throw new Error("evidence signer is not trusted");
-  if (JSON.stringify(envelope.payload) !== JSON.stringify(fields)) throw new Error("evidence does not match cutover");
-  if (typeof envelope.payload.nonce !== "string" || !/^[A-Za-z0-9_-]{12,128}$/.test(envelope.payload.nonce) || !/^[a-f0-9]{64}$/.test(envelope.signature)) throw new Error("evidence signature or nonce format is invalid");
-  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = hex(await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(envelope.payload))));
-  const expectedBytes = Uint8Array.from(signature.match(/../g) || [], (v) => parseInt(v, 16)), actualBytes = Uint8Array.from(envelope.signature.match(/../g) || [], (v) => parseInt(v, 16));
-  let difference = expectedBytes.length ^ actualBytes.length; for (let i = 0; i < expectedBytes.length; i += 1) difference |= expectedBytes[i] ^ (actualBytes[i] || 0);
-  if (difference !== 0) throw new Error("evidence signature is invalid");
-  if (!await consumeNonce(envelope.payload.nonce)) throw new Error("evidence nonce is invalid or replayed");
-  return true;
-}
