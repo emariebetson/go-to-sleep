@@ -1283,3 +1283,62 @@ export const legacyDeletionOperations = sqliteTable("legacy_deletion_operations"
 export const legacyErasureTombstones = sqliteTable("legacy_erasure_tombstones", {householdId:text("household_id").notNull().references(()=>households.id,{onDelete:"cascade"}),targetKind:text("target_kind",{enum:["archive","contributor","recording"]}).notNull(),targetId:text("target_id").notNull(),operationId:text("operation_id").notNull().references(()=>legacyDeletionOperations.id,{onDelete:"cascade"}),completedAt:integer("completed_at",{mode:"timestamp_ms"}).notNull()},table=>[primaryKey({columns:[table.householdId,table.targetKind,table.targetId]})]);
 export const legacyDeletionItems = sqliteTable("legacy_deletion_items", { id: text("id").primaryKey(), householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }), operationId: text("operation_id").notNull().references(() => legacyDeletionOperations.id, { onDelete: "cascade" }), objectKind: text("object_kind").notNull(), objectId: text("object_id").notNull(), storageKey: text("storage_key"), status: text("status").notNull().default("pending"), attempts: integer("attempts").notNull().default(0), updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull() });
 export const legacyErasureAuthorizations=sqliteTable("legacy_erasure_authorizations",{id:text("id").primaryKey(),householdId:text("household_id").notNull(),operationKind:text("operation_kind").notNull(),operationId:text("operation_id").notNull(),active:integer("active",{mode:"boolean"}).notNull().default(true),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),expiresAt:integer("expires_at",{mode:"timestamp_ms"}).notNull()},table=>[uniqueIndex("legacy_erasure_operation_idx").on(table.operationKind,table.operationId)]);
+
+// Default-off mobile entitlement and media-integration bridge. These tables
+// store only server-verified receipts and encrypted provider tokens.
+export const mobileEntitlementEvents = sqliteTable(
+  "mobile_entitlement_events",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    appId: text("app_id").notNull(),
+    environment: text("environment", { enum: ["SANDBOX", "PRODUCTION"] }).notNull(),
+    productId: text("product_id").notNull(),
+    entitlementId: text("entitlement_id").notNull(),
+    appUserIdHash: text("app_user_id_hash").notNull(),
+    eventType: text("event_type").notNull(),
+    occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+    payloadChecksum: text("payload_checksum").notNull(),
+    processedAt: integer("processed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("mobile_entitlement_order_idx").on(table.householdId, table.occurredAt)],
+);
+
+export const mobileAccountBindings = sqliteTable("mobile_account_bindings", {
+  appUserIdHash: text("app_user_id_hash").primaryKey(),
+  householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+});
+
+export const integrationRightsReceipts = sqliteTable(
+  "integration_rights_receipts",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    sourceKind: text("source_kind", { enum: ["youtube", "upload"] }).notNull(),
+    sourceIdHash: text("source_id_hash").notNull(),
+    consentVersion: text("consent_version").notNull(),
+    attestedAt: integer("attested_at", { mode: "timestamp_ms" }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [uniqueIndex("integration_rights_receipts_household_source_idx").on(table.householdId, table.sourceKind, table.sourceIdHash)],
+);
+
+export const encryptedIntegrationTokens = sqliteTable(
+  "encrypted_integration_tokens",
+  {
+    id: text("id").primaryKey(),
+    householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: ["spotify", "youtube"] }).notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    keyVersion: text("key_version").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [uniqueIndex("encrypted_integration_tokens_household_user_provider_idx").on(table.householdId, table.userId, table.provider)],
+);
