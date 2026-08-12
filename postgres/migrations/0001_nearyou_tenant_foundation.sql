@@ -7,14 +7,25 @@ CREATE SCHEMA IF NOT EXISTS nearyou;
 REVOKE ALL ON SCHEMA nearyou FROM PUBLIC;
 
 DO $$ BEGIN
-  CREATE ROLE nearyou_app NOLOGIN NOBYPASSRLS;
+  CREATE ROLE nearyou_migration NOLOGIN NOINHERIT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
-  CREATE ROLE nearyou_billing_worker NOLOGIN NOBYPASSRLS;
+  CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT BYPASSRLS;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
-  CREATE ROLE nearyou_job_worker NOLOGIN NOBYPASSRLS;
+  CREATE ROLE nearyou_app NOLOGIN NOINHERIT NOBYPASSRLS;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE ROLE nearyou_billing_worker NOLOGIN NOINHERIT NOBYPASSRLS;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE ROLE nearyou_job_worker NOLOGIN NOINHERIT NOBYPASSRLS;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER ROLE nearyou_migration NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_app NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_billing_worker NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_job_worker NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 GRANT USAGE ON SCHEMA nearyou TO nearyou_app, nearyou_billing_worker, nearyou_job_worker;
 ALTER DEFAULT PRIVILEGES IN SCHEMA nearyou REVOKE ALL ON TABLES FROM PUBLIC;
 
@@ -99,6 +110,7 @@ LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT nullif(current_setting('app.house
 
 CREATE FUNCTION nearyou.current_user_id() RETURNS text
 LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT nullif(current_setting('app.user_id', true), '') $$;
+REVOKE ALL ON FUNCTION nearyou.current_household_id(), nearyou.current_user_id() FROM PUBLIC;
 
 CREATE FUNCTION nearyou.is_active_household_member(candidate_household_id text) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = nearyou, pg_temp AS $$
@@ -110,6 +122,23 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = nearyou, pg_temp AS $$
   )
 $$;
 REVOKE ALL ON FUNCTION nearyou.is_active_household_member(text) FROM PUBLIC;
+ALTER FUNCTION nearyou.is_active_household_member(text) OWNER TO nearyou_policy_owner;
+
+CREATE FUNCTION nearyou.is_household_manager(candidate_household_id text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = nearyou, pg_temp AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM nearyou.household_members
+    WHERE household_id = candidate_household_id
+      AND user_id = nearyou.current_user_id()
+      AND status = 'active'
+      AND role IN ('owner', 'adult_manager')
+  )
+$$;
+REVOKE ALL ON FUNCTION nearyou.is_household_manager(text) FROM PUBLIC;
+ALTER FUNCTION nearyou.is_household_manager(text) OWNER TO nearyou_policy_owner;
+GRANT USAGE ON SCHEMA nearyou TO nearyou_policy_owner;
+GRANT SELECT ON nearyou.household_members TO nearyou_policy_owner;
+GRANT EXECUTE ON FUNCTION nearyou.current_household_id(), nearyou.current_user_id() TO nearyou_policy_owner;
 
 ALTER TABLE nearyou.households ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nearyou.households FORCE ROW LEVEL SECURITY;
@@ -128,6 +157,9 @@ CREATE POLICY member_select ON nearyou.household_members FOR SELECT
   USING (household_id = nearyou.current_household_id() AND nearyou.is_active_household_member(household_id));
 CREATE POLICY tenant_record_select ON nearyou.tenant_records FOR SELECT
   USING (household_id = nearyou.current_household_id() AND nearyou.is_active_household_member(household_id));
+CREATE POLICY tenant_record_app_mutation ON nearyou.tenant_records FOR ALL TO nearyou_app
+  USING (household_id = nearyou.current_household_id() AND nearyou.is_household_manager(household_id))
+  WITH CHECK (household_id = nearyou.current_household_id() AND nearyou.is_household_manager(household_id));
 CREATE POLICY mobile_event_select ON nearyou.mobile_entitlement_events FOR SELECT
   USING (household_id = nearyou.current_household_id() AND nearyou.is_active_household_member(household_id))
 ;
@@ -139,8 +171,9 @@ CREATE POLICY durable_job_select ON nearyou.durable_jobs FOR SELECT
 CREATE POLICY durable_job_worker_mutation ON nearyou.durable_jobs FOR ALL TO nearyou_job_worker
   USING (household_id = nearyou.current_household_id()) WITH CHECK (household_id = nearyou.current_household_id());
 
-GRANT EXECUTE ON FUNCTION nearyou.current_household_id(), nearyou.current_user_id(), nearyou.is_active_household_member(text) TO nearyou_app, nearyou_billing_worker, nearyou_job_worker;
+GRANT EXECUTE ON FUNCTION nearyou.current_household_id(), nearyou.current_user_id(), nearyou.is_active_household_member(text), nearyou.is_household_manager(text) TO nearyou_app, nearyou_billing_worker, nearyou_job_worker;
 GRANT SELECT ON nearyou.households, nearyou.household_members, nearyou.tenant_records, nearyou.mobile_entitlement_events, nearyou.durable_jobs TO nearyou_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON nearyou.tenant_records TO nearyou_app;
 GRANT SELECT, INSERT, UPDATE ON nearyou.mobile_entitlement_events TO nearyou_billing_worker;
 GRANT SELECT, INSERT, UPDATE ON nearyou.durable_jobs TO nearyou_job_worker;
 
