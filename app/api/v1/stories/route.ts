@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   try {
     if (!await nearStoryProductionDependencies.enabled()) return jsonNoStore({ error: "NearStory is not available." }, { status: 404 });
     const { householdId } = await requireHouseholdContext(request, "job:read");
+    if (!await nearStoryProductionDependencies.authorizeProduct(householdId)) return jsonNoStore({ error: "NearStory is not available." }, { status: 404 });
     const stories = await getDb().select({
       id: storyExperiences.id, childProfileId: storyExperiences.childProfileId, voiceId: storyExperiences.voiceId,
       mode: storyExperiences.mode, durationMinutes: storyExperiences.durationMinutes, status: storyExperiences.status,

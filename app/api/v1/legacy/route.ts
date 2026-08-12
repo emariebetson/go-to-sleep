@@ -1,12 +1,13 @@
 import { env } from "cloudflare:workers";
 import { apiV1Failure, requireHouseholdContext } from "@/lib/api-v1-context";
 import { jsonNoStore } from "@/lib/http";
-import { nearLegacyReady, requireLegacyEntitlement } from "./production";
+import { authorizeNearLegacyHousehold, nearLegacyReady, requireLegacyEntitlement } from "./production";
 
 export async function GET(request: Request) {
   try {
     if (!await nearLegacyReady("read")) return jsonNoStore({ error: "NearLegacy is not available." }, { status: 404 });
     const { householdId, role, user } = await requireHouseholdContext(request, "archive:read");
+    if (!await authorizeNearLegacyHousehold(householdId)) return jsonNoStore({ error: "NearLegacy is not available." }, { status: 404 });
     if (!await requireLegacyEntitlement(householdId, "read")) return jsonNoStore({ error: "NearLegacy is not included in this household plan." }, { status: 403 });
     const [contributors, interviews, collections, custodian] = await Promise.all([
       env.DB.prepare("SELECT id,display_name,relationship,status FROM contributors WHERE household_id=? AND status NOT IN ('revoked','invited') ORDER BY created_at").bind(householdId).all(),

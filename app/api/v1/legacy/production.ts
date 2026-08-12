@@ -3,6 +3,7 @@ import { featureFlagsFromEnv, nearLegacyArchiveFlagsEnabled } from "@/lib/nearyo
 import { requireApiAuthContext } from "@/lib/auth";
 import { revealTotpSecret, verifyTotp } from "@/lib/legacy-mfa";
 import { legacyHash } from "@/lib/nearlegacy-route";
+import { createPostgresHouseholdProductAccess } from "@/lib/product-release-readiness-service";
 
 const HEARTBEAT_MAX_AGE_MS = 5 * 60_000;
 
@@ -18,6 +19,7 @@ export async function nearLegacyReady(mode: "worker" | "read" = "worker") {
   // object must never globally disable retries or reads for every household.
   return Boolean(state?.status === "ready" && state.migration_version === "0014" && (mode === "read" || (state.worker_heartbeat_at && state.worker_heartbeat_at >= Date.now() - HEARTBEAT_MAX_AGE_MS)));
 }
+export async function authorizeNearLegacyHousehold(householdId:string){const pg=(env as unknown as{READINESS_PG?:{query<T>(sql:string,args:unknown[]):Promise<{rows:T[]}>}}).READINESS_PG;return pg?createPostgresHouseholdProductAccess(pg)("nearlegacy",householdId):false}
 
 export async function requireLegacyEntitlement(householdId: string, mode: "create" | "read" = "create") {
   const now = Date.now();

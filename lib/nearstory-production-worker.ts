@@ -16,7 +16,7 @@ const bucket = () => (env as unknown as { AUDIO?: AudioBucket }).AUDIO;
 
 export async function nextDispatchableNearStoryJobId() {
   const now = Date.now();
-  const row = (await env.DB.prepare("SELECT id FROM jobs WHERE type='story_audio' AND attempts<3 AND (status='queued' OR (status='running' AND (worker_lease_expires_at IS NULL OR worker_lease_expires_at<=?))) ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END, created_at LIMIT 1").bind(now).all()).results[0] as { id?: unknown } | undefined;
+  const row = (await env.DB.prepare("SELECT id FROM jobs WHERE type='story_audio' AND attempts<3 AND ((status='queued' AND (worker_lease_expires_at IS NULL OR worker_lease_expires_at<=?)) OR (status='running' AND (worker_lease_expires_at IS NULL OR worker_lease_expires_at<=?))) ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END, created_at LIMIT 1").bind(now,now).all()).results[0] as { id?: unknown } | undefined;
   return typeof row?.id === "string" && row.id ? row.id : null;
 }
 

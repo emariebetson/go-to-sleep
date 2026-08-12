@@ -15,7 +15,8 @@ const result = {
   security: { critical: 0, high: 0, scanArtifact: hash("e"), penTestArtifact: hash("f") },
 };
 const gate = (kind) => ({ kind, policyVersion: 1, releaseId, schema, artifact: hash("c"), verifiedAt: now - 1000, results: result[kind] });
-const claims = { version: 1, principal: "ci://github/nearyou/release", keyId: "kms-release", keyVersion: 2, releaseId, schema, backfill: hash("b"), highWater: 42, fence: 7, notBefore: now - 70_000, issuedAt: now - 500, expiresAt: now + 60_000, nonce: "abcdefghijklmnopqrstuv", gates: Object.fromEntries(Object.keys(result).map((kind) => [kind, gate(kind)])), shadow: { kind: "shadow", policyVersion: 1, releaseId, schema, artifact: hash("d"), startedAt: now - 65_000, endedAt: now - 1000, sourceChecksum: hash("b"), targetChecksum: hash("b"), sampleCount: 100, observedRows: 100, mismatchCount: 0 } };
+const productReadiness=["nearstory","nearfamily","nearlegacy"].map(product=>({product,environment:"production",region:"us-central1",releaseId,artifact:hash("7"),imageDigest:hash("8"),expiresAt:now+60_000,controllerMapping:{verified:true,artifact:hash("9"),verifiedAt:now-1000},secretVersions:{runtime:"projects/prod/secrets/runtime/versions/7"},capacity:{queueDepth:1,maxQueueDepth:10,errorRateBps:1,maxErrorRateBps:10,soakStartedAt:now-3700000,soakEndedAt:now-1000},probes:Object.fromEntries((product==="nearfamily"?["identity","member","entitlement","invite","privacy"]:["worker","scheduler","processor"]).map(name=>[name,{identity:`probe:${name}`,passed:true,verifiedAt:now-1000}])),mobilePlatforms:product==="nearfamily"?["ios","android"]:[]}));
+const claims = { version: 1, principal: "ci://github/nearyou/release", keyId: "kms-release", keyVersion: 2, releaseId, schema, backfill: hash("b"), highWater: 42, fence: 7, notBefore: now - 70_000, issuedAt: now - 500, expiresAt: now + 60_000, productReadiness, nonce: "abcdefghijklmnopqrstuv", gates: Object.fromEntries(Object.keys(result).map((kind) => [kind, gate(kind)])), shadow: { kind: "shadow", policyVersion: 1, releaseId, schema, artifact: hash("d"), startedAt: now - 65_000, endedAt: now - 1000, sourceChecksum: hash("b"), targetChecksum: hash("b"), sampleCount: 100, observedRows: 100, mismatchCount: 0 } };
 const hex = (buffer) => Buffer.from(buffer).toString("hex");
 async function fixture(bits = 3072) {
   const pair = await crypto.subtle.generateKey({ name: "RSA-PSS", modulusLength: bits, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
@@ -54,7 +55,7 @@ test("validates every trust lifecycle record and exact rotation tuple", async ()
 test("enforces evidence freshness, bounded lifetime, and canonical signatures", async () => {
   const f = await fixture();
   await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, claims: { ...claims, expiresAt: now + 3_600_000 } }, options(f)), /freshness/);
-  await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, claims: { ...claims, notBefore: now + 60_000, issuedAt: now + 60_000 } }, options(f)), /gate|freshness/);
+  await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, claims: { ...claims, notBefore: now + 60_000, issuedAt: now + 60_000 } }, options(f)), /gate|freshness|product readiness/);
   await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, signature: `${f.envelope.signature}=` }, options(f)), /malformed/);
   await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, signature: "AAAA" }, options(f)), /malformed/);
 });

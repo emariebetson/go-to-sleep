@@ -16,11 +16,13 @@
     "db:local:apply": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.jsonc",
     "platform:evidence-lint": "tsx scripts/release-readiness.ts",
     "platform:postgres-cutover": "tsx scripts/postgres-cutover.ts"
+    ,"platform:register-rollout-controller": "tsx scripts/migrate.ts --register-rollout-controller"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.6.26",
     "better-auth": "1.6.26",
     "drizzle-orm": "0.45.2",
+    "pg": "8.16.3",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

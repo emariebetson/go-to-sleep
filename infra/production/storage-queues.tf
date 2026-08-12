@@ -425,19 +425,19 @@ resource "google_cloud_run_v2_job" "migrations" {
       volumes {
 
 
-        name = "db-secret"
+        name = "migration-admin-secret"
 
 
         secret {
 
 
-          secret = google_secret_manager_secret.app.secret_id
+          secret = google_secret_manager_secret.migration_admin.secret_id
 
 
           items {
 
 
-            version = try(var.secret_bootstrap_evidence.app_version, "0")
+            version = var.migration_admin_secret_version
 
 
             path = "database-url"
@@ -458,10 +458,10 @@ resource "google_cloud_run_v2_job" "migrations" {
         image = var.migration_image_digest
 
 
-        command = ["/app/migrate"]
+        command = ["node", "/app/dist/scripts/migrate.js"]
 
 
-        args = ["--release", var.release_id, "--schema-checksum", var.schema_checksum, "--database-url-file", "/var/run/secrets/nearyou/database-url"]
+        args = ["--register-rollout-controller", "--release", var.release_id, "--schema-checksum", trimprefix(var.schema_checksum, "sha256:"), "--catalog-checksum", local.catalog_manifest_checksum, "--database-url-file", "/var/run/secrets/nearyou/database-url"]
 
 
         env {
@@ -470,6 +470,14 @@ resource "google_cloud_run_v2_job" "migrations" {
 
           value = var.release_id
 
+        }
+        env {
+          name  = "NEARYOU_READINESS_DATABASE_USER"
+          value = local.readiness_controller_database_user
+        }
+        env {
+          name  = "NEARYOU_READINESS_OIDC_PRINCIPAL"
+          value = local.readiness_controller_oidc_principal
         }
 
 

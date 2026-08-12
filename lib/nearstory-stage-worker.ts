@@ -58,6 +58,7 @@ async function requeue(work: NearStoryWork, stage: string, percent: number) {
   const changed = await getDb().update(jobs).set({ status: "queued", progressStage: stage, progressPercent: percent, workerAttemptToken: null, workerLeaseExpiresAt: null, updatedAt: new Date() }).where(and(eq(jobs.id, work.jobId), eq(jobs.householdId, work.householdId), eq(jobs.status, "running"), eq(jobs.workerAttemptToken, work.attemptToken || ""))).returning({ id: jobs.id }).get();
   if (!changed) throw new Error("story_worker_lease_lost");
 }
+async function pauseForRollout(work:NearStoryWork,version:number|null){const changed=await getDb().update(jobs).set({status:"queued",errorCode:`rollout_paused:${version??0}`,workerAttemptToken:null,workerLeaseExpiresAt:new Date(Date.now()+60_000),updatedAt:new Date()}).where(and(eq(jobs.id,work.jobId),eq(jobs.householdId,work.householdId),eq(jobs.status,"running"),eq(jobs.workerAttemptToken,work.attemptToken||""))).returning({id:jobs.id}).get();if(!changed)throw new Error("story_worker_lease_lost")}
 
 async function settleRecoveredHold(work: NearStoryWork, operation: "story_writing" | "story_output_moderation" | "story_speech" | "story_sfx", deps: ReturnType<typeof createNearStoryProductionDependencies>) {
   const hold = await getDb().select().from(storyProviderBudgetHolds).where(and(eq(storyProviderBudgetHolds.householdId, work.householdId), eq(storyProviderBudgetHolds.storyId, work.storyId), eq(storyProviderBudgetHolds.branchKey, "root"), eq(storyProviderBudgetHolds.operation, operation), eq(storyProviderBudgetHolds.status, "claimed"))).get();
@@ -71,7 +72,11 @@ async function failOwned(work: NearStoryWork, code: string, deps: ReturnType<typ
 
 export async function advanceNextNearStoryStage(jobId?: string) {
   const selected = jobId || await nextDispatchableNearStoryJobId(); if (!selected) return { status: "idle" as const };
-  const deps = createNearStoryProductionDependencies(); const work = await deps.claimJob(selected); if (!work) return { status: "busy" as const };
+  const baseDeps = createNearStoryProductionDependencies(); const work = await baseDeps.claimJob(selected); if (!work) return { status: "busy" as const };
+  const runtime=(await import("cloudflare:workers")).env as unknown as{READINESS_PG?:{query<T>(sql:string,args:unknown[]):Promise<{rows:T[]}>}};
+  const fence=runtime.READINESS_PG?(await import("./product-release-readiness-service")).createPostgresRolloutFence(runtime.READINESS_PG):null,grant=fence?await fence("nearstory",work.householdId):null;
+  if(!grant){await pauseForRollout(work,null);return{status:"paused"as const}}
+  const guarded=new Set(["writeStory","moderateOutput","synthesize","effect","mix","persist","complete"]),deps=new Proxy(baseDeps,{get(target,key,receiver){const value=Reflect.get(target,key,receiver);if(typeof key!=="string"||!guarded.has(key)||typeof value!=="function")return value;return async(...args:unknown[])=>{const current=await fence!("nearstory",work.householdId);if(!current||current.releaseId!==grant.releaseId||current.version!==grant.version)throw new Error("rollout_fenced");return value.apply(target,args)}}}) as typeof baseDeps;
   try {
     await deps.requireConsent(work);
     const stage = work.progressStage || "writing";
@@ -120,6 +125,7 @@ export async function advanceNextNearStoryStage(jobId?: string) {
     if (stage === "complete") { const recovered = await deps.recoverPersisted(work); if (!recovered) throw new Error("story_persistence_uncertain"); await deps.requireConsent(work); await deps.complete(work, recovered); return { status: "completed" as const, result: recovered }; }
     throw new Error("story_stage_invalid");
   } catch (error) {
+    if(error instanceof Error&&error.message==="rollout_fenced"){await pauseForRollout(work,grant.version);return{status:"paused"as const}}
     if (error instanceof Error && /unsafe/.test(error.message)) return failOwned(work, "story_output_unsafe", deps);
     return { status: "retryable" as const, code: error instanceof Error ? error.message : "story_stage_failed" };
   }

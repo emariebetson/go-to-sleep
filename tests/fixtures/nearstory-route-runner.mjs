@@ -31,6 +31,14 @@ class D1 {
     catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
   }
 }
+class AuthorizedProductRolloutPg {
+  async query(source) {
+    if (source.startsWith("SELECT release_id,version FROM nearyou.product_rollout_state")) return { rows: [{ release_id: "rel_story_fixture", version: 1 }] };
+    if (source.startsWith("SELECT release_id FROM nearyou.product_rollout_state")) return { rows: [{ release_id: "rel_story_fixture" }] };
+    if (source.startsWith("SELECT nearyou.authorize_product_household")) return { rows: [{ allowed: true }] };
+    throw new Error(`unexpected rollout fixture query: ${source}`);
+  }
+}
 class R2 {
   constructor() { this.objects = new Map(); this.failDeleteOnce = false; this.losePutAfterStoreMatching = null; this.beforePutOnceMatching = null; this.beforePutOnce = null; this.afterPutOnceMatching = null; this.afterPutOnce = null; }
   async put(key, value, options = {}) {
@@ -56,8 +64,9 @@ class R2 {
 
 const db = new DatabaseSync(":memory:"); db.exec("PRAGMA foreign_keys=ON");
 for (const name of migrations) for (const statement of readFileSync(new URL(`../../drizzle/${name}`, import.meta.url), "utf8").split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) db.exec(statement);
-const d1 = new D1(db); const r2 = new R2(); globalThis.__TASK2B_CLOUDFLARE_ENV__ = { DB: d1, AUDIO: r2 };
+const d1 = new D1(db); const r2 = new R2(); globalThis.__TASK2B_CLOUDFLARE_ENV__ = { DB: d1, AUDIO: r2, READINESS_PG: new AuthorizedProductRolloutPg() };
 Object.assign(process.env, {
+  NEARYOU_TEST_AUTHORIZED_PRODUCT_ROLLOUT: "true",
   NEARYOU_ENABLE_FOUNDATION_API: "true", NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION: "true",
   NEARYOU_ENABLE_NEARSLEEP_PRODUCTION: "true", NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY: "true",
   NEARYOU_ENABLE_STORY: "true", NEARYOU_ENABLE_ASYNC_MEDIA_JOBS: "true", NEARYOU_ENABLE_USAGE_RESERVATIONS: "true",
