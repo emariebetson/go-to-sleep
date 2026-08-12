@@ -13,7 +13,9 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit --incremental false",
     "db:generate": "drizzle-kit generate",
-    "db:local:apply": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.jsonc"
+    "db:local:apply": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.jsonc",
+    "platform:evidence-lint": "tsx scripts/release-readiness.ts",
+    "platform:postgres-cutover": "tsx scripts/postgres-cutover.ts"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.6.26",

@@ -1,0 +1,16 @@
+{
+  "name": "@nearyou/mobile",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": { "start": "expo start", "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "expo": "~55.0.0",
+    "expo-apple-authentication": "~9.0.0",
+    "expo-audio": "~1.1.0",
+    "expo-crypto": "~15.0.0",
+    "expo-secure-store": "~16.0.0",
+    "react": "19.2.0",
+    "react-native": "0.83.1"
+  },
+  "devDependencies": { "typescript": "~5.9.2" }
+}

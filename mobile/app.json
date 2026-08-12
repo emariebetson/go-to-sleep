@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "NearYou",
+    "slug": "near-you",
+    "scheme": "nearyou",
+    "ios": { "bundleIdentifier": "com.nearyou.family", "usesAppleSignIn": true },
+    "android": { "package": "com.nearyou.family" },
+    "plugins": ["expo-apple-authentication", "expo-secure-store", ["expo-audio", { "microphonePermission": "Allow NearYou to record an adult-managed family session." }]],
+    "extra": { "platformFeaturesEnabled": false }
+  }
+}

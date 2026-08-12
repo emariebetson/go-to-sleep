@@ -1,0 +1,3 @@
+# NearYou mobile scaffold
+
+This Expo workspace is intentionally dark (`platformFeaturesEnabled: false`) until StoreKit/Play sandbox purchases, Apple/Google OS-bound auth sessions with PKCE and claimed HTTPS links, legal country gates, native accessibility, background playback, Bluetooth interruption, weak-network, a native non-exportable-keystore encrypted file cache with lock/biometric-change/logout/account-removal tests, and app-store review gates pass. The current offline module is only a keystore-wrapped exportable data-key scaffold and must not be enabled. The web API remains canonical; provider credentials never ship in the app.
