@@ -11,7 +11,7 @@ function fixture() {
     source: {
       async acquireSnapshot() { return { ...state.snapshot }; },
       async page({ highWater, cursor }) { const start = cursor ?? 0; const rows = start >= highWater ? [] : [row(start + 1)]; return { highWater, cursor, rows, nextCursor: rows.length ? rows[0].sequence : null }; },
-      async freeze({ expectedHighWater, operationId }) { assert.equal(expectedHighWater, 3); assert.match(operationId, /^freeze:/); state.frozen = true; state.freeze ??= { operationId, token: "freeze-1", highWater: 4 }; return { ...state.freeze }; },
+      async freeze({ expectedHighWater, operationId }) { assert.equal(expectedHighWater, 3); assert.match(operationId, /^freeze:/); state.frozen = true; state.freeze ??= { operationId, token: "freeze-1", highWater: 4,sourceChecksum:"a".repeat(64),sourceRowCount:3 }; return { ...state.freeze }; },
       async loadFreeze(operationId) { return state.freeze?.operationId === operationId ? { ...state.freeze } : null; },
       async unfreeze(token) { assert.equal(token, state.freeze.token); state.frozen = false; },
       async commitFreeze(token) { assert.equal(token, state.freeze.token); state.freezeCommitted = true; },
@@ -78,6 +78,35 @@ test("finalize requires shadow evidence bound after the final delta", async () =
   assert.equal(result.highWater, 4);
 });
 
+test("finalize advances the concrete paged delta path to the frozen high-water", async () => {
+  const f=fixture(); f.state.checkpoint={highWater:3,cursor:3,fence:7}; let cursor=3,calls=0;
+  f.source.deltaPage=async({after,highWater})=>{assert.equal(after,cursor);return{highWater,from:after,to:4,rows:[row(4)],complete:true}};
+  f.target.loadDelta=async({freezeToken,finalHighWater})=>({freezeToken,cursor,finalHighWater,fence:7});
+  f.target.applyDeltaPage=async(input)=>{calls+=1;assert.equal(input.from,3);assert.equal(input.to,4);cursor=input.to;return{operationId:input.operationId,to:input.to}};
+  assert.equal((await finalizeCutover(f,{owner:"runner",now:Date.now()})).highWater,4);
+  assert.equal(calls,1); assert.equal(cursor,4);
+});
+
+test("lost paged delta response keeps D1 frozen and resumes from durable delta cursor", async () => {
+  const f=fixture(); f.state.checkpoint={highWater:3,cursor:3,fence:7}; let cursor=3,lose=true;
+  f.source.deltaPage=async({after,highWater})=>({highWater,from:after,to:4,rows:[row(4)],complete:true});
+  f.target.loadDelta=async({freezeToken,finalHighWater})=>({freezeToken,cursor,finalHighWater,fence:7});
+  f.target.applyDeltaPage=async(input)=>{cursor=input.to;if(lose){lose=false;throw new Error("lost paged delta")}return{operationId:input.operationId,to:input.to}};
+  await assert.rejects(()=>finalizeCutover(f,{owner:"runner",now:Date.now()}),/lost paged delta/);
+  assert.equal(f.state.frozen,true);assert.equal(cursor,4);
+  assert.equal((await finalizeCutover(f,{owner:"runner",now:Date.now()})).mode,"postgres");
+});
+
+test("lost delta initialization response keeps D1 frozen for authoritative retry", async () => {
+  const f=fixture();f.state.checkpoint={highWater:3,cursor:3,fence:7};let initialized=false,lose=true,cursor=3;
+  f.source.deltaPage=async({after,highWater})=>({highWater,from:after,to:4,rows:[row(4)],complete:true});
+  f.target.loadDelta=async({freezeToken,finalHighWater})=>{initialized=true;if(lose){lose=false;throw new Error("lost delta init")}return{freezeToken,cursor,finalHighWater,fence:7}};
+  f.target.applyDeltaPage=async(input)=>{cursor=input.to;return{operationId:input.operationId,to:input.to}};
+  await assert.rejects(()=>finalizeCutover(f,{owner:"runner",now:Date.now()}),/lost delta init/);
+  assert.equal(initialized,true);assert.equal(f.state.frozen,true);
+  assert.equal((await finalizeCutover(f,{owner:"runner",now:Date.now()})).mode,"postgres");
+});
+
 test("an empty nonterminal snapshot page is rejected instead of falsely completing", async () => {
   const f = fixture();
   f.source.page = async ({ highWater, cursor }) => ({ highWater, cursor, rows: [], nextCursor: null });
@@ -121,11 +150,11 @@ test("snapshot initialization exact-binds the acquired immutable high-water", as
   await assert.rejects(() => runBackfill(f, { owner: "runner", now: Date.now() }), /snapshot initialization/);
 });
 
-test("empty snapshot completes with a zero-sample checksum shadow", async () => {
+test("empty snapshot completes with zero observed rows and three observations", async () => {
   const f = fixture(); f.state.snapshot.highWater = 0;
-  f.source.freeze = async ({ operationId }) => (f.state.freeze = { operationId, token: "freeze-empty", highWater: 0 });
+  f.source.freeze = async ({ operationId }) => (f.state.freeze = { operationId, token: "freeze-empty", highWater: 0,sourceChecksum:"e".repeat(64),sourceRowCount:0 });
   f.target.applyFinalDelta = async ({ operationId, freezeToken }) => ({ operationId, freezeToken, fromHighWater: 0, highWater: 0 });
-  f.target.shadow = async () => ({ sourceChecksum: "e".repeat(64), targetChecksum: "e".repeat(64), sampleCount: 0, mismatchCount: 0, startedAt: Date.now() - 70_000, endedAt: Date.now() - 1000 });
+  f.target.shadow = async () => ({ sourceChecksum: "e".repeat(64), targetChecksum: "e".repeat(64), sampleCount: 3,observedRows:0, mismatchCount: 0, startedAt: Date.now() - 70_000, endedAt: Date.now() - 1000 });
   assert.equal((await runBackfill(f, { owner: "runner", now: Date.now() })).complete, true);
   assert.equal((await finalizeCutover(f, { owner: "runner", now: Date.now() })).mode, "postgres");
 });

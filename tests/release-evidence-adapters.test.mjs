@@ -32,7 +32,7 @@ test("Postgres evidence roles expose only narrow security-definer functions", ()
   assert.doesNotMatch(migration, /revoked_at BETWEEN valid_from AND valid_until/);
 });
 
-const nonceInput = { nonce: "abcdefghijklmnopqrstuv", claimsDigest: "a".repeat(64), principal: "ci://release", keyId: "key-1", keyVersion: 1, releaseId: "rel_1", expiresAt: Date.now() + 60_000 };
+const nonceInput = { nonce: "abcdefghijklmnopqrstuv", claimsDigest: "a".repeat(64), principal: "ci://release", keyId: "key-1", keyVersion: 1, releaseId: "rel_1", expiresAt: Date.now() + 60_000, canonicalClaims:'{"releaseId":"rel_1"}' };
 test("nonce store converges after a committed response is lost", async () => {
   let inserted = false; let lose = true;
   const db = { query: async () => { if (!inserted) { inserted = true; if (lose) { lose = false; throw new Error("lost response"); } return { rows: [{ consumed: true }] }; } return { rows: [{ consumed: false }] }; } };
@@ -43,9 +43,21 @@ test("nonce store converges after a committed response is lost", async () => {
 
 test("concurrent nonce consumption admits exactly one and cleanup is bounded", async () => {
   let inserted = false;
-  const db = { query: async (sql, args) => { if (sql.includes("consume_evidence_nonce")) { await new Promise((resolve) => setTimeout(resolve, 5)); if (inserted) return { rows: [{ consumed: false }] }; inserted = true; return { rows: [{ consumed: true }] }; } assert.deepEqual(args, [25]); return { rows: [{ removed: 25 }] }; } };
+  const db = { query: async (sql, args) => { if (sql.includes("consume_release_evidence")) { await new Promise((resolve) => setTimeout(resolve, 5)); if (inserted) return { rows: [{ consumed: false }] }; inserted = true; return { rows: [{ consumed: true }] }; } assert.deepEqual(args, [25]); return { rows: [{ removed: 25 }] }; } };
   const store = new PostgresNonceStore(db); const outcomes = await Promise.all([store.consume(nonceInput), store.consume(nonceInput)]); assert.equal(outcomes.filter(Boolean).length, 1);
   assert.equal(await new PostgresNonceMaintenance(db).cleanup(25), 25); await assert.rejects(() => new PostgresNonceMaintenance(db).cleanup(1001), /limit/);
+});
+
+test("verified evidence consumption durably binds the exact signed claims projection", async () => {
+  const runtime=readFileSync(new URL("../postgres/migrations/0003_cutover_runtime.sql",import.meta.url),"utf8");
+  assert.match(runtime,/claims_projection jsonb/);
+  assert.match(runtime,/consume_release_evidence\(p_nonce text,p_digest text,p_canonical text/);
+  assert.match(runtime,/encode\(nearyou_crypto\.digest\(p_canonical,'sha256'\),'hex'\)<>p_digest/);
+  assert.match(runtime,/REVOKE ALL ON FUNCTION nearyou\.consume_evidence_nonce\(text,text,text,text,integer,text,timestamptz\) FROM nearyou_release_verifier/);
+  const canonical='{"releaseId":"release-1"}';let args;
+  const store=new PostgresNonceStore({query:async(_sql,input)=>{args=input;return{rows:[{consumed:true}]}}});
+  assert.equal(await store.consume({...nonceInput,canonicalClaims:canonical}),true);
+  assert.equal(args[7],canonical);
 });
 
 async function kmsFixture(overrides = {}) {
