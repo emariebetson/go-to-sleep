@@ -25,3 +25,14 @@ test("release runbook has exact migration and private binding verification with 
   for (const item of ["0026_canary_entitlements.sql", "READINESS_PG", "CANARY_OIDC_ISSUER", "CANARY_OIDC_AUDIENCE", "CANARY_OIDC_SUBJECT", "CANARY_OIDC_JWKS_URL", "ROUTE_ENABLED = false", "NEARFAMILY_SOURCE_ACTIVATED = false"]) assert.match(runbook, new RegExp(item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(runbook, /Do not deploy|No product activation/i);
 });
+
+test("the new Sites migration keeps every deployment statement on one physical line", () => {
+  const migration = readFileSync(new URL("../drizzle/0026_canary_entitlements.sql", import.meta.url), "utf8");
+  const statements = migration
+    .split("--> statement-breakpoint")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  assert.ok(statements.length > 1);
+  for (const statement of statements) assert.doesNotMatch(statement, /\r?\n/);
+});
