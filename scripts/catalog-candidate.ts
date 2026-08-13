@@ -17,6 +17,8 @@ export async function generateCatalogCandidate(input: { databaseUrl: string; out
 export function catalogCandidateFailureCode(error: unknown) {
   if (error instanceof Error && error.message === "catalog candidate incomplete") return "catalog-candidate-incomplete";
   if (error instanceof Error && error.message === "catalog security invariant failed") return "catalog-security-invariant";
+  if (error instanceof Error && /^catalog security invariant failed:public-execute:nearyou\.[a-z0-9_]+\([a-z0-9_, ]*\)(?:;nearyou\.[a-z0-9_]+\([a-z0-9_, ]*\))*$/.test(error.message)) return error.message.replace("catalog security invariant failed:public-execute:", "catalog-public-execute:");
+  if (error instanceof Error && error.message.startsWith("catalog security invariant failed:public-execute:")) return "catalog-security-invariant";
   return "catalog-query-failed";
 }
 if (import.meta.url === `file://${process.argv[1]}`) { const output = process.argv[2], url = process.env.READINESS_CONTROL_DATABASE_URL; if (!url || !output) throw new Error("catalog candidate configuration missing"); generateCatalogCandidate({ databaseUrl: url, output }).catch((error) => { process.stderr.write(`${catalogCandidateFailureCode(error)}\n`); process.exitCode = 1; }); }
