@@ -16,9 +16,16 @@ import { operationalArtifact } from "../scripts/evidence-artifact.ts";
 import { canonicalEvidence } from "../lib/asymmetric-release-evidence.ts";
 import { buildRlsEvidence } from "../scripts/rls-evidence.ts";
 import { LIVE_CATALOG_QUERY, LIVE_CATALOG_SECURITY_QUERY } from "../scripts/postgres-catalog.ts";
+import { resolveAxeSource } from "../scripts/accessibility-runtime.ts";
 
 const hash = (c) => c.repeat(64);
 const base = { releaseId: "rel_12345678", artifact: hash("a"), schemaChecksum: hash("b"), startedAt: 1_700_000_000_000, endedAt: 1_700_086_400_000 };
+
+test("accessibility runtime resolves axe from an ESM default export", () => {
+  const source = resolveAxeSource({ default: { source: "x".repeat(100_001) } });
+  assert.equal(typeof source, "string");
+  assert.ok(source.length > 100_000);
+});
 
 test("canonical Story job IDs cross telemetry, HTTP, and PostgreSQL authority boundaries", async () => {
   const jobId=`job:${"a".repeat(64)}`,requests=[];

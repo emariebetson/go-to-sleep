@@ -101,7 +101,7 @@ img { max-width: 100%; }
 .phone-top { display: flex; justify-content: space-between; margin-top: 15px; font-size: .7rem; opacity: .7; }
 .phone-moon { width: 138px; height: 138px; margin: 40px auto 26px; border-radius: 50%; background: linear-gradient(145deg,#f6dbc3,#dda983); box-shadow: 0 0 70px rgba(239,199,170,.4); display: grid; place-items: center; }
 .phone-moon::after { content: ""; width: 110px; height: 110px; margin-left: 42px; margin-top: -30px; border-radius: 50%; background: #3f466e; }
-.phone h3 { margin: 0; text-align: center; font-family: var(--font-display),serif; font-size: 1.75rem; font-weight: 500; }
+.phone-title { margin: 0; text-align: center; font-family: var(--font-display),serif; font-size: 1.75rem; font-weight: 500; }
 .phone p { margin: 3px 0 24px; text-align: center; font-size: .78rem; opacity: .65; }
 .wave { display: flex; height: 50px; align-items: center; justify-content: center; gap: 4px; }
 .wave i { display: block; width: 3px; border-radius: 5px; background: #efc7aa; }

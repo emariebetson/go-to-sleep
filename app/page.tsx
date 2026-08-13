@@ -13,8 +13,9 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   return (
     <>
+      <SiteHeader />
+      <main>
       <section className="hero">
-        <SiteHeader />
         <div className="container hero-grid">
           <div>
             <span className="eyebrow">A familiar voice for sleepy moments</span>
@@ -36,7 +37,7 @@ export default function Home() {
             <div className="phone">
               <div className="phone-top"><span>9:14</span><span>Tonight</span></div>
               <div className="phone-moon" aria-hidden="true" />
-              <h3>Moonlit Meadow</h3>
+              <p className="phone-title">Moonlit Meadow</p>
               <p>For baby Junie · In Mama’s voice</p>
               <div className="wave" aria-hidden="true">{Array.from({ length: 9 }, (_, index) => <i key={index} />)}</div>
               <div className="phone-controls" aria-hidden="true"><span className="round">−15</span><span className="round play">▶</span><span className="round">+15</span></div>
@@ -54,9 +55,9 @@ export default function Home() {
             <p className="muted">A simple ritual designed for exhausted parents, not audio engineers.</p>
           </div>
           <div className="steps">
-            <article className="step"><span className="step-number">01</span><h3>Share your voice</h3><p>Record one to two quiet minutes in a room without background noise. You stay in control of the clone.</p><span className="step-art" aria-hidden="true" /></article>
-            <article className="step"><span className="step-number">02</span><h3>Shape tonight’s story</h3><p>Choose your baby’s name, the bedtime challenge, story world, length, soundscape, and calming style.</p><span className="step-art" aria-hidden="true" /></article>
-            <article className="step"><span className="step-number">03</span><h3>Press play nearby</h3><p>We create a familiar-voice track for you to play from a safe distance while you lead the bedtime routine.</p><span className="step-art" aria-hidden="true" /></article>
+            <article className="step"><span className="step-number" aria-hidden="true">01</span><h3>Share your voice</h3><p>Record one to two quiet minutes in a room without background noise. You stay in control of the clone.</p><span className="step-art" aria-hidden="true" /></article>
+            <article className="step"><span className="step-number" aria-hidden="true">02</span><h3>Shape tonight’s story</h3><p>Choose your baby’s name, the bedtime challenge, story world, length, soundscape, and calming style.</p><span className="step-art" aria-hidden="true" /></article>
+            <article className="step"><span className="step-number" aria-hidden="true">03</span><h3>Press play nearby</h3><p>We create a familiar-voice track for you to play from a safe distance while you lead the bedtime routine.</p><span className="step-art" aria-hidden="true" /></article>
           </div>
         </div>
       </section>
@@ -98,6 +99,7 @@ export default function Home() {
       </section>
 
       <section className="cta-band"><div className="container"><h2 className="display">A little more of you, right when they need it.</h2><Link className="btn btn-primary" href="/studio">Create your first bedtime</Link></div></section>
+      </main>
       <SiteFooter />
     </>
   );
