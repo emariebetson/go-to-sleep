@@ -12,6 +12,7 @@ UNION ALL SELECT 'sequence',n.nspname||'.'||c.relname,concat_ws('|',pg_get_userb
 UNION ALL SELECT 'extension',e.extname,concat_ws('|',e.extversion,n.nspname) FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
 UNION ALL SELECT 'role',rolname,concat_ws('|',rolsuper,rolcreaterole,rolcreatedb,rolcanlogin,rolbypassrls) FROM pg_roles WHERE rolname LIKE 'nearyou%'
 UNION ALL SELECT 'membership',member.rolname||'->'||role.rolname,concat_ws('|',admin.rolname,m.admin_option,m.inherit_option,m.set_option) FROM pg_auth_members m JOIN pg_roles role ON role.oid=m.roleid JOIN pg_roles member ON member.oid=m.member LEFT JOIN pg_roles admin ON admin.oid=m.grantor WHERE role.rolname LIKE 'nearyou%' OR member.rolname LIKE 'nearyou%'
+UNION ALL SELECT 'membership','<none>','' WHERE NOT EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles role ON role.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE role.rolname LIKE 'nearyou%' OR member.rolname LIKE 'nearyou%')
 ) observed ORDER BY kind COLLATE "C",identity COLLATE "C",definition COLLATE "C"`;
 export const LIVE_CATALOG_SECURITY_QUERY=`SELECT
   COALESCE(array_agg(c.relname ORDER BY c.relname) FILTER (WHERE c.relname IN ('household_members','tenant_records') AND c.relrowsecurity AND c.relforcerowsecurity),'{}'::text[]) forced_rls,

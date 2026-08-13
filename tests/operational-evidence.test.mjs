@@ -15,6 +15,7 @@ import { composeReleaseClaims } from "../scripts/compose-release-claims.ts";
 import { operationalArtifact } from "../scripts/evidence-artifact.ts";
 import { canonicalEvidence } from "../lib/asymmetric-release-evidence.ts";
 import { buildRlsEvidence } from "../scripts/rls-evidence.ts";
+import { LIVE_CATALOG_QUERY } from "../scripts/postgres-catalog.ts";
 
 const hash = (c) => c.repeat(64);
 const base = { releaseId: "rel_12345678", artifact: hash("a"), schemaChecksum: hash("b"), startedAt: 1_700_000_000_000, endedAt: 1_700_086_400_000 };
@@ -29,6 +30,11 @@ test("canonical Story job IDs cross telemetry, HTTP, and PostgreSQL authority bo
 });
 
 test("catalog candidate and promotion bind complete live security to the current migration head",async()=>{const directory=await mkdtemp(join(tmpdir(),"nearyou-catalog-")),output=join(directory,"catalog-manifest.candidate.json"),reviewedOutput=join(directory,"catalog-manifest.reviewed.json"),rows=REQUIRED_CATALOG_KINDS.map((kind,index)=>({kind,identity:`nearyou.${kind}.${index}`,definition:`definition-${index}`})),connect=async()=>({query:async(sql)=>({rows:sql.includes("public_execute_count")?[{forced_rls:["household_members","tenant_records"],public_execute_count:"0"}]:rows}),close:async()=>{}}),candidate=await generateCatalogCandidate({databaseUrl:"postgres://fixture",output,connect});try{assert.equal(candidate.migrationHead,"0005_operational_evidence");assert.deepEqual(candidate.requiredKinds,REQUIRED_CATALOG_KINDS);assert.deepEqual(candidate.security,{forcedRls:["household_members","tenant_records"],publicExecuteCount:0});assert.match(candidate.catalogChecksum,/^[a-f0-9]{64}$/);assert.notEqual(candidate.catalogChecksum,"0".repeat(64));assert.deepEqual(JSON.parse(await readFile(output,"utf8")),candidate);const reviewed=await promoteCatalogManifest({candidate:output,output:reviewedOutput});assert.equal(reviewed.generatedFrom,"reviewed-supported-postgresql-16");assert.equal(reviewed.reviewRequired,false);assert.equal(reviewed.catalogChecksum,candidate.catalogChecksum);await assert.rejects(()=>generateCatalogCandidate({databaseUrl:"postgres://fixture",output,connect}),/EEXIST/);const tampered={...candidate,security:{forcedRls:["household_members"],publicExecuteCount:0}},tamperedPath=join(directory,"tampered-catalog-manifest.candidate.json");await import("node:fs/promises").then(fs=>fs.writeFile(tamperedPath,JSON.stringify(tampered)));await assert.rejects(()=>promoteCatalogManifest({candidate:tamperedPath,output:join(directory,"tampered-catalog-manifest.reviewed.json")}),/promotion/)}finally{await rm(directory,{recursive:true,force:true})}});
+
+test("catalog records the reviewed absence of NearYou role memberships",()=>{
+  assert.match(LIVE_CATALOG_QUERY,/SELECT 'membership','<none>',''/);
+  assert.match(LIVE_CATALOG_QUERY,/NOT EXISTS[\s\S]*pg_auth_members/);
+});
 
 test("catalog candidate rejects missing FORCE RLS and PUBLIC function execution",async()=>{const rows=REQUIRED_CATALOG_KINDS.map((kind,index)=>({kind,identity:`i${index}`,definition:`d${index}`})),directory=await mkdtemp(join(tmpdir(),"nearyou-catalog-security-"));try{for(const security of [{forced_rls:["household_members"],public_execute_count:"0"},{forced_rls:["household_members","tenant_records"],public_execute_count:"1"}])await assert.rejects(()=>generateCatalogCandidate({databaseUrl:"postgres://fixture",output:join(directory,`${Math.random()}-catalog-manifest.candidate.json`),connect:async()=>({query:async sql=>({rows:sql.includes("public_execute_count")?[security]:rows}),close:async()=>{}})}),/security invariant/)}finally{await rm(directory,{recursive:true,force:true})}});
 
