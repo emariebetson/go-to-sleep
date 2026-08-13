@@ -17,6 +17,8 @@
     "platform:evidence-lint": "tsx scripts/release-readiness.ts",
     "platform:postgres-cutover": "tsx scripts/postgres-cutover.ts"
     ,"platform:verify-private-canary": "tsx scripts/verify-private-canary-runtime.ts"
+    ,"platform:test-private-canary": "tsx --test tests/private-canary-smoke.test.mjs"
+    ,"platform:private-canary-live": "tsx scripts/private-canary-live.ts"
     ,"platform:register-rollout-controller": "tsx scripts/migrate.ts --register-rollout-controller"
   },
   "dependencies": {

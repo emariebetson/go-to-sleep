@@ -19,9 +19,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - name: Apply PostgreSQL migrations 0001-0005 in reviewed order
+      - name: Apply PostgreSQL migrations 0001-0006 in reviewed order
         env: { READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres" }
-        run: for migration in postgres/migrations/0001_*.sql postgres/migrations/0002_*.sql postgres/migrations/0003_*.sql postgres/migrations/0004_*.sql postgres/migrations/0005_*.sql; do psql "$READINESS_CONTROL_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"; done
+        run: for migration in postgres/migrations/0001_*.sql postgres/migrations/0002_*.sql postgres/migrations/0003_*.sql postgres/migrations/0004_*.sql postgres/migrations/0005_*.sql postgres/migrations/0006_*.sql; do psql "$READINESS_CONTROL_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"; done
       - name: Generate review-only live catalog candidate
         env: { READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres" }
         run: node --import tsx scripts/catalog-candidate.ts postgres/catalog-manifest.candidate.json
