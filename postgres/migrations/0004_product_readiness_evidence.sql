@@ -15,6 +15,8 @@ ALTER TABLE nearyou.product_rollout_audit OWNER TO nearyou_release_policy_owner;
 ALTER TABLE nearyou.product_canary_invites OWNER TO nearyou_release_policy_owner;
 ALTER SEQUENCE nearyou.product_rollout_audit_id_seq OWNER TO nearyou_release_policy_owner;
 CREATE FUNCTION nearyou.reject_product_audit_mutation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN RAISE EXCEPTION 'product rollout audit immutable'; END $$;
+ALTER FUNCTION nearyou.reject_product_audit_mutation() OWNER TO nearyou_release_policy_owner;
+REVOKE ALL ON FUNCTION nearyou.reject_product_audit_mutation() FROM PUBLIC;
 CREATE TRIGGER product_rollout_audit_immutable BEFORE UPDATE OR DELETE ON nearyou.product_rollout_audit FOR EACH ROW EXECUTE FUNCTION nearyou.reject_product_audit_mutation();
 REVOKE ALL ON nearyou.product_rollout_state,nearyou.product_rollout_audit,nearyou.product_canary_invites FROM PUBLIC,nearyou_app;
 CREATE ROLE nearyou_rollout_controller NOLOGIN NOINHERIT NOBYPASSRLS;

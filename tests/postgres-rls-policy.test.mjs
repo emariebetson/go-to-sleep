@@ -40,6 +40,12 @@ test("security-definer migrations schema-qualify pgcrypto digest calls", () => {
   assert.match(migration, /GRANT EXECUTE ON FUNCTION nearyou_crypto\.digest\(bytea,text\) TO nearyou_policy_owner/);
 });
 
+test("rollout audit trigger helper is policy-owned and not publicly executable", () => {
+  const migration = readFileSync(new URL("../postgres/migrations/0004_product_readiness_evidence.sql", import.meta.url), "utf8");
+  assert.match(migration, /ALTER FUNCTION nearyou\.reject_product_audit_mutation\(\) OWNER TO nearyou_release_policy_owner/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION nearyou\.reject_product_audit_mutation\(\) FROM PUBLIC/);
+});
+
 test("tenant RLS avoids recursive membership policies and grants app-scoped writes", () => {
   const memberPolicy = sql.match(/CREATE POLICY member_select[\s\S]*?;/)?.[0] || "";
   assert.match(memberPolicy, /is_active_household_member\(household_id\)/);
