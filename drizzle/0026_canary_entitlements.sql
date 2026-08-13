@@ -1,26 +1,8 @@
-CREATE TABLE `canary_entitlement_audit` (
-  `id` text PRIMARY KEY NOT NULL,
-  `operation` text NOT NULL CHECK (`operation` IN ('issue','revoke')),
-  `entitlement_id` text NOT NULL,
-  `household_id` text NOT NULL REFERENCES `households`(`id`) ON DELETE RESTRICT,
-  `plan_id` text NOT NULL CHECK (`plan_id` IN ('nearyou_plus','nearyou_family')),
-  `release_id` text NOT NULL CHECK (`release_id` GLOB 'rel_[A-Za-z0-9_-]*' AND length(`release_id`) BETWEEN 12 AND 100),
-  `principal` text NOT NULL CHECK (`principal` GLOB 'service:[A-Za-z0-9_-]*' AND length(`principal`) BETWEEN 11 AND 120),
-  `reason` text NOT NULL CHECK (length(`reason`) BETWEEN 1 AND 240),
-  `issued_at` integer NOT NULL,
-  `not_before` integer NOT NULL,
-  `expires_at` integer NOT NULL,
-  `idempotency_key` text NOT NULL UNIQUE CHECK (length(`idempotency_key`) BETWEEN 16 AND 120),
-  `request_digest` text NOT NULL CHECK (`request_digest` GLOB '[a-f0-9]*' AND length(`request_digest`)=64),
-  `created_at` integer NOT NULL,
-  CHECK (`issued_at`<=`not_before` AND `not_before`<`expires_at` AND `expires_at`-`issued_at`<=86400000)
-);
+CREATE TABLE `canary_entitlement_audit` (`id` text PRIMARY KEY NOT NULL, `operation` text NOT NULL CHECK (`operation` IN ('issue','revoke')), `entitlement_id` text NOT NULL, `household_id` text NOT NULL REFERENCES `households`(`id`) ON DELETE RESTRICT, `plan_id` text NOT NULL CHECK (`plan_id` IN ('nearyou_plus','nearyou_family')), `release_id` text NOT NULL CHECK (`release_id` GLOB 'rel_[A-Za-z0-9_-]*' AND length(`release_id`) BETWEEN 12 AND 100), `principal` text NOT NULL CHECK (`principal` GLOB 'service:[A-Za-z0-9_-]*' AND length(`principal`) BETWEEN 11 AND 120), `reason` text NOT NULL CHECK (length(`reason`) BETWEEN 1 AND 240), `issued_at` integer NOT NULL, `not_before` integer NOT NULL, `expires_at` integer NOT NULL, `idempotency_key` text NOT NULL UNIQUE CHECK (length(`idempotency_key`) BETWEEN 16 AND 120), `request_digest` text NOT NULL CHECK (`request_digest` GLOB '[a-f0-9]*' AND length(`request_digest`)=64), `created_at` integer NOT NULL, CHECK (`issued_at`<=`not_before` AND `not_before`<`expires_at` AND `expires_at`-`issued_at`<=86400000));
 --> statement-breakpoint
-CREATE TRIGGER `canary_entitlement_audit_issue_exact` BEFORE INSERT ON `canary_entitlement_audit` WHEN NEW.`operation`='issue'
-BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM `entitlements` e WHERE e.`id`=NEW.`entitlement_id` AND e.`household_id`=NEW.`household_id` AND e.`plan_id`=NEW.`plan_id` AND e.`source`='canary' AND e.`status`='active' AND e.`valid_from`=NEW.`not_before` AND e.`valid_until`=NEW.`expires_at`) THEN RAISE(ABORT,'canary_entitlement_issue_invalid') END; END;
+CREATE TRIGGER `canary_entitlement_audit_issue_exact` BEFORE INSERT ON `canary_entitlement_audit` WHEN NEW.`operation`='issue' BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM `entitlements` e WHERE e.`id`=NEW.`entitlement_id` AND e.`household_id`=NEW.`household_id` AND e.`plan_id`=NEW.`plan_id` AND e.`source`='canary' AND e.`status`='active' AND e.`valid_from`=NEW.`not_before` AND e.`valid_until`=NEW.`expires_at`) THEN RAISE(ABORT,'canary_entitlement_issue_invalid') END; END;
 --> statement-breakpoint
-CREATE TRIGGER `canary_entitlement_audit_revoke_exact` BEFORE INSERT ON `canary_entitlement_audit` WHEN NEW.`operation`='revoke'
-BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM `entitlements` e JOIN `canary_entitlement_audit` issued ON issued.`entitlement_id`=e.`id` AND issued.`operation`='issue' WHERE e.`id`=NEW.`entitlement_id` AND e.`household_id`=NEW.`household_id` AND e.`plan_id`=NEW.`plan_id` AND e.`source`='canary' AND e.`status`='active' AND issued.`release_id`=NEW.`release_id`) THEN RAISE(ABORT,'canary_entitlement_revoke_invalid') END; END;
+CREATE TRIGGER `canary_entitlement_audit_revoke_exact` BEFORE INSERT ON `canary_entitlement_audit` WHEN NEW.`operation`='revoke' BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM `entitlements` e JOIN `canary_entitlement_audit` issued ON issued.`entitlement_id`=e.`id` AND issued.`operation`='issue' WHERE e.`id`=NEW.`entitlement_id` AND e.`household_id`=NEW.`household_id` AND e.`plan_id`=NEW.`plan_id` AND e.`source`='canary' AND e.`status`='active' AND issued.`release_id`=NEW.`release_id`) THEN RAISE(ABORT,'canary_entitlement_revoke_invalid') END; END;
 --> statement-breakpoint
 CREATE TRIGGER `canary_entitlement_audit_immutable_update` BEFORE UPDATE ON `canary_entitlement_audit` BEGIN SELECT RAISE(ABORT,'canary_entitlement_audit_immutable'); END;
 --> statement-breakpoint
