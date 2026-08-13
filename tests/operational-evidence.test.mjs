@@ -40,6 +40,7 @@ test("catalog CLI reports only bounded failure classes",()=>{
   assert.equal(catalogCandidateFailureCode(new Error("catalog candidate incomplete")),"catalog-candidate-incomplete");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed")),"catalog-security-invariant");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:public-execute:nearyou.safe_name(text)")),"catalog-public-execute:nearyou.safe_name(text)");
+  assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:public-execute:unknown")),"catalog-public-execute:unknown");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:public-execute:postgres://secret")),"catalog-security-invariant");
   assert.equal(catalogCandidateFailureCode(new Error("postgres://secret unexpected syntax")),"catalog-query-failed");
 });
