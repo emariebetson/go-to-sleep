@@ -31,6 +31,15 @@ test("PostgreSQL ownership changes target exactly one object per ALTER statement
   assert.deepEqual(multiObjectOwnerStatements(migrations), []);
 });
 
+test("security-definer migrations schema-qualify pgcrypto digest calls", () => {
+  const migration = readFileSync(new URL("../postgres/migrations/0005_operational_evidence.sql", import.meta.url), "utf8");
+  const digestCalls = [...migration.matchAll(/(?:[A-Za-z_][A-Za-z0-9_]*\.)?digest\(/g)].map((match) => match[0]);
+  assert.ok(digestCalls.length >= 2);
+  assert.deepEqual(new Set(digestCalls), new Set(["nearyou_crypto.digest("]));
+  assert.match(migration, /GRANT USAGE ON SCHEMA nearyou_crypto TO nearyou_policy_owner/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION nearyou_crypto\.digest\(bytea,text\) TO nearyou_policy_owner/);
+});
+
 test("tenant RLS avoids recursive membership policies and grants app-scoped writes", () => {
   const memberPolicy = sql.match(/CREATE POLICY member_select[\s\S]*?;/)?.[0] || "";
   assert.match(memberPolicy, /is_active_household_member\(household_id\)/);
