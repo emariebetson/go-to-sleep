@@ -369,7 +369,7 @@ resource "google_sql_user" "migration" {
 resource "google_cloud_run_v2_job" "migrations" {
 
 
-  count = local.secrets_ready ? 1 : 0
+  count = local.secrets_ready && local.catalog_ready ? 1 : 0
 
 
 

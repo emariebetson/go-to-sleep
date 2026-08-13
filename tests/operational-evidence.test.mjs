@@ -5,6 +5,12 @@ import { buildOperationalEvidence, validateCanaryWindow } from "../scripts/opera
 import { collectHttpLoad, collectRestore, collectCanary, collectAccessibility, collectMedia, collectSecurity, CanarySampleStore } from "../scripts/collect-operational-gate.ts";
 import { createPostgresCanarySampleStore } from "../lib/postgres-canary-evidence.ts";
 import { reportProductOutcome } from "../lib/product-outcome-telemetry.ts";
+import { generateCatalogCandidate } from "../scripts/catalog-candidate.ts";
+import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
+import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const hash = (c) => c.repeat(64);
 const base = { releaseId: "rel_12345678", artifact: hash("a"), schemaChecksum: hash("b"), startedAt: 1_700_000_000_000, endedAt: 1_700_086_400_000 };
@@ -17,6 +23,10 @@ test("canonical Story job IDs cross telemetry, HTTP, and PostgreSQL authority bo
   const route=readFileSync(new URL("../app/api/internal/product-outcomes/route.ts",import.meta.url),"utf8"),sql=readFileSync(new URL("../postgres/migrations/0005_operational_evidence.sql",import.meta.url),"utf8");
   assert.match(route,/job:\[a-f0-9\]\{64\}/);assert.equal((sql.match(/job:\[a-f0-9\]\{64\}/g)??[]).length,3);
 });
+
+test("catalog candidate and promotion bind complete live security to the current migration head",async()=>{const directory=await mkdtemp(join(tmpdir(),"nearyou-catalog-")),output=join(directory,"catalog-manifest.candidate.json"),reviewedOutput=join(directory,"catalog-manifest.reviewed.json"),rows=REQUIRED_CATALOG_KINDS.map((kind,index)=>({kind,identity:`nearyou.${kind}.${index}`,definition:`definition-${index}`})),connect=async()=>({query:async(sql)=>({rows:sql.includes("public_execute_count")?[{forced_rls:["household_members","tenant_records"],public_execute_count:"0"}]:rows}),close:async()=>{}}),candidate=await generateCatalogCandidate({databaseUrl:"postgres://fixture",output,connect});try{assert.equal(candidate.migrationHead,"0005_operational_evidence");assert.deepEqual(candidate.requiredKinds,REQUIRED_CATALOG_KINDS);assert.deepEqual(candidate.security,{forcedRls:["household_members","tenant_records"],publicExecuteCount:0});assert.match(candidate.catalogChecksum,/^[a-f0-9]{64}$/);assert.notEqual(candidate.catalogChecksum,"0".repeat(64));assert.deepEqual(JSON.parse(await readFile(output,"utf8")),candidate);const reviewed=await promoteCatalogManifest({candidate:output,output:reviewedOutput});assert.equal(reviewed.generatedFrom,"reviewed-supported-postgresql-16");assert.equal(reviewed.reviewRequired,false);assert.equal(reviewed.catalogChecksum,candidate.catalogChecksum);await assert.rejects(()=>generateCatalogCandidate({databaseUrl:"postgres://fixture",output,connect}),/EEXIST/);const tampered={...candidate,security:{forcedRls:["household_members"],publicExecuteCount:0}},tamperedPath=join(directory,"tampered-catalog-manifest.candidate.json");await import("node:fs/promises").then(fs=>fs.writeFile(tamperedPath,JSON.stringify(tampered)));await assert.rejects(()=>promoteCatalogManifest({candidate:tamperedPath,output:join(directory,"tampered-catalog-manifest.reviewed.json")}),/promotion/)}finally{await rm(directory,{recursive:true,force:true})}});
+
+test("catalog candidate rejects missing FORCE RLS and PUBLIC function execution",async()=>{const rows=REQUIRED_CATALOG_KINDS.map((kind,index)=>({kind,identity:`i${index}`,definition:`d${index}`})),directory=await mkdtemp(join(tmpdir(),"nearyou-catalog-security-"));try{for(const security of [{forced_rls:["household_members"],public_execute_count:"0"},{forced_rls:["household_members","tenant_records"],public_execute_count:"1"}])await assert.rejects(()=>generateCatalogCandidate({databaseUrl:"postgres://fixture",output:join(directory,`${Math.random()}-catalog-manifest.candidate.json`),connect:async()=>({query:async sql=>({rows:sql.includes("public_execute_count")?[security]:rows}),close:async()=>{}})}),/security invariant/)}finally{await rm(directory,{recursive:true,force:true})}});
 
 test("operational evidence is exact, bounded, release-bound and fail closed", () => {
   assert.throws(() => buildOperationalEvidence({ ...base, load: null, restore: null, accessibility: null, security: null, media: null, canary: null }), /evidence incomplete/);

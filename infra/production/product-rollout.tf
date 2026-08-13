@@ -33,7 +33,10 @@ variable "nearlegacy_rollout_percent" {
 locals {
   product_rollouts_default_dark = { nearstory = 0, nearfamily = 0, nearlegacy = 0 }
 }
-locals { catalog_manifest_checksum = jsondecode(file("${path.module}/../../postgres/catalog-manifest.json")).catalogChecksum }
+locals {
+  catalog_manifest          = jsondecode(file("${path.module}/../../postgres/catalog-manifest.json"))
+  catalog_manifest_checksum = local.catalog_manifest.catalogChecksum
+}
 variable "migration_admin_secret_version" {
   type      = string
   sensitive = true
