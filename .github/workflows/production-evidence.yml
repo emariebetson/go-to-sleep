@@ -36,7 +36,10 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with: { name: catalog-manifest-review-candidate, path: postgres/catalog-manifest.candidate.json }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with: { name: rls-evidence-${{ github.run_id }}-${{ github.run_attempt }}, path: postgres/rls-evidence.json, if-no-files-found: error }
+        with:
+          name: rls-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: postgres/rls-evidence.json
+          if-no-files-found: error
   operational-evidence:
     needs: postgres-contract
     runs-on: ubuntu-latest
