@@ -20,6 +20,7 @@ function dependencies(overrides = {}) {
   return {
     enabled: async () => true,
     authenticate: async () => ({ householdId: "h1", userId: "u1" }),
+    authorizeProduct: async () => true,
     entitlement: async () => ({ planId: "nearyou_plus", status: "active", validFrom: 1, validUntil: null, remainingMilliunits: 60_000 }),
     selectors: async () => ({ child: { nickname: "Lou", pronunciation: "LOU", ageMonths: 48 }, consent: { id: "consent-1", version: "voice-consent-v2" } }),
     moderate: async () => "safe",
@@ -38,6 +39,12 @@ function dependencies(overrides = {}) {
 test("story handler is dark until migration and worker readiness are healthy", async () => {
   const response = await createNearStoryPostHandler(dependencies({ enabled: async () => false }))(request());
   assert.equal(response.status, 404);
+});
+
+test("story handler denies a household outside the authoritative rollout", async () => {
+  let entitlementCalls=0;
+  const response=await createNearStoryPostHandler(dependencies({authorizeProduct:async()=>false,entitlement:async()=>{entitlementCalls++;throw new Error("must not run")}}))(request());
+  assert.equal(response.status,404);assert.equal(entitlementCalls,0);
 });
 
 test("story mutations require same-origin JSON and enforce the body limit", async () => {

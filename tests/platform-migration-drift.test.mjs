@@ -12,10 +12,10 @@ test("platform migration tables are represented in the Drizzle schema", () => {
   }
 });
 
-test("a blank SQLite database applies 0000 through 0015 without foreign-key damage", () => {
+test("a blank SQLite database applies 0000 through 0016 without foreign-key damage", () => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
-  for (let index = 0; index <= 15; index += 1) {
+  for (let index = 0; index <= 16; index += 1) {
     const prefix = String(index).padStart(4, "0");
     const journal = JSON.parse(source("drizzle/meta/_journal.json"));
     const tag = journal.entries.find((entry) => entry.idx === index)?.tag;
@@ -30,15 +30,29 @@ test("a blank SQLite database applies 0000 through 0015 without foreign-key dama
   }
 });
 
-test("Drizzle migration metadata tracks every hand-written migration through 0015", () => {
+test("Drizzle migration metadata tracks every migration through 0016", () => {
   const journal = JSON.parse(source("drizzle/meta/_journal.json"));
-  assert.deepEqual(journal.entries.slice(-3).map((entry) => entry.tag), [
+  assert.deepEqual(journal.entries.slice(-4).map((entry) => entry.tag), [
     "0013_nearstory_parent_beta",
     "0014_nearlegacy_archive",
     "0015_platform_release_foundation",
+    "0016_marketing_waitlist",
   ]);
-  for (const index of [13, 14, 15]) {
+  for (const index of [13, 14, 15, 16]) {
     const snapshot = JSON.parse(source(`drizzle/meta/${String(index).padStart(4, "0")}_snapshot.json`));
     assert.equal(snapshot.dialect, "sqlite");
+  }
+});
+
+test("every packaged post-0016 migration contains executable SQL", () => {
+  for (let index = 17; index <= 25; index += 1) {
+    const prefix = String(index).padStart(4, "0");
+    const name = [
+      "cutover_source_runtime", "cutover_inventory_fence.generated", "mobile_entitlement_runtime",
+      "product_release_readiness", "story_rollout_telemetry", "operational_outcome_outbox",
+      "nearfamily_capacity", "nearfamily_capacity_authority", "nearfamily_tenant_binding",
+    ][index - 17];
+    const executable = source(`drizzle/${prefix}_${name}.sql`).replace(/^\s*--.*$/gm, "").trim();
+    assert.notEqual(executable, "", `${prefix} cannot be a comment-only production migration`);
   }
 });

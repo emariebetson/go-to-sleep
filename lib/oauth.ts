@@ -21,7 +21,7 @@ function createOAuthAuth(baseURL: string) {
   };
 
   return betterAuth({
-    appName: "Nearnight",
+    appName: "NearSleep",
     baseURL,
     basePath: "/api/auth",
     secret: process.env.BETTER_AUTH_SECRET,

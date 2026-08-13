@@ -1,10 +1,16 @@
 import { and, eq, ne } from "drizzle-orm";
+import { env } from "cloudflare:workers";
 import { getDb } from "@/db";
 import { accountDeletionOperations, householdMembers, task2cActivationState } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { jsonNoStore } from "@/lib/http";
 import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled, roleCan, type HouseholdCapability, type HouseholdRole } from "@/lib/nearyou-foundation";
+import { createPostgresHouseholdProductAccess } from "@/lib/product-release-readiness-service";
+
+type ProductRoute="nearstory"|"nearlegacy";
+export function productCleanupAllowed(method:string,path:string){return(method==="POST"&&(/^\/api\/v1\/legacy\/consents\/[^/]+\/revoke$/.test(path)||path==="/api/v1/legacy/deletions"||/^\/api\/v1\/legacy\/contributors\/[^/]+\/lifecycle$/.test(path)))||(method==="DELETE"&&path==="/api/v1/legacy/mfa")||(method==="GET"&&path==="/api/v1/legacy/my-contributions")}
+export async function withProductRollout(request:Request,householdId:string){const path=new URL(request.url).pathname,product:ProductRoute|null=path.startsWith("/api/v1/stories")?"nearstory":path.startsWith("/api/v1/legacy")?"nearlegacy":null;if(!product)return true;if(product==="nearlegacy"&&productCleanupAllowed(request.method,path))return true;const pg=(env as unknown as{READINESS_PG?:{query<T>(sql:string,args:unknown[]):Promise<{rows:T[]}>}}).READINESS_PG;return pg?createPostgresHouseholdProductAccess(pg)(product,householdId):false}
 
 export async function requireFoundationUser(request: Request) {
   const user = await requireApiUser(request);
@@ -57,6 +63,7 @@ export async function requireHouseholdContext(request: Request, capability: Hous
   if (!roleCan(membership.role as HouseholdRole, capability)) {
     throw jsonNoStore({ error: "Your household role does not allow this action." }, { status: 403 });
   }
+  if(!await withProductRollout(request,householdId))throw jsonNoStore({error:"This product is not available for this household."},{status:404});
   return { user, householdId, role: membership.role };
 }
 

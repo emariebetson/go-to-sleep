@@ -104,7 +104,9 @@ export function parseRevenueCatEntitlementEvent(payload: unknown, allowlist: Rev
   if (typeof event.id !== "string" || !/^rc_[A-Za-z0-9_-]+$/.test(event.id)
     || typeof event.app_user_id !== "string" || !/^rcusr_[a-f0-9]{32,64}$/.test(event.app_user_id)
     || typeof event.event_timestamp_ms !== "number" || !Number.isSafeInteger(event.event_timestamp_ms)) throw new Error("RevenueCat identity fields are invalid.");
-  return { id: event.id, appUserId: event.app_user_id, occurredAtMs: event.event_timestamp_ms, productId: event.product_id, entitlementId, environment: event.environment };
+  if(typeof event.type!=="string"||!/^[A-Z_]{3,64}$/.test(event.type))throw new Error("RevenueCat event type is invalid.");
+  const expiresAtMs=event.expiration_at_ms===null||event.expiration_at_ms===undefined?null:event.expiration_at_ms;if(expiresAtMs!==null&&(typeof expiresAtMs!=="number"||!Number.isSafeInteger(expiresAtMs)||expiresAtMs<0))throw new Error("RevenueCat expiration is invalid.");
+  return { id: event.id, appId:event.app_id,appUserId: event.app_user_id, occurredAtMs: event.event_timestamp_ms, productId: event.product_id, entitlementId, environment: allowlist.environment,eventType:event.type,expiresAtMs };
 }
 
 export type OfflineAsset = { version: 1; mediaId: string; iv: Uint8Array; ciphertext: Uint8Array };

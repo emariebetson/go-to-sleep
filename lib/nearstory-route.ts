@@ -18,6 +18,7 @@ export type NearStoryEnqueueInput = {
 export type NearStoryPostDependencies = {
   enabled: () => Promise<boolean>;
   authenticate: (request: Request) => Promise<{ householdId: string; userId: string }>;
+  authorizeProduct: (householdId: string) => Promise<boolean>;
   entitlement: (householdId: string) => Promise<Entitlement>;
   selectors: (householdId: string, input: StoryRequest) => Promise<Selectors | null>;
   moderate: (text: string, context: { householdId: string; userId: string; requestId: string; requestHash: string }) => Promise<"safe" | "unsafe" | "unavailable">;
@@ -60,6 +61,7 @@ export function createNearStoryPostHandler(dependencies: NearStoryPostDependenci
       if (!idempotencyKey || idempotencyKey.length > 200) return json({ error: "A bounded Idempotency-Key header is required." }, 400);
       if (idempotencyKey !== input.requestId) return json({ error: "Idempotency-Key must match requestId." }, 409);
       const identity = await dependencies.authenticate(request);
+      if (!await dependencies.authorizeProduct(identity.householdId)) return json({ error: "NearStory is not available." }, 404);
       const entitlement = await dependencies.entitlement(identity.householdId);
       if (!Number.isInteger(entitlement.remainingMilliunits) || entitlement.remainingMilliunits < 0) return json({ error: "Household allowance is unavailable." }, 503);
       if (!hasCurrentStoryEntitlement(entitlement)) return json({ error: "NearStory is included with NearYou Plus or higher." }, 402);

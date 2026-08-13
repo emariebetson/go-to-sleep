@@ -5,6 +5,7 @@ import { jobs, providerSpendReservations, storyExperiences, storyPersistStagingO
 import { createNearStoryProductionDependencies, nextDispatchableNearStoryJobId } from "./nearstory-production-worker";
 import { validateStoryWriterOutput, type NearStoryWork } from "./nearstory-worker";
 import { sha256Hex } from "./nearsleep-library";
+import { enqueueOperationalOutcome, flushOperationalOutcomeOutbox } from "./operational-outcome-outbox";
 
 type StageBucket = { put(key: string, body: Uint8Array, options: { httpMetadata: { contentType: string }; customMetadata: Record<string, string> }): Promise<unknown>; get(key: string): Promise<{ size: number; customMetadata?: Record<string, string>; arrayBuffer(): Promise<ArrayBuffer> } | null>; head(key: string): Promise<{ size: number; customMetadata?: Record<string, string> } | null>; delete(key: string): Promise<void> };
 type CheckpointStage = "writer" | "moderation" | "speech" | "effect" | "mix";
@@ -58,6 +59,7 @@ async function requeue(work: NearStoryWork, stage: string, percent: number) {
   const changed = await getDb().update(jobs).set({ status: "queued", progressStage: stage, progressPercent: percent, workerAttemptToken: null, workerLeaseExpiresAt: null, updatedAt: new Date() }).where(and(eq(jobs.id, work.jobId), eq(jobs.householdId, work.householdId), eq(jobs.status, "running"), eq(jobs.workerAttemptToken, work.attemptToken || ""))).returning({ id: jobs.id }).get();
   if (!changed) throw new Error("story_worker_lease_lost");
 }
+async function pauseForRollout(work:NearStoryWork,version:number|null){const changed=await getDb().update(jobs).set({status:"queued",errorCode:`rollout_paused:${version??0}`,workerAttemptToken:null,workerLeaseExpiresAt:new Date(Date.now()+60_000),updatedAt:new Date()}).where(and(eq(jobs.id,work.jobId),eq(jobs.householdId,work.householdId),eq(jobs.status,"running"),eq(jobs.workerAttemptToken,work.attemptToken||""))).returning({id:jobs.id}).get();if(!changed)throw new Error("story_worker_lease_lost")}
 
 async function settleRecoveredHold(work: NearStoryWork, operation: "story_writing" | "story_output_moderation" | "story_speech" | "story_sfx", deps: ReturnType<typeof createNearStoryProductionDependencies>) {
   const hold = await getDb().select().from(storyProviderBudgetHolds).where(and(eq(storyProviderBudgetHolds.householdId, work.householdId), eq(storyProviderBudgetHolds.storyId, work.storyId), eq(storyProviderBudgetHolds.branchKey, "root"), eq(storyProviderBudgetHolds.operation, operation), eq(storyProviderBudgetHolds.status, "claimed"))).get();
@@ -71,7 +73,14 @@ async function failOwned(work: NearStoryWork, code: string, deps: ReturnType<typ
 
 export async function advanceNextNearStoryStage(jobId?: string) {
   const selected = jobId || await nextDispatchableNearStoryJobId(); if (!selected) return { status: "idle" as const };
-  const deps = createNearStoryProductionDependencies(); const work = await deps.claimJob(selected); if (!work) return { status: "busy" as const };
+  const baseDeps = createNearStoryProductionDependencies(); const work = await baseDeps.claimJob(selected); if (!work) return { status: "busy" as const };
+  const runtime=(await import("cloudflare:workers")).env as unknown as{READINESS_PG?:{query<T>(sql:string,args:unknown[]):Promise<{rows:T[]}>}};
+  const fence=runtime.READINESS_PG?(await import("./product-release-readiness-service")).createPostgresRolloutFence(runtime.READINESS_PG):null,grant=fence?await fence("nearstory",work.householdId):null;
+  if(!grant){await pauseForRollout(work,null);return{status:"paused"as const}}
+  const rolloutBound=await getDb().update(jobs).set({rolloutReleaseId:grant.releaseId,rolloutVersion:grant.version,updatedAt:new Date()}).where(and(eq(jobs.id,work.jobId),eq(jobs.householdId,work.householdId),eq(jobs.status,"running"),eq(jobs.workerAttemptToken,work.attemptToken||""))).returning({id:jobs.id,inputChecksum:jobs.requestHash}).get();
+  if(!rolloutBound)throw new Error("story_worker_lease_lost");
+  if(!work.attemptToken)throw new Error("story_attempt_registration_failed");await(await enqueueOperationalOutcome((env as unknown as{DB:Parameters<typeof enqueueOperationalOutcome>[0]}).DB,{releaseId:grant.releaseId,releaseVersion:grant.version,product:"nearstory",jobId:work.jobId,householdId:work.householdId,attemptToken:work.attemptToken,requestHash:rolloutBound.inputChecksum,operation:"attempt_started"})).run();await flushOperationalOutcomeOutbox((env as unknown as{DB:Parameters<typeof flushOperationalOutcomeOutbox>[0]}).DB,env as unknown as Record<string,unknown>,2);
+  const guarded=new Set(["writeStory","moderateOutput","synthesize","effect","mix","persist","complete"]),deps=new Proxy(baseDeps,{get(target,key,receiver){const value=Reflect.get(target,key,receiver);if(typeof key!=="string"||!guarded.has(key)||typeof value!=="function")return value;return async(...args:unknown[])=>{const current=await fence!("nearstory",work.householdId);if(!current||current.releaseId!==grant.releaseId||current.version!==grant.version)throw new Error("rollout_fenced");return value.apply(target,args)}}}) as typeof baseDeps;
   try {
     await deps.requireConsent(work);
     const stage = work.progressStage || "writing";
@@ -120,6 +129,7 @@ export async function advanceNextNearStoryStage(jobId?: string) {
     if (stage === "complete") { const recovered = await deps.recoverPersisted(work); if (!recovered) throw new Error("story_persistence_uncertain"); await deps.requireConsent(work); await deps.complete(work, recovered); return { status: "completed" as const, result: recovered }; }
     throw new Error("story_stage_invalid");
   } catch (error) {
+    if(error instanceof Error&&error.message==="rollout_fenced"){await pauseForRollout(work,grant.version);return{status:"paused"as const}}
     if (error instanceof Error && /unsafe/.test(error.message)) return failOwned(work, "story_output_unsafe", deps);
     return { status: "retryable" as const, code: error instanceof Error ? error.message : "story_stage_failed" };
   }
@@ -127,10 +137,11 @@ export async function advanceNextNearStoryStage(jobId?: string) {
 
 export async function reconcileExhaustedNearStoryJobs(limit = 5) {
   const db = getDb(); const now = new Date();
-  const records = await db.select({ jobId: sql<string>`${jobs.id}`.as("story_job_id"), householdId: sql<string>`${jobs.householdId}`.as("story_household_id"), storyId: sql<string>`${storyExperiences.id}`.as("story_id"), reservationId: sql<string | null>`${storyExperiences.reservationId}`.as("story_reservation_id"), leaseId: sql<string>`${storyExperiences.consentLeaseId}`.as("story_lease_id") })
+  const records = await db.select({ jobId: sql<string>`${jobs.id}`.as("story_job_id"), householdId: sql<string>`${jobs.householdId}`.as("story_household_id"), storyId: sql<string>`${storyExperiences.id}`.as("story_id"), reservationId: sql<string | null>`${storyExperiences.reservationId}`.as("story_reservation_id"), leaseId: sql<string>`${storyExperiences.consentLeaseId}`.as("story_lease_id"), inputChecksum:jobs.requestHash,attemptToken:jobs.workerAttemptToken, rolloutReleaseId: jobs.rolloutReleaseId, rolloutVersion: jobs.rolloutVersion })
     .from(jobs).innerJoin(storyExperiences, and(eq(storyExperiences.jobId, jobs.id), eq(storyExperiences.householdId, jobs.householdId)))
     .where(and(eq(jobs.type, "story_audio"), eq(jobs.status, "running"), lte(jobs.workerLeaseExpiresAt, now), eq(jobs.attempts, 3))).limit(Math.max(1, Math.min(limit, 20))).all();
   for (const record of records) {
+    const terminalOutcome=record.rolloutReleaseId&&record.attemptToken&&typeof record.rolloutVersion==="number"&&Number.isSafeInteger(record.rolloutVersion)&&record.rolloutVersion>0?{product:"nearstory"as const,operation:"terminal"as const,jobId:record.jobId,householdId:record.householdId,attemptToken:record.attemptToken,requestHash:record.inputChecksum,releaseId:record.rolloutReleaseId,releaseVersion:record.rolloutVersion,terminalStatus:"dead_letter"as const}:null,terminalChecksum=terminalOutcome?await (await import("./operational-outcome-outbox")).outcomeChecksum(terminalOutcome):null;
     const holds = await db.select({ id: storyProviderBudgetHolds.id, status: storyProviderBudgetHolds.status, spendId: storyProviderBudgetHolds.providerSpendReservationId }).from(storyProviderBudgetHolds).where(and(eq(storyProviderBudgetHolds.householdId, record.householdId), eq(storyProviderBudgetHolds.storyId, record.storyId), inArray(storyProviderBudgetHolds.status, ["reserved", "claimed"]))).all();
     const spendIds = holds.map((hold) => hold.spendId).filter((id): id is string => Boolean(id));
     const spends = spendIds.length ? await db.select({ id: providerSpendReservations.id, status: providerSpendReservations.status }).from(providerSpendReservations).where(inArray(providerSpendReservations.id, spendIds)).all() : [];
@@ -141,6 +152,7 @@ export async function reconcileExhaustedNearStoryJobs(limit = 5) {
       ...(record.reservationId ? [db.update(usageReservations).set({ status: "released" as const, finalizedAt: now, updatedAt: now }).where(and(eq(usageReservations.id, record.reservationId), eq(usageReservations.householdId, record.householdId), eq(usageReservations.status, "reserved")))] : []),
       db.update(storyExperiences).set({ status: "failed", errorCode: "story_worker_attempts_exhausted", updatedAt: now }).where(and(eq(storyExperiences.id, record.storyId), eq(storyExperiences.householdId, record.householdId), inArray(storyExperiences.status, ["queued", "processing"]))),
       db.update(jobs).set({ status: "failed", errorCode: "story_worker_attempts_exhausted", progressStage: "failed", workerAttemptToken: null, workerLeaseExpiresAt: null, completedAt: now, updatedAt: now }).where(and(eq(jobs.id, record.jobId), eq(jobs.householdId, record.householdId), eq(jobs.status, "running"), eq(jobs.attempts, 3))),
+      ...(terminalOutcome&&terminalChecksum?[db.insert((await import("@/db/schema")).operationalOutcomeOutbox).values({id:`nearstory:${record.jobId}:${record.attemptToken}:terminal`,product:"nearstory",operation:"terminal",jobId:record.jobId,householdId:record.householdId,attemptToken:record.attemptToken!,requestHash:record.inputChecksum,releaseId:record.rolloutReleaseId!,releaseVersion:record.rolloutVersion!,terminalStatus:"dead_letter",deliveryStatus:"pending",attempts:0,nextAttemptAt:now,payloadChecksum:terminalChecksum,createdAt:now,updatedAt:now}).onConflictDoNothing()]:[]),
     ] as never);
   }
   return records.length;

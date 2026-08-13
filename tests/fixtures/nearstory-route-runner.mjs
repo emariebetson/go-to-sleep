@@ -7,7 +7,7 @@ const migrations = [
   "0004_salty_sugar_man.sql", "0005_pronunciation_frequency_layers.sql", "0006_nearyou_shared_foundation.sql",
   "0007_nearsleep_production_upgrade.sql", "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql",
   "0010_child_profile_pronunciation.sql", "0011_household_billing_accounts.sql", "0012_nearsleep_library_privacy.sql",
-  "0013_nearstory_parent_beta.sql",
+  "0013_nearstory_parent_beta.sql", "0021_story_rollout_telemetry.sql", "0022_operational_outcome_outbox.sql",
 ];
 
 class Statement {
@@ -29,6 +29,14 @@ class D1 {
     this.db.exec("BEGIN IMMEDIATE");
     try { const results = statements.map((statement) => statement.execute()); this.db.exec("COMMIT"); if (this.loseBatchResponse) { this.loseBatchResponse = false; throw new Error("simulated_lost_batch_response"); } return results; }
     catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+  }
+}
+class AuthorizedProductRolloutPg {
+  async query(source) {
+    if (source.startsWith("SELECT release_id,version FROM nearyou.product_rollout_state")) return { rows: [{ release_id: "rel_story_fixture", version: 1 }] };
+    if (source.startsWith("SELECT release_id FROM nearyou.product_rollout_state")) return { rows: [{ release_id: "rel_story_fixture" }] };
+    if (source.startsWith("SELECT nearyou.authorize_product_household")) return { rows: [{ allowed: true }] };
+    throw new Error(`unexpected rollout fixture query: ${source}`);
   }
 }
 class R2 {
@@ -56,8 +64,9 @@ class R2 {
 
 const db = new DatabaseSync(":memory:"); db.exec("PRAGMA foreign_keys=ON");
 for (const name of migrations) for (const statement of readFileSync(new URL(`../../drizzle/${name}`, import.meta.url), "utf8").split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) db.exec(statement);
-const d1 = new D1(db); const r2 = new R2(); globalThis.__TASK2B_CLOUDFLARE_ENV__ = { DB: d1, AUDIO: r2 };
+const d1 = new D1(db); const r2 = new R2(); globalThis.__TASK2B_CLOUDFLARE_ENV__ = { DB: d1, AUDIO: r2, READINESS_PG: new AuthorizedProductRolloutPg() };
 Object.assign(process.env, {
+  NEARYOU_TEST_AUTHORIZED_PRODUCT_ROLLOUT: "true",
   NEARYOU_ENABLE_FOUNDATION_API: "true", NEARYOU_ENABLE_PRODUCTION_UPGRADE_FOUNDATION: "true",
   NEARYOU_ENABLE_NEARSLEEP_PRODUCTION: "true", NEARYOU_ENABLE_NEARSLEEP_LIBRARY_PRIVACY: "true",
   NEARYOU_ENABLE_STORY: "true", NEARYOU_ENABLE_ASYNC_MEDIA_JOBS: "true", NEARYOU_ENABLE_USAGE_RESERVATIONS: "true",
@@ -114,6 +123,7 @@ assert.equal(db.prepare("SELECT count(*) value FROM story_experiences WHERE id=?
 assert.equal(db.prepare("SELECT remaining_milliunits value FROM entitlements WHERE id='ent_one'").get().value, 40_000);
 
 const rootJobId = db.prepare("SELECT job_id value FROM story_experiences WHERE id=?").get(lostBody.story.id).value;
+assert.match(db.prepare("SELECT request_hash value FROM jobs WHERE id=?").get(rootJobId).value, /^[a-f0-9]{64}$/);
 const consentState = db.prepare("SELECT l.status leaseStatus,l.expires_at expiresAt,s.status storyStatus,c.status consentStatus,v.status voiceStatus,v.current_consent_id currentConsent,l.consent_id leaseConsent,v.provider_voice_id providerVoice FROM story_experiences s JOIN voice_consent_leases l ON l.id=s.consent_lease_id JOIN voice_consents c ON c.id=l.consent_id JOIN voices v ON v.id=l.voice_id WHERE s.id=?").get(lostBody.story.id);
 assert.deepEqual({ ...consentState, expiresAt: undefined }, { leaseStatus: "active", expiresAt: undefined, storyStatus: "queued", consentStatus: "active_verified", voiceStatus: "ready", currentConsent: "consent_one", leaseConsent: "consent_one", providerVoice: "pv_one" });
 assert.ok(consentState.expiresAt > Date.now());

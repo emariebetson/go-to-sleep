@@ -46,7 +46,7 @@ const unsafeScriptPatterns = [
 
 export function validateNarrationSafety(script: string) {
   if (unsafeScriptPatterns.some((pattern) => pattern.test(script))) {
-    throw new Error("The edited script contains language outside Nearnight’s safety boundaries. Please revise it before creating audio.");
+    throw new Error("The edited script contains language outside NearSleep’s safety boundaries. Please revise it before creating audio.");
   }
   return script;
 }

@@ -2,164 +2,435 @@ import { env } from "cloudflare:workers";
 import { deletePrivateLegacyObject, putPrivateLegacyExportStream, putPrivateLegacyObject } from "@/lib/nearlegacy-media";
 import { legacyHash } from "@/lib/nearlegacy-route";
 import { buildLegacyExportManifest } from "@/lib/nearlegacy";
-
-type Bucket = Parameters<typeof putPrivateLegacyObject>[0] & { get(key:string):Promise<{body?:ReadableStream<Uint8Array>;arrayBuffer():Promise<ArrayBuffer>}|null> };
-const bucket=()=> (env as unknown as {AUDIO:Bucket}).AUDIO;
-async function stableLegacyUuid(value:string){const hex=await legacyHash(value);return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20,32)}`;}
-function transcriptChunks(payload:{text?:string;words?:Array<{text?:string;word?:string;start?:number;end?:number}>},durationMs:number){const words=(payload.words||[]).map(item=>({text:String(item.text||item.word||"").trim(),startMs:Math.round(Number(item.start)*1000),endMs:Math.round(Number(item.end)*1000)})).filter(item=>item.text&&Number.isSafeInteger(item.startMs)&&Number.isSafeInteger(item.endMs)&&item.startMs>=0&&item.endMs>item.startMs&&item.endMs<=durationMs);if(words.length){const chunks:Array<{text:string;startMs:number;endMs:number}>=[];let current:{text:string;startMs:number;endMs:number}|null=null;for(const word of words){if(!current||current.text.length+word.text.length+1>3500){if(current)chunks.push(current);current={text:word.text,startMs:word.startMs,endMs:word.endMs};}else{current.text+=` ${word.text}`;current.endMs=word.endMs;}}if(current)chunks.push(current);return chunks;}const text=String(payload.text||"").normalize("NFC").trim();if(!text||Array.from(text).length>4000)throw new Error("transcript_alignment_required");return [{text,startMs:0,endMs:durationMs}];}
-
+import { createPostgresHouseholdProductAccess } from "@/lib/product-release-readiness-service";
+import { createPostgresRolloutFence } from "@/lib/product-release-readiness-service";
+import { enqueueOperationalOutcome } from "@/lib/operational-outcome-outbox";
+type Bucket = Parameters<typeof putPrivateLegacyObject>[0] & {
+    get(key: string): Promise<{
+        body?: ReadableStream<Uint8Array>;
+        arrayBuffer(): Promise<ArrayBuffer>;
+    } | null>;
+};
+const bucket = () => (env as unknown as {
+    AUDIO: Bucket;
+}).AUDIO;
+async function legacyWorkAllowed(householdId: string) { const pg = (env as unknown as {
+    READINESS_PG?: {
+        query<T>(sql: string, args: unknown[]): Promise<{
+            rows: T[];
+        }>;
+    };
+}).READINESS_PG; return pg ? createPostgresHouseholdProductAccess(pg)("nearlegacy", householdId) : false; }
+async function legacyFence(householdId: string) { const pg = (env as unknown as {
+    READINESS_PG?: {
+        query<T>(sql: string, args: unknown[]): Promise<{
+            rows: T[];
+        }>;
+    };
+}).READINESS_PG, grant = pg ? await createPostgresRolloutFence(pg)("nearlegacy", householdId) : null; if (grant) {
+    const active = await env.DB.prepare("SELECT id,worker_attempt_token,request_hash FROM jobs WHERE household_id=? AND type='archive_transcription' AND status='running' AND worker_attempt_token IS NOT NULL LIMIT 2").bind(householdId).all();
+    if (active.results?.length === 1) {
+        const row = active.results[0] as Record<string, unknown>;
+        await (await enqueueOperationalOutcome(env.DB, { releaseId: grant.releaseId, releaseVersion: grant.version, product: "nearlegacy", jobId: String(row.id), householdId, attemptToken: String(row.worker_attempt_token), requestHash: String(row.request_hash), operation: "attempt_started" })).run();
+    }
+} return grant; }
+async function assertLegacyFence(householdId: string, captured: Awaited<ReturnType<typeof legacyFence>>) { const current = await legacyFence(householdId); if (!captured || !current || current.releaseId !== captured.releaseId || current.version !== captured.version)
+    throw new Error("rollout_fenced"); }
+async function legacyTerminalOutboxStatement(jobId: string, status: "succeeded" | "failed" | "dead_letter") { const rows = await env.DB.prepare("SELECT o.job_id,o.household_id,o.attempt_token,o.request_hash,o.release_id,o.release_version FROM operational_outcome_outbox o JOIN jobs j ON j.id=o.job_id AND j.household_id=o.household_id AND j.worker_attempt_token=o.attempt_token WHERE o.product='nearlegacy' AND o.job_id=? AND o.operation='attempt_started' LIMIT 2").bind(jobId).all(); if (rows.results?.length !== 1) throw new Error("legacy_attempt_identity_invalid"); const row = rows.results[0] as Record<string, unknown>; return enqueueOperationalOutcome(env.DB, { product: "nearlegacy", operation: "terminal", jobId: String(row.job_id), householdId: String(row.household_id), attemptToken: String(row.attempt_token), requestHash: String(row.request_hash), releaseId: String(row.release_id), releaseVersion: Number(row.release_version), terminalStatus: status }); }
+async function stableLegacyUuid(value: string) { const hex = await legacyHash(value); return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`; }
+function transcriptChunks(payload: {
+    text?: string;
+    words?: Array<{
+        text?: string;
+        word?: string;
+        start?: number;
+        end?: number;
+    }>;
+}, durationMs: number) { const words = (payload.words || []).map(item => ({ text: String(item.text || item.word || "").trim(), startMs: Math.round(Number(item.start) * 1000), endMs: Math.round(Number(item.end) * 1000) })).filter(item => item.text && Number.isSafeInteger(item.startMs) && Number.isSafeInteger(item.endMs) && item.startMs >= 0 && item.endMs > item.startMs && item.endMs <= durationMs); if (words.length) {
+    const chunks: Array<{
+        text: string;
+        startMs: number;
+        endMs: number;
+    }> = [];
+    let current: {
+        text: string;
+        startMs: number;
+        endMs: number;
+    } | null = null;
+    for (const word of words) {
+        if (!current || current.text.length + word.text.length + 1 > 3500) {
+            if (current)
+                chunks.push(current);
+            current = { text: word.text, startMs: word.startMs, endMs: word.endMs };
+        }
+        else {
+            current.text += ` ${word.text}`;
+            current.endMs = word.endMs;
+        }
+    }
+    if (current)
+        chunks.push(current);
+    return chunks;
+} const text = String(payload.text || "").normalize("NFC").trim(); if (!text || Array.from(text).length > 4000)
+    throw new Error("transcript_alignment_required"); return [{ text, startMs: 0, endMs: durationMs }]; }
 export async function advanceLegacyEvidenceRetention() {
-  const now = Date.now();
-  const selected = await env.DB.prepare("SELECT x.household_id,x.consent_id,x.media_asset_id,x.attempts,m.storage_key FROM legacy_evidence_retention x JOIN media_assets m ON m.id=x.media_asset_id AND m.household_id=x.household_id WHERE ((x.status IN ('retained','cleanup_required') AND x.delete_after<=? AND (x.next_attempt_at IS NULL OR x.next_attempt_at<=?)) OR (x.status='cleanup_required' AND x.lease_expires_at<?)) ORDER BY COALESCE(x.next_attempt_at,x.delete_after),x.household_id,x.consent_id LIMIT 1").bind(now,now,now).all();
-  const row = selected.results?.[0] as {household_id?:string;consent_id?:string;media_asset_id?:string;storage_key?:string;attempts?:number}|undefined;
-  if (!row?.household_id || !row.consent_id || !row.media_asset_id || !row.storage_key) return { status: "idle" };
-  const token=crypto.randomUUID(),attempt=Number(row.attempts||0)+1;
-  const claimed = await env.DB.prepare("UPDATE legacy_evidence_retention SET status='cleanup_required',attempts=?,attempt_token=?,lease_expires_at=?,updated_at=? WHERE household_id=? AND consent_id=? AND status IN ('retained','cleanup_required') AND (next_attempt_at IS NULL OR next_attempt_at<=? OR lease_expires_at<?)").bind(attempt,token,now+30000,now,row.household_id,row.consent_id,now,now).run();
-  if (!claimed.meta.changes) return { status: "busy" };
-  try {
-    await deletePrivateLegacyObject(bucket(),row.storage_key);
-    await env.DB.batch([
-      env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE id=? AND household_id=? AND status IN ('processing','ready','failed')").bind(now,now,row.media_asset_id,row.household_id),
-      env.DB.prepare("UPDATE legacy_evidence_retention SET status='deleted',attempt_token=NULL,lease_expires_at=NULL,next_attempt_at=NULL,error_code=NULL,updated_at=? WHERE household_id=? AND consent_id=? AND status='cleanup_required' AND attempt_token=?").bind(now,row.household_id,row.consent_id,token),
-    ]);
-    return { status: "completed", consentId: row.consent_id };
-  } catch {
-    const failed=Date.now(),dead=attempt>=5;
-    await env.DB.prepare("UPDATE legacy_evidence_retention SET status=?,next_attempt_at=?,dead_lettered_at=?,error_code='evidence_cleanup_failed',attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE household_id=? AND consent_id=? AND attempt_token=?").bind(dead?'dead_letter':'cleanup_required',dead?null:failed+Math.min(3600000,1000*2**Math.max(0,attempt-1)),dead?failed:null,failed,row.household_id,row.consent_id,token).run();
-    return { status: dead?"dead_letter":"retryable", consentId: row.consent_id };
-  }
+    const now = Date.now();
+    const selected = await env.DB.prepare("SELECT x.household_id,x.consent_id,x.media_asset_id,x.attempts,m.storage_key FROM legacy_evidence_retention x JOIN media_assets m ON m.id=x.media_asset_id AND m.household_id=x.household_id WHERE ((x.status IN ('retained','cleanup_required') AND x.delete_after<=? AND (x.next_attempt_at IS NULL OR x.next_attempt_at<=?)) OR (x.status='cleanup_required' AND x.lease_expires_at<?)) ORDER BY COALESCE(x.next_attempt_at,x.delete_after),x.household_id,x.consent_id LIMIT 1").bind(now, now, now).all();
+    const row = selected.results?.[0] as {
+        household_id?: string;
+        consent_id?: string;
+        media_asset_id?: string;
+        storage_key?: string;
+        attempts?: number;
+    } | undefined;
+    if (!row?.household_id || !row.consent_id || !row.media_asset_id || !row.storage_key)
+        return { status: "idle" };
+    const token = crypto.randomUUID(), attempt = Number(row.attempts || 0) + 1;
+    const claimed = await env.DB.prepare("UPDATE legacy_evidence_retention SET status='cleanup_required',attempts=?,attempt_token=?,lease_expires_at=?,updated_at=? WHERE household_id=? AND consent_id=? AND status IN ('retained','cleanup_required') AND (next_attempt_at IS NULL OR next_attempt_at<=? OR lease_expires_at<?)").bind(attempt, token, now + 30000, now, row.household_id, row.consent_id, now, now).run();
+    if (!claimed.meta.changes)
+        return { status: "busy" };
+    try {
+        await deletePrivateLegacyObject(bucket(), row.storage_key);
+        await env.DB.batch([
+            env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE id=? AND household_id=? AND status IN ('processing','ready','failed')").bind(now, now, row.media_asset_id, row.household_id),
+            env.DB.prepare("UPDATE legacy_evidence_retention SET status='deleted',attempt_token=NULL,lease_expires_at=NULL,next_attempt_at=NULL,error_code=NULL,updated_at=? WHERE household_id=? AND consent_id=? AND status='cleanup_required' AND attempt_token=?").bind(now, row.household_id, row.consent_id, token),
+        ]);
+        return { status: "completed", consentId: row.consent_id };
+    }
+    catch {
+        const failed = Date.now(), dead = attempt >= 5;
+        await env.DB.prepare("UPDATE legacy_evidence_retention SET status=?,next_attempt_at=?,dead_lettered_at=?,error_code='evidence_cleanup_failed',attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE household_id=? AND consent_id=? AND attempt_token=?").bind(dead ? 'dead_letter' : 'cleanup_required', dead ? null : failed + Math.min(3600000, 1000 * 2 ** Math.max(0, attempt - 1)), dead ? failed : null, failed, row.household_id, row.consent_id, token).run();
+        return { status: dead ? "dead_letter" : "retryable", consentId: row.consent_id };
+    }
 }
-
 export async function advanceLegacyDeletion() {
-  const selectedAt=Date.now();
-  const operation=await env.DB.prepare("SELECT id,household_id,target_kind,target_id,attempts FROM legacy_deletion_operations WHERE ((status IN ('queued','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR (status='processing' AND (attempt_token IS NULL OR lease_expires_at<?))) ORDER BY COALESCE(next_attempt_at,updated_at),household_id,id LIMIT 1").bind(selectedAt,selectedAt).all(); const op=operation.results?.[0] as {id?:string;household_id?:string;target_kind?:string;target_id?:string;attempts?:number}|undefined; if(!op?.id||!op.household_id||!op.target_kind||!op.target_id)return {status:"idle"};
-  const token=crypto.randomUUID(),now=Date.now(),attempt=Number(op.attempts||0)+1; const claim=await env.DB.prepare("UPDATE legacy_deletion_operations SET status='processing',attempts=?,attempt_token=?,lease_expires_at=?,updated_at=? WHERE id=? AND household_id=? AND ((status IN ('queued','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR (status='processing' AND (attempt_token IS NULL OR lease_expires_at<?)))").bind(attempt,token,now+30000,now,op.id,op.household_id,now,now).run(); if(!claim.meta.changes)return {status:"busy"};
-  const item=await env.DB.prepare("SELECT id,storage_key,object_kind,object_id FROM legacy_deletion_items WHERE operation_id=? AND household_id=? AND status NOT IN ('verified_absent','tombstoned') ORDER BY id LIMIT 1").bind(op.id,op.household_id).all(); const row=item.results?.[0] as {id?:string;storage_key?:string;object_kind?:string;object_id?:string}|undefined;
-  if(!row?.id){
-    const scope=op.target_kind==='archive'?"1=1":op.target_kind==='contributor'?"r.contributor_id=?":"r.id=?",scopeArgs=op.target_kind==='archive'?[]:[op.target_id];
-    const bindingScope=op.target_kind==='archive'?"1=1":op.target_kind==='contributor'?"contributor_id=?":"recording_id=?";
-    const statements=[
-      ...(op.target_kind==='archive'?[env.DB.prepare("DELETE FROM legacy_query_receipts WHERE household_id=?").bind(op.household_id)]:op.target_kind==='contributor'?[
-        env.DB.prepare("DELETE FROM legacy_query_receipts WHERE household_id=? AND id IN (SELECT query_receipt_id FROM legacy_query_sources q JOIN legacy_transcript_segments s ON s.id=q.segment_id AND s.household_id=q.household_id WHERE q.household_id=? AND s.contributor_id=?)").bind(op.household_id,op.household_id,op.target_id),
-        env.DB.prepare("DELETE FROM legacy_memories WHERE household_id=? AND (contributor_id=? OR source_segment_id IN (SELECT id FROM legacy_transcript_segments WHERE household_id=? AND contributor_id=?))").bind(op.household_id,op.target_id,op.household_id,op.target_id),
-        env.DB.prepare("DELETE FROM legacy_transcript_corrections WHERE household_id=? AND speaker_contributor_id=?").bind(op.household_id,op.target_id),
-        env.DB.prepare("DELETE FROM legacy_transcript_segments WHERE household_id=? AND contributor_id=? AND recording_id NOT IN (SELECT id FROM legacy_recordings WHERE household_id=? AND contributor_id=?)").bind(op.household_id,op.target_id,op.household_id,op.target_id),
-      ]:[]),
-      env.DB.prepare(`DELETE FROM legacy_query_receipts WHERE household_id=? AND id IN (SELECT q.query_receipt_id FROM legacy_query_sources q JOIN legacy_recordings r ON r.id=q.recording_id AND r.household_id=q.household_id WHERE q.household_id=? AND ${scope})`).bind(op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`DELETE FROM legacy_memories WHERE household_id=? AND source_segment_id IN (SELECT s.id FROM legacy_transcript_segments s JOIN legacy_recordings r ON r.id=s.recording_id AND r.household_id=s.household_id WHERE s.household_id=? AND ${scope})`).bind(op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`DELETE FROM legacy_transcript_corrections WHERE household_id=? AND segment_id IN (SELECT s.id FROM legacy_transcript_segments s JOIN legacy_recordings r ON r.id=s.recording_id AND r.household_id=s.household_id WHERE s.household_id=? AND ${scope})`).bind(op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`DELETE FROM legacy_transcripts WHERE household_id=? AND recording_id IN (SELECT r.id FROM legacy_recordings r WHERE r.household_id=? AND ${scope})`).bind(op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`UPDATE jobs SET input='{"erased":true}',result=NULL,request_hash=lower(hex(randomblob(32))),idempotency_key='erased:'||id,updated_at=? WHERE household_id=? AND id IN (SELECT job_id FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope})`).bind(now,op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`UPDATE usage_reservations SET request_hash=lower(hex(randomblob(32))),idempotency_key='erased:'||id,updated_at=? WHERE household_id=? AND id IN (SELECT reservation_id FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope})`).bind(now,op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`UPDATE provider_spend_reservations SET idempotency_key='erased:'||id,updated_at=? WHERE household_id=? AND id IN (SELECT provider_spend_reservation_id FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope})`).bind(now,op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`DELETE FROM legacy_upload_operations WHERE household_id=? AND target_id IN (SELECT r.id FROM legacy_recordings r WHERE r.household_id=? AND ${scope})`).bind(op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`DELETE FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope}`).bind(op.household_id,...scopeArgs),
-      env.DB.prepare(`UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT r.media_asset_id FROM legacy_recordings r WHERE r.household_id=? AND ${scope}) AND status<>'deleted'`).bind(now,now,op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare(`DELETE FROM legacy_recordings WHERE household_id=? AND id IN (SELECT r.id FROM legacy_recordings r WHERE r.household_id=? AND ${scope})`).bind(op.household_id,op.household_id,...scopeArgs),
-      env.DB.prepare("DELETE FROM legacy_upload_operations WHERE household_id=? AND (?='archive' OR target_id=? OR target_id IN (SELECT id FROM legacy_consents WHERE household_id=? AND contributor_id=?) OR (?='contributor' AND requested_by_user_id=(SELECT adult_user_id FROM contributors WHERE household_id=? AND id=?)))").bind(op.household_id,op.target_kind,op.target_id,op.household_id,op.target_id,op.target_kind,op.household_id,op.target_id),
-      ...(op.target_kind==='archive'?[
-        env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT media_asset_id FROM legacy_photos WHERE household_id=?) AND status<>'deleted'").bind(now,now,op.household_id,op.household_id),
-        env.DB.prepare("DELETE FROM legacy_photos WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_collections WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_timeline_events WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_memory_tags WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_memories WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_tags WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_people WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_places WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_interviews WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_export_operations WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT evidence_media_asset_id FROM legacy_consents WHERE household_id=?) AND status<>'deleted'").bind(now,now,op.household_id,op.household_id),
-        env.DB.prepare("DELETE FROM legacy_consents WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_custodian_transfers WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_custodian_acceptances WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_custodians WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_audit_events WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM contributors WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("DELETE FROM legacy_rate_limits WHERE household_id=?").bind(op.household_id),
-      ]:op.target_kind==='contributor'?[
-        env.DB.prepare("DELETE FROM legacy_export_operations WHERE household_id=?").bind(op.household_id),
-        env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT evidence_media_asset_id FROM legacy_consents WHERE household_id=? AND contributor_id=?) AND status<>'deleted'").bind(now,now,op.household_id,op.household_id,op.target_id),
-        env.DB.prepare("DELETE FROM legacy_consents WHERE household_id=? AND contributor_id=?").bind(op.household_id,op.target_id),
-        env.DB.prepare("DELETE FROM legacy_interviews WHERE household_id=? AND contributor_id=?").bind(op.household_id,op.target_id),
-        env.DB.prepare("UPDATE contributors SET adult_user_id=NULL,display_name='Deleted contributor',relationship=NULL,creation_idempotency_key=NULL,request_hash=NULL,status='revoked',updated_at=? WHERE household_id=? AND id=?").bind(now,op.household_id,op.target_id),
-      ]:[]),
-      env.DB.prepare("DELETE FROM legacy_deletion_items WHERE operation_id=? AND household_id=?").bind(op.id,op.household_id),
-      env.DB.prepare("UPDATE legacy_deletion_operations SET status='completed',completed_at=?,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(now,now,op.id,token),
-    ];
-    await env.DB.batch(statements);return {status:"completed",operationId:op.id};
-  }
-  try{if(row.storage_key)await deletePrivateLegacyObject(bucket(),row.storage_key); await env.DB.batch([
-    env.DB.prepare("UPDATE legacy_deletion_items SET status='verified_absent',attempts=attempts+1,updated_at=? WHERE id=? AND household_id=?").bind(Date.now(),row.id,op.household_id),
-    ...(row.object_kind==='recording'?[env.DB.prepare("UPDATE legacy_recordings SET status='deleted',deleted_at=?,updated_at=? WHERE id=? AND household_id=? AND status='delete_pending'").bind(Date.now(),Date.now(),row.object_id,op.household_id)]:[]),
-    env.DB.prepare("UPDATE legacy_deletion_operations SET status='processing',attempts=0,next_attempt_at=NULL,error_code=NULL,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(Date.now(),op.id,token),
-  ]);return {status:"progress",operationId:op.id};}catch{const failed=Date.now(),dead=attempt>=5;await env.DB.prepare("UPDATE legacy_deletion_operations SET status=?,next_attempt_at=?,dead_lettered_at=?,error_code='storage_cleanup_retry',attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(dead?'dead_letter':'failed',dead?null:failed+Math.min(3600000,1000*2**Math.max(0,attempt-1)),dead?failed:null,failed,op.id,token).run();return {status:dead?'dead_letter':'retryable',operationId:op.id};}
+    const selectedAt = Date.now();
+    const operation = await env.DB.prepare("SELECT id,household_id,target_kind,target_id,attempts FROM legacy_deletion_operations WHERE ((status IN ('queued','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR (status='processing' AND (attempt_token IS NULL OR lease_expires_at<?))) ORDER BY COALESCE(next_attempt_at,updated_at),household_id,id LIMIT 1").bind(selectedAt, selectedAt).all();
+    const op = operation.results?.[0] as {
+        id?: string;
+        household_id?: string;
+        target_kind?: string;
+        target_id?: string;
+        attempts?: number;
+    } | undefined;
+    if (!op?.id || !op.household_id || !op.target_kind || !op.target_id)
+        return { status: "idle" };
+    const token = crypto.randomUUID(), now = Date.now(), attempt = Number(op.attempts || 0) + 1;
+    const claim = await env.DB.prepare("UPDATE legacy_deletion_operations SET status='processing',attempts=?,attempt_token=?,lease_expires_at=?,updated_at=? WHERE id=? AND household_id=? AND ((status IN ('queued','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR (status='processing' AND (attempt_token IS NULL OR lease_expires_at<?)))").bind(attempt, token, now + 30000, now, op.id, op.household_id, now, now).run();
+    if (!claim.meta.changes)
+        return { status: "busy" };
+    const item = await env.DB.prepare("SELECT id,storage_key,object_kind,object_id FROM legacy_deletion_items WHERE operation_id=? AND household_id=? AND status NOT IN ('verified_absent','tombstoned') ORDER BY id LIMIT 1").bind(op.id, op.household_id).all();
+    const row = item.results?.[0] as {
+        id?: string;
+        storage_key?: string;
+        object_kind?: string;
+        object_id?: string;
+    } | undefined;
+    if (!row?.id) {
+        const scope = op.target_kind === 'archive' ? "1=1" : op.target_kind === 'contributor' ? "r.contributor_id=?" : "r.id=?", scopeArgs = op.target_kind === 'archive' ? [] : [op.target_id];
+        const bindingScope = op.target_kind === 'archive' ? "1=1" : op.target_kind === 'contributor' ? "contributor_id=?" : "recording_id=?";
+        const statements = [
+            ...(op.target_kind === 'archive' ? [env.DB.prepare("DELETE FROM legacy_query_receipts WHERE household_id=?").bind(op.household_id)] : op.target_kind === 'contributor' ? [
+                env.DB.prepare("DELETE FROM legacy_query_receipts WHERE household_id=? AND id IN (SELECT query_receipt_id FROM legacy_query_sources q JOIN legacy_transcript_segments s ON s.id=q.segment_id AND s.household_id=q.household_id WHERE q.household_id=? AND s.contributor_id=?)").bind(op.household_id, op.household_id, op.target_id),
+                env.DB.prepare("DELETE FROM legacy_memories WHERE household_id=? AND (contributor_id=? OR source_segment_id IN (SELECT id FROM legacy_transcript_segments WHERE household_id=? AND contributor_id=?))").bind(op.household_id, op.target_id, op.household_id, op.target_id),
+                env.DB.prepare("DELETE FROM legacy_transcript_corrections WHERE household_id=? AND speaker_contributor_id=?").bind(op.household_id, op.target_id),
+                env.DB.prepare("DELETE FROM legacy_transcript_segments WHERE household_id=? AND contributor_id=? AND recording_id NOT IN (SELECT id FROM legacy_recordings WHERE household_id=? AND contributor_id=?)").bind(op.household_id, op.target_id, op.household_id, op.target_id),
+            ] : []),
+            env.DB.prepare(`DELETE FROM legacy_query_receipts WHERE household_id=? AND id IN (SELECT q.query_receipt_id FROM legacy_query_sources q JOIN legacy_recordings r ON r.id=q.recording_id AND r.household_id=q.household_id WHERE q.household_id=? AND ${scope})`).bind(op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`DELETE FROM legacy_memories WHERE household_id=? AND source_segment_id IN (SELECT s.id FROM legacy_transcript_segments s JOIN legacy_recordings r ON r.id=s.recording_id AND r.household_id=s.household_id WHERE s.household_id=? AND ${scope})`).bind(op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`DELETE FROM legacy_transcript_corrections WHERE household_id=? AND segment_id IN (SELECT s.id FROM legacy_transcript_segments s JOIN legacy_recordings r ON r.id=s.recording_id AND r.household_id=s.household_id WHERE s.household_id=? AND ${scope})`).bind(op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`DELETE FROM legacy_transcripts WHERE household_id=? AND recording_id IN (SELECT r.id FROM legacy_recordings r WHERE r.household_id=? AND ${scope})`).bind(op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`UPDATE jobs SET input='{"erased":true}',result=NULL,request_hash=lower(hex(randomblob(32))),idempotency_key='erased:'||id,updated_at=? WHERE household_id=? AND id IN (SELECT job_id FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope})`).bind(now, op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`UPDATE usage_reservations SET request_hash=lower(hex(randomblob(32))),idempotency_key='erased:'||id,updated_at=? WHERE household_id=? AND id IN (SELECT reservation_id FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope})`).bind(now, op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`UPDATE provider_spend_reservations SET idempotency_key='erased:'||id,updated_at=? WHERE household_id=? AND id IN (SELECT provider_spend_reservation_id FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope})`).bind(now, op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`DELETE FROM legacy_upload_operations WHERE household_id=? AND target_id IN (SELECT r.id FROM legacy_recordings r WHERE r.household_id=? AND ${scope})`).bind(op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`DELETE FROM legacy_job_bindings WHERE household_id=? AND ${bindingScope}`).bind(op.household_id, ...scopeArgs),
+            env.DB.prepare(`UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT r.media_asset_id FROM legacy_recordings r WHERE r.household_id=? AND ${scope}) AND status<>'deleted'`).bind(now, now, op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare(`DELETE FROM legacy_recordings WHERE household_id=? AND id IN (SELECT r.id FROM legacy_recordings r WHERE r.household_id=? AND ${scope})`).bind(op.household_id, op.household_id, ...scopeArgs),
+            env.DB.prepare("DELETE FROM legacy_upload_operations WHERE household_id=? AND (?='archive' OR target_id=? OR target_id IN (SELECT id FROM legacy_consents WHERE household_id=? AND contributor_id=?) OR (?='contributor' AND requested_by_user_id=(SELECT adult_user_id FROM contributors WHERE household_id=? AND id=?)))").bind(op.household_id, op.target_kind, op.target_id, op.household_id, op.target_id, op.target_kind, op.household_id, op.target_id),
+            ...(op.target_kind === 'archive' ? [
+                env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT media_asset_id FROM legacy_photos WHERE household_id=?) AND status<>'deleted'").bind(now, now, op.household_id, op.household_id),
+                env.DB.prepare("DELETE FROM legacy_photos WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_collections WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_timeline_events WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_memory_tags WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_memories WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_tags WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_people WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_places WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_interviews WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_export_operations WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT evidence_media_asset_id FROM legacy_consents WHERE household_id=?) AND status<>'deleted'").bind(now, now, op.household_id, op.household_id),
+                env.DB.prepare("DELETE FROM legacy_consents WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_custodian_transfers WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_custodian_acceptances WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_custodians WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_audit_events WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM contributors WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("DELETE FROM legacy_rate_limits WHERE household_id=?").bind(op.household_id),
+            ] : op.target_kind === 'contributor' ? [
+                env.DB.prepare("DELETE FROM legacy_export_operations WHERE household_id=?").bind(op.household_id),
+                env.DB.prepare("UPDATE media_assets SET status='deleted',deleted_at=?,updated_at=? WHERE household_id=? AND id IN (SELECT evidence_media_asset_id FROM legacy_consents WHERE household_id=? AND contributor_id=?) AND status<>'deleted'").bind(now, now, op.household_id, op.household_id, op.target_id),
+                env.DB.prepare("DELETE FROM legacy_consents WHERE household_id=? AND contributor_id=?").bind(op.household_id, op.target_id),
+                env.DB.prepare("DELETE FROM legacy_interviews WHERE household_id=? AND contributor_id=?").bind(op.household_id, op.target_id),
+                env.DB.prepare("UPDATE contributors SET adult_user_id=NULL,display_name='Deleted contributor',relationship=NULL,creation_idempotency_key=NULL,request_hash=NULL,status='revoked',updated_at=? WHERE household_id=? AND id=?").bind(now, op.household_id, op.target_id),
+            ] : []),
+            env.DB.prepare("DELETE FROM legacy_deletion_items WHERE operation_id=? AND household_id=?").bind(op.id, op.household_id),
+            env.DB.prepare("UPDATE legacy_deletion_operations SET status='completed',completed_at=?,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(now, now, op.id, token),
+        ];
+        await env.DB.batch(statements);
+        return { status: "completed", operationId: op.id };
+    }
+    try {
+        if (row.storage_key)
+            await deletePrivateLegacyObject(bucket(), row.storage_key);
+        await env.DB.batch([
+            env.DB.prepare("UPDATE legacy_deletion_items SET status='verified_absent',attempts=attempts+1,updated_at=? WHERE id=? AND household_id=?").bind(Date.now(), row.id, op.household_id),
+            ...(row.object_kind === 'recording' ? [env.DB.prepare("UPDATE legacy_recordings SET status='deleted',deleted_at=?,updated_at=? WHERE id=? AND household_id=? AND status='delete_pending'").bind(Date.now(), Date.now(), row.object_id, op.household_id)] : []),
+            env.DB.prepare("UPDATE legacy_deletion_operations SET status='processing',attempts=0,next_attempt_at=NULL,error_code=NULL,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(Date.now(), op.id, token),
+        ]);
+        return { status: "progress", operationId: op.id };
+    }
+    catch {
+        const failed = Date.now(), dead = attempt >= 5;
+        await env.DB.prepare("UPDATE legacy_deletion_operations SET status=?,next_attempt_at=?,dead_lettered_at=?,error_code='storage_cleanup_retry',attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(dead ? 'dead_letter' : 'failed', dead ? null : failed + Math.min(3600000, 1000 * 2 ** Math.max(0, attempt - 1)), dead ? failed : null, failed, op.id, token).run();
+        return { status: dead ? 'dead_letter' : 'retryable', operationId: op.id };
+    }
 }
-
 export async function advanceLegacyExport() {
-  const now=Date.now();
-  await env.DB.prepare("UPDATE legacy_export_operations SET status='expired',updated_at=? WHERE status IN ('queued','inventory','copying','ready','failed','dead_letter') AND (expires_at<=? OR EXISTS (SELECT 1 FROM legacy_export_consents x JOIN legacy_consents c ON c.id=x.consent_id AND c.household_id=x.household_id WHERE x.export_id=legacy_export_operations.id AND x.household_id=legacy_export_operations.household_id AND (c.status<>'active' OR (c.expires_at IS NOT NULL AND c.expires_at<=?))))").bind(now,now,now).run();
-  const expired=await env.DB.prepare("SELECT p.id,p.household_id,p.storage_key FROM legacy_export_parts p JOIN legacy_export_operations e ON e.id=p.export_id AND e.household_id=p.household_id WHERE p.status IN ('copying','ready') AND e.status='expired' ORDER BY e.updated_at,p.ordinal LIMIT 1").all();
-  const expiredPart=expired.results?.[0] as Record<string,unknown>|undefined;
-  if(expiredPart){try{await deletePrivateLegacyObject(bucket(),String(expiredPart.storage_key));await env.DB.prepare("UPDATE legacy_export_parts SET status='deleted',updated_at=? WHERE id=? AND household_id=? AND status IN ('copying','ready')").bind(now,expiredPart.id,expiredPart.household_id).run();return{status:"cleanup",partId:expiredPart.id};}catch{return{status:"retryable",partId:expiredPart.id};}}
-  const selected=await env.DB.prepare("SELECT id,household_id,snapshot_at,inventory_stage,cursor,attempts FROM legacy_export_operations e WHERE ((e.status IN ('queued','failed') AND (e.next_attempt_at IS NULL OR e.next_attempt_at<=?)) OR (e.status IN ('inventory','copying') AND e.lease_expires_at<?)) AND NOT EXISTS (SELECT 1 FROM legacy_deletion_operations d WHERE d.household_id=e.household_id AND d.status IN ('queued','processing','failed','dead_letter')) ORDER BY COALESCE(e.next_attempt_at,e.updated_at),e.household_id,e.id LIMIT 1").bind(now,now).all();
-  const op=selected.results?.[0] as {id?:string;household_id?:string;snapshot_at?:number;inventory_stage?:string;cursor?:string|null;attempts?:number}|undefined;
-  if(!op?.id||!op.household_id)return{status:"idle"};
-  const token=crypto.randomUUID(),snapshot=Number(op.snapshot_at||now),attempt=Number(op.attempts||0)+1;
-  const claim=await env.DB.prepare("UPDATE legacy_export_operations SET status='inventory',attempts=attempts+1,attempt_token=?,lease_expires_at=?,updated_at=? WHERE id=? AND household_id=? AND ((status IN ('queued','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR (status IN ('inventory','copying') AND lease_expires_at<?))").bind(token,now+120000,now,op.id,op.household_id,now,now).run();
-  if(!claim.meta.changes)return{status:"busy"};
-  const advance=async(stage:string,cursor:string|null)=>{await env.DB.prepare("UPDATE legacy_export_operations SET status='queued',inventory_stage=?,cursor=?,attempts=0,next_attempt_at=NULL,error_code=NULL,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND household_id=? AND attempt_token=? AND status='inventory'").bind(stage,cursor,Date.now(),op.id,op.household_id,token).run();return{status:"progress",operationId:op.id,stage,cursor};};
-  const storeBytes=async(sourceKind:string,sourceId:string,logicalPath:string,contentType:string,bytes:Uint8Array,checksum:string)=>{const partId=await stableLegacyUuid(`export:${op.id}:${sourceKind}:${sourceId}`),existing=await env.DB.prepare("SELECT ordinal,status FROM legacy_export_parts WHERE id=? AND household_id=? AND export_id=?").bind(partId,op.household_id,op.id).all();let ordinal=Number((existing.results?.[0] as Record<string,unknown>|undefined)?.ordinal||0);if(!ordinal){const next=await env.DB.prepare("SELECT COALESCE(max(ordinal),0)+1 ordinal FROM legacy_export_parts WHERE household_id=? AND export_id=?").bind(op.household_id,op.id).all();ordinal=Number((next.results?.[0] as Record<string,unknown>).ordinal);const ext=logicalPath.split('.').pop()||'json',key=`legacy/${op.household_id}/export/${partId}.${ext}`;await env.DB.prepare("INSERT INTO legacy_export_parts (id,household_id,export_id,ordinal,source_kind,source_id,logical_path,content_type,storage_key,checksum,byte_size,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'copying',?,?)").bind(partId,op.household_id,op.id,ordinal,sourceKind,sourceId,logicalPath,contentType,key,checksum,bytes.byteLength,now,now).run();}const part=await env.DB.prepare("SELECT storage_key,status FROM legacy_export_parts WHERE id=? AND household_id=?").bind(partId,op.household_id).all(),row=part.results?.[0] as Record<string,unknown>;if(row.status!=='ready'){await putPrivateLegacyObject(bucket(),String(row.storage_key),bytes,contentType,checksum);await env.DB.prepare("UPDATE legacy_export_parts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='copying'").bind(Date.now(),partId,op.household_id).run();}};
-  const storeObject=async(sourceKind:string,row:Record<string,unknown>,logicalPath:string)=>{const partId=await stableLegacyUuid(`export:${op.id}:${sourceKind}:${row.id}`),existing=await env.DB.prepare("SELECT ordinal,storage_key,status FROM legacy_export_parts WHERE id=? AND household_id=? AND export_id=?").bind(partId,op.household_id,op.id).all();let part=existing.results?.[0] as Record<string,unknown>|undefined;if(!part){const next=await env.DB.prepare("SELECT COALESCE(max(ordinal),0)+1 ordinal FROM legacy_export_parts WHERE household_id=? AND export_id=?").bind(op.household_id,op.id).all(),ordinal=Number((next.results?.[0] as Record<string,unknown>).ordinal),ext=logicalPath.split('.').pop()||'bin',key=`legacy/${op.household_id}/export/${partId}.${ext}`;await env.DB.prepare("INSERT INTO legacy_export_parts (id,household_id,export_id,ordinal,source_kind,source_id,logical_path,content_type,storage_key,checksum,byte_size,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'copying',?,?)").bind(partId,op.household_id,op.id,ordinal,sourceKind,row.id,logicalPath,row.content_type,key,row.checksum,row.byte_size,now,now).run();part={storage_key:key,status:'copying'};}if(part.status!=='ready'){const object=await bucket().get(String(row.storage_key));if(!object)throw new Error('export_source_missing');const stream=object.body||new Blob([await object.arrayBuffer()]).stream();await putPrivateLegacyExportStream(bucket(),String(part.storage_key),stream,Number(row.byte_size),String(row.content_type),String(row.checksum));await env.DB.prepare("UPDATE legacy_export_parts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='copying'").bind(Date.now(),partId,op.household_id).run();}};
-  try{
-    const cursor=op.cursor||'';
-    if(op.inventory_stage==='recordings'){
-      const rows=await env.DB.prepare("SELECT r.id,m.storage_key,m.content_type,m.byte_size,m.checksum FROM legacy_recordings r JOIN media_assets m ON m.id=r.media_asset_id AND m.household_id=r.household_id JOIN contributors n ON n.id=r.contributor_id AND n.household_id=r.household_id JOIN legacy_consents c ON c.id=r.consent_id AND c.household_id=r.household_id WHERE r.household_id=? AND r.id>? AND r.created_at<=? AND r.status='ready' AND m.status='ready' AND n.status IN ('active','deceased_pending_review') AND c.kind='recording' AND c.status='active' AND (c.expires_at IS NULL OR c.expires_at>?) ORDER BY r.id LIMIT 1").bind(op.household_id,cursor,snapshot,now).all();const row=rows.results?.[0] as Record<string,unknown>|undefined;if(!row)return await advance('transcripts',null);const ext=row.content_type==='audio/mp4'?'m4a':row.content_type==='audio/mpeg'?'mp3':'webm';await storeObject('recording',row,`recordings/${row.id}.${ext}`);return await advance('recordings',String(row.id));
+    const now = Date.now();
+    await env.DB.prepare("UPDATE legacy_export_operations SET status='expired',updated_at=? WHERE status IN ('queued','inventory','copying','ready','failed','dead_letter') AND (expires_at<=? OR EXISTS (SELECT 1 FROM legacy_export_consents x JOIN legacy_consents c ON c.id=x.consent_id AND c.household_id=x.household_id WHERE x.export_id=legacy_export_operations.id AND x.household_id=legacy_export_operations.household_id AND (c.status<>'active' OR (c.expires_at IS NOT NULL AND c.expires_at<=?))))").bind(now, now, now).run();
+    const expired = await env.DB.prepare("SELECT p.id,p.household_id,p.storage_key FROM legacy_export_parts p JOIN legacy_export_operations e ON e.id=p.export_id AND e.household_id=p.household_id WHERE p.status IN ('copying','ready') AND e.status='expired' ORDER BY e.updated_at,p.ordinal LIMIT 1").all();
+    const expiredPart = expired.results?.[0] as Record<string, unknown> | undefined;
+    if (expiredPart) {
+        try {
+            await deletePrivateLegacyObject(bucket(), String(expiredPart.storage_key));
+            await env.DB.prepare("UPDATE legacy_export_parts SET status='deleted',updated_at=? WHERE id=? AND household_id=? AND status IN ('copying','ready')").bind(now, expiredPart.id, expiredPart.household_id).run();
+            return { status: "cleanup", partId: expiredPart.id };
+        }
+        catch {
+            return { status: "retryable", partId: expiredPart.id };
+        }
     }
-    if(op.inventory_stage==='transcripts'){
-      const rows=await env.DB.prepare("SELECT t.id,t.recording_id FROM legacy_transcripts t JOIN legacy_recordings r ON r.id=t.recording_id AND r.household_id=t.household_id JOIN contributors n ON n.id=r.contributor_id AND n.household_id=r.household_id JOIN legacy_consents rc ON rc.id=r.consent_id AND rc.household_id=r.household_id JOIN legacy_consents tc ON tc.id=t.consent_id AND tc.household_id=t.household_id WHERE t.household_id=? AND t.id>? AND t.created_at<=? AND t.status='ready' AND r.status='ready' AND n.status IN ('active','deceased_pending_review') AND rc.status='active' AND tc.status='active' AND (rc.expires_at IS NULL OR rc.expires_at>?) AND (tc.expires_at IS NULL OR tc.expires_at>?) ORDER BY t.id LIMIT 1").bind(op.household_id,cursor,snapshot,now,now).all();const row=rows.results?.[0] as Record<string,unknown>|undefined;if(!row)return await advance('photos',null);const segments=await env.DB.prepare("SELECT s.id,s.ordinal,s.start_ms,s.end_ms,s.original_text,COALESCE((SELECT x.corrected_text FROM legacy_transcript_corrections x WHERE x.household_id=s.household_id AND x.segment_id=s.id AND x.created_at<=? ORDER BY x.created_at DESC,x.id DESC LIMIT 1),s.original_text) effective_text,(SELECT x.id FROM legacy_transcript_corrections x WHERE x.household_id=s.household_id AND x.segment_id=s.id AND x.created_at<=? ORDER BY x.created_at DESC,x.id DESC LIMIT 1) correction_id FROM legacy_transcript_segments s WHERE s.household_id=? AND s.transcript_id=? AND s.created_at<=? AND s.status='ready' ORDER BY s.ordinal").bind(snapshot,snapshot,op.household_id,row.id,snapshot).all();const bytes=new TextEncoder().encode(JSON.stringify({version:'nearlegacy-transcript-v1',recordingId:row.recording_id,segments:segments.results||[]})),checksum=await legacyHash(new TextDecoder().decode(bytes));await storeBytes('transcript',String(row.id),`transcripts/${row.id}.json`,'application/json',bytes,checksum);return await advance('transcripts',String(row.id));
+    const selected = await env.DB.prepare("SELECT id,household_id,snapshot_at,inventory_stage,cursor,attempts FROM legacy_export_operations e WHERE ((e.status IN ('queued','failed') AND (e.next_attempt_at IS NULL OR e.next_attempt_at<=?)) OR (e.status IN ('inventory','copying') AND e.lease_expires_at<?)) AND NOT EXISTS (SELECT 1 FROM legacy_deletion_operations d WHERE d.household_id=e.household_id AND d.status IN ('queued','processing','failed','dead_letter')) ORDER BY COALESCE(e.next_attempt_at,e.updated_at),e.household_id,e.id LIMIT 1").bind(now, now).all();
+    const op = selected.results?.[0] as {
+        id?: string;
+        household_id?: string;
+        snapshot_at?: number;
+        inventory_stage?: string;
+        cursor?: string | null;
+        attempts?: number;
+    } | undefined;
+    if (!op?.id || !op.household_id)
+        return { status: "idle" };
+    const rollout = await legacyFence(op.household_id);
+    if (!rollout)
+        return { status: "paused" };
+    const token = crypto.randomUUID(), snapshot = Number(op.snapshot_at || now), attempt = Number(op.attempts || 0) + 1;
+    const claim = await env.DB.prepare("UPDATE legacy_export_operations SET status='inventory',attempts=attempts+1,attempt_token=?,lease_expires_at=?,updated_at=? WHERE id=? AND household_id=? AND ((status IN ('queued','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR (status IN ('inventory','copying') AND lease_expires_at<?))").bind(token, now + 120000, now, op.id, op.household_id, now, now).run();
+    if (!claim.meta.changes)
+        return { status: "busy" };
+    const advance = async (stage: string, cursor: string | null) => { await env.DB.prepare("UPDATE legacy_export_operations SET status='queued',inventory_stage=?,cursor=?,attempts=0,next_attempt_at=NULL,error_code=NULL,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND household_id=? AND attempt_token=? AND status='inventory'").bind(stage, cursor, Date.now(), op.id, op.household_id, token).run(); return { status: "progress", operationId: op.id, stage, cursor }; };
+    const storeBytes = async (sourceKind: string, sourceId: string, logicalPath: string, contentType: string, bytes: Uint8Array, checksum: string) => { const partId = await stableLegacyUuid(`export:${op.id}:${sourceKind}:${sourceId}`), existing = await env.DB.prepare("SELECT ordinal,status FROM legacy_export_parts WHERE id=? AND household_id=? AND export_id=?").bind(partId, op.household_id, op.id).all(); let ordinal = Number((existing.results?.[0] as Record<string, unknown> | undefined)?.ordinal || 0); if (!ordinal) {
+        const next = await env.DB.prepare("SELECT COALESCE(max(ordinal),0)+1 ordinal FROM legacy_export_parts WHERE household_id=? AND export_id=?").bind(op.household_id, op.id).all();
+        ordinal = Number((next.results?.[0] as Record<string, unknown>).ordinal);
+        const ext = logicalPath.split('.').pop() || 'json', key = `legacy/${op.household_id}/export/${partId}.${ext}`;
+        await env.DB.prepare("INSERT INTO legacy_export_parts (id,household_id,export_id,ordinal,source_kind,source_id,logical_path,content_type,storage_key,checksum,byte_size,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'copying',?,?)").bind(partId, op.household_id, op.id, ordinal, sourceKind, sourceId, logicalPath, contentType, key, checksum, bytes.byteLength, now, now).run();
+    } const part = await env.DB.prepare("SELECT storage_key,status FROM legacy_export_parts WHERE id=? AND household_id=?").bind(partId, op.household_id).all(), row = part.results?.[0] as Record<string, unknown>; if (row.status !== 'ready') {
+        await assertLegacyFence(op.household_id!, rollout);
+        await putPrivateLegacyObject(bucket(), String(row.storage_key), bytes, contentType, checksum);
+        await assertLegacyFence(op.household_id!, rollout);
+        await env.DB.prepare("UPDATE legacy_export_parts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='copying'").bind(Date.now(), partId, op.household_id).run();
+    } };
+    const storeObject = async (sourceKind: string, row: Record<string, unknown>, logicalPath: string) => { const partId = await stableLegacyUuid(`export:${op.id}:${sourceKind}:${row.id}`), existing = await env.DB.prepare("SELECT ordinal,storage_key,status FROM legacy_export_parts WHERE id=? AND household_id=? AND export_id=?").bind(partId, op.household_id, op.id).all(); let part = existing.results?.[0] as Record<string, unknown> | undefined; if (!part) {
+        const next = await env.DB.prepare("SELECT COALESCE(max(ordinal),0)+1 ordinal FROM legacy_export_parts WHERE household_id=? AND export_id=?").bind(op.household_id, op.id).all(), ordinal = Number((next.results?.[0] as Record<string, unknown>).ordinal), ext = logicalPath.split('.').pop() || 'bin', key = `legacy/${op.household_id}/export/${partId}.${ext}`;
+        await env.DB.prepare("INSERT INTO legacy_export_parts (id,household_id,export_id,ordinal,source_kind,source_id,logical_path,content_type,storage_key,checksum,byte_size,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'copying',?,?)").bind(partId, op.household_id, op.id, ordinal, sourceKind, row.id, logicalPath, row.content_type, key, row.checksum, row.byte_size, now, now).run();
+        part = { storage_key: key, status: 'copying' };
+    } if (part.status !== 'ready') {
+        await assertLegacyFence(op.household_id!, rollout);
+        const object = await bucket().get(String(row.storage_key));
+        if (!object)
+            throw new Error('export_source_missing');
+        const stream = object.body || new Blob([await object.arrayBuffer()]).stream();
+        await putPrivateLegacyExportStream(bucket(), String(part.storage_key), stream, Number(row.byte_size), String(row.content_type), String(row.checksum));
+        await assertLegacyFence(op.household_id!, rollout);
+        await env.DB.prepare("UPDATE legacy_export_parts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='copying'").bind(Date.now(), partId, op.household_id).run();
+    } };
+    try {
+        const cursor = op.cursor || '';
+        if (op.inventory_stage === 'recordings') {
+            const rows = await env.DB.prepare("SELECT r.id,m.storage_key,m.content_type,m.byte_size,m.checksum FROM legacy_recordings r JOIN media_assets m ON m.id=r.media_asset_id AND m.household_id=r.household_id JOIN contributors n ON n.id=r.contributor_id AND n.household_id=r.household_id JOIN legacy_consents c ON c.id=r.consent_id AND c.household_id=r.household_id WHERE r.household_id=? AND r.id>? AND r.created_at<=? AND r.status='ready' AND m.status='ready' AND n.status IN ('active','deceased_pending_review') AND c.kind='recording' AND c.status='active' AND (c.expires_at IS NULL OR c.expires_at>?) ORDER BY r.id LIMIT 1").bind(op.household_id, cursor, snapshot, now).all();
+            const row = rows.results?.[0] as Record<string, unknown> | undefined;
+            if (!row)
+                return await advance('transcripts', null);
+            const ext = row.content_type === 'audio/mp4' ? 'm4a' : row.content_type === 'audio/mpeg' ? 'mp3' : 'webm';
+            await storeObject('recording', row, `recordings/${row.id}.${ext}`);
+            return await advance('recordings', String(row.id));
+        }
+        if (op.inventory_stage === 'transcripts') {
+            const rows = await env.DB.prepare("SELECT t.id,t.recording_id FROM legacy_transcripts t JOIN legacy_recordings r ON r.id=t.recording_id AND r.household_id=t.household_id JOIN contributors n ON n.id=r.contributor_id AND n.household_id=r.household_id JOIN legacy_consents rc ON rc.id=r.consent_id AND rc.household_id=r.household_id JOIN legacy_consents tc ON tc.id=t.consent_id AND tc.household_id=t.household_id WHERE t.household_id=? AND t.id>? AND t.created_at<=? AND t.status='ready' AND r.status='ready' AND n.status IN ('active','deceased_pending_review') AND rc.status='active' AND tc.status='active' AND (rc.expires_at IS NULL OR rc.expires_at>?) AND (tc.expires_at IS NULL OR tc.expires_at>?) ORDER BY t.id LIMIT 1").bind(op.household_id, cursor, snapshot, now, now).all();
+            const row = rows.results?.[0] as Record<string, unknown> | undefined;
+            if (!row)
+                return await advance('photos', null);
+            const segments = await env.DB.prepare("SELECT s.id,s.ordinal,s.start_ms,s.end_ms,s.original_text,COALESCE((SELECT x.corrected_text FROM legacy_transcript_corrections x WHERE x.household_id=s.household_id AND x.segment_id=s.id AND x.created_at<=? ORDER BY x.created_at DESC,x.id DESC LIMIT 1),s.original_text) effective_text,(SELECT x.id FROM legacy_transcript_corrections x WHERE x.household_id=s.household_id AND x.segment_id=s.id AND x.created_at<=? ORDER BY x.created_at DESC,x.id DESC LIMIT 1) correction_id FROM legacy_transcript_segments s WHERE s.household_id=? AND s.transcript_id=? AND s.created_at<=? AND s.status='ready' ORDER BY s.ordinal").bind(snapshot, snapshot, op.household_id, row.id, snapshot).all();
+            const bytes = new TextEncoder().encode(JSON.stringify({ version: 'nearlegacy-transcript-v1', recordingId: row.recording_id, segments: segments.results || [] })), checksum = await legacyHash(new TextDecoder().decode(bytes));
+            await storeBytes('transcript', String(row.id), `transcripts/${row.id}.json`, 'application/json', bytes, checksum);
+            return await advance('transcripts', String(row.id));
+        }
+        if (op.inventory_stage === 'photos') {
+            const rows = await env.DB.prepare("SELECT p.id,m.storage_key,m.content_type,m.byte_size,m.checksum FROM legacy_photos p JOIN media_assets m ON m.id=p.media_asset_id AND m.household_id=p.household_id WHERE p.household_id=? AND p.id>? AND p.created_at<=? AND m.status='ready' ORDER BY p.id LIMIT 1").bind(op.household_id, cursor, snapshot).all();
+            const row = rows.results?.[0] as Record<string, unknown> | undefined;
+            if (!row)
+                return await advance('metadata', '0:0');
+            const ext = row.content_type === 'image/png' ? 'png' : 'jpg';
+            await storeObject('photo', row, `photos/${row.id}.${ext}`);
+            return await advance('photos', String(row.id));
+        }
+        if (op.inventory_stage === 'metadata') {
+            const specs = [
+                ['contributors', "SELECT id,display_name,relationship,status,created_at,updated_at FROM contributors WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['interviews', "SELECT id,contributor_id,title,prompt_set_version,status,created_at,updated_at FROM legacy_interviews WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['memories', "SELECT id,contributor_id,title,summary,source_segment_id,status,created_at,updated_at FROM legacy_memories WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['people', "SELECT id,display_name,relationship,created_at,updated_at FROM legacy_people WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['places', "SELECT id,name,description,created_at,updated_at FROM legacy_places WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['photo_captions', "SELECT id,caption,taken_at,created_at FROM legacy_photos WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['tags', "SELECT id,name,created_at FROM legacy_tags WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['memory_tags', "SELECT x.memory_id,x.tag_id FROM legacy_memory_tags x JOIN legacy_memories m ON m.id=x.memory_id AND m.household_id=x.household_id WHERE x.household_id=? AND m.created_at<=? ORDER BY x.memory_id,x.tag_id LIMIT 201 OFFSET ?"],
+                ['timeline', "SELECT e.id,e.memory_id,e.occurred_on,e.precision,e.title,e.created_at FROM legacy_timeline_events e WHERE e.household_id=? AND e.created_at<=? ORDER BY e.id LIMIT 201 OFFSET ?"],
+                ['collections', "SELECT id,name,description,created_at,updated_at FROM legacy_collections WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+                ['collection_items', "SELECT i.id,i.collection_id,i.memory_id,i.position,i.created_at FROM legacy_collection_items i WHERE i.household_id=? AND i.created_at<=? ORDER BY i.id LIMIT 201 OFFSET ?"],
+                ['consent_receipts', "SELECT id,contributor_id,version,kind,audience,purpose,status,evidence_checksum,attested_at,expires_at,revoked_at FROM legacy_consents WHERE household_id=? AND attested_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
+            ] as const;
+            const [indexRaw, offsetRaw] = cursor.split(':'), index = Number(indexRaw || 0), offset = Number(offsetRaw || 0);
+            if (index >= specs.length)
+                return await advance('manifest', null);
+            const [category, sql] = specs[index], page = await env.DB.prepare(sql).bind(op.household_id, snapshot, offset).all(), records = (page.results || []).slice(0, 200), bytes = new TextEncoder().encode(JSON.stringify({ version: 'nearlegacy-metadata-page-v1', category, offset, records })), checksum = await legacyHash(new TextDecoder().decode(bytes));
+            await storeBytes('metadata', `${category}:${offset}`, `metadata/${category}-${offset}.json`, 'application/json', bytes, checksum);
+            return await advance('metadata', (page.results?.length || 0) > 200 ? `${index}:${offset + 200}` : `${index + 1}:0`);
+        }
+        const parts = await env.DB.prepare("SELECT id,source_kind,source_id,logical_path,checksum,byte_size FROM legacy_export_parts WHERE household_id=? AND export_id=? AND status='ready' AND source_kind IS NOT NULL ORDER BY ordinal").bind(op.household_id, op.id).all(), consents = await env.DB.prepare("SELECT c.id,c.contributor_id,c.version,c.kind,c.audience,c.purpose,c.status,c.evidence_checksum,c.attested_at,c.expires_at,c.revoked_at FROM legacy_export_consents x JOIN legacy_consents c ON c.id=x.consent_id AND c.household_id=x.household_id WHERE x.household_id=? AND x.export_id=? ORDER BY c.id LIMIT 50").bind(op.household_id, op.id).all();
+        const files = (parts.results || []).map(raw => raw as Record<string, unknown>), mapFiles = (kind: string) => files.filter(row => row.source_kind === kind).map(row => ({ id: String(row.id), path: String(row.logical_path), checksum: String(row.checksum), byteSize: Number(row.byte_size), ...(kind === 'transcript' ? { recordingId: String(row.source_id) } : {}) }));
+        const receipts = (consents.results || []).map(raw => { const row = raw as Record<string, unknown>; return { id: String(row.id), contributorId: String(row.contributor_id), version: row.version as 'legacy-consent-v1' | 'legacy-synthetic-v1', kind: row.kind as 'recording' | 'transcription' | 'synthetic', audience: 'household' as const, purpose: row.purpose as 'private_archive' | 'private_archive_narration', status: row.status as 'active' | 'superseded' | 'revoked' | 'expired', attestedAt: new Date(Number(row.attested_at)).toISOString(), expiresAt: row.expires_at ? new Date(Number(row.expires_at)).toISOString() : null, revokedAt: row.revoked_at ? new Date(Number(row.revoked_at)).toISOString() : null, evidenceChecksum: String(row.evidence_checksum) }; });
+        const manifest = await buildLegacyExportManifest({ householdId: op.household_id, generatedAt: new Date(now).toISOString(), recordings: mapFiles('recording'), transcripts: mapFiles('transcript'), photos: mapFiles('photo'), metadata: files.filter(row => row.source_kind === 'metadata').map(row => ({ id: String(row.id), category: String(row.source_id).split(':')[0], path: String(row.logical_path), checksum: String(row.checksum), byteSize: Number(row.byte_size) })), consentReceipts: receipts });
+        const bytes = new TextEncoder().encode(JSON.stringify(manifest)), checksum = await legacyHash(new TextDecoder().decode(bytes)), manifestId = await stableLegacyUuid(`export:${op.id}:manifest`), key = `legacy/${op.household_id}/export/${manifestId}.json`;
+        await env.DB.prepare("INSERT OR IGNORE INTO legacy_export_parts (id,household_id,export_id,ordinal,source_kind,source_id,logical_path,content_type,storage_key,checksum,byte_size,status,created_at,updated_at) VALUES (?,?,?,0,'manifest','manifest','manifest.json','application/json',?,?,?,'copying',?,?)").bind(manifestId, op.household_id, op.id, key, checksum, bytes.byteLength, now, now).run();
+        await assertLegacyFence(op.household_id!, rollout);
+        await putPrivateLegacyObject(bucket(), key, bytes, 'application/json', checksum);
+        await assertLegacyFence(op.household_id!, rollout);
+        const still = await env.DB.prepare("SELECT id FROM legacy_export_operations WHERE id=? AND household_id=? AND status='inventory' AND attempt_token=?").bind(op.id, op.household_id, token).all();
+        if (!still.results?.length)
+            throw new Error('export_fenced');
+        const count = await env.DB.prepare("SELECT count(*) value FROM legacy_export_parts WHERE household_id=? AND export_id=? AND status='ready'").bind(op.household_id, op.id).all();
+        await env.DB.batch([env.DB.prepare("UPDATE legacy_export_parts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='copying'").bind(now, manifestId, op.household_id), env.DB.prepare("UPDATE legacy_export_operations SET status='ready',manifest_key=?,manifest_checksum=?,part_count=?,attempts=0,next_attempt_at=NULL,error_code=NULL,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND household_id=? AND status='inventory' AND attempt_token=?").bind(key, checksum, Number((count.results?.[0] as Record<string, unknown>).value) + 1, now, op.id, op.household_id, token)]);
+        return { status: 'completed', operationId: op.id };
     }
-    if(op.inventory_stage==='photos'){
-      const rows=await env.DB.prepare("SELECT p.id,m.storage_key,m.content_type,m.byte_size,m.checksum FROM legacy_photos p JOIN media_assets m ON m.id=p.media_asset_id AND m.household_id=p.household_id WHERE p.household_id=? AND p.id>? AND p.created_at<=? AND m.status='ready' ORDER BY p.id LIMIT 1").bind(op.household_id,cursor,snapshot).all();const row=rows.results?.[0] as Record<string,unknown>|undefined;if(!row)return await advance('metadata','0:0');const ext=row.content_type==='image/png'?'png':'jpg';await storeObject('photo',row,`photos/${row.id}.${ext}`);return await advance('photos',String(row.id));
+    catch (error) {
+        const failed = Date.now(), dead = attempt >= 5, code = (error instanceof Error ? error.message : 'export_failed').slice(0, 100);
+        await env.DB.prepare("UPDATE legacy_export_operations SET status=CASE WHEN status='expired' THEN 'expired' ELSE ? END,next_attempt_at=?,dead_lettered_at=?,error_code=?,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND household_id=? AND attempt_token=?").bind(dead ? 'dead_letter' : 'failed', dead ? null : failed + Math.min(3600000, 1000 * 2 ** Math.max(0, attempt - 1)), dead ? failed : null, code, failed, op.id, op.household_id, token).run();
+        return { status: dead ? 'dead_letter' : 'retryable', operationId: op.id, error: code };
     }
-    if(op.inventory_stage==='metadata'){
-      const specs=[
-        ['contributors',"SELECT id,display_name,relationship,status,created_at,updated_at FROM contributors WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['interviews',"SELECT id,contributor_id,title,prompt_set_version,status,created_at,updated_at FROM legacy_interviews WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['memories',"SELECT id,contributor_id,title,summary,source_segment_id,status,created_at,updated_at FROM legacy_memories WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['people',"SELECT id,display_name,relationship,created_at,updated_at FROM legacy_people WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['places',"SELECT id,name,description,created_at,updated_at FROM legacy_places WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['photo_captions',"SELECT id,caption,taken_at,created_at FROM legacy_photos WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['tags',"SELECT id,name,created_at FROM legacy_tags WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['memory_tags',"SELECT x.memory_id,x.tag_id FROM legacy_memory_tags x JOIN legacy_memories m ON m.id=x.memory_id AND m.household_id=x.household_id WHERE x.household_id=? AND m.created_at<=? ORDER BY x.memory_id,x.tag_id LIMIT 201 OFFSET ?"],
-        ['timeline',"SELECT e.id,e.memory_id,e.occurred_on,e.precision,e.title,e.created_at FROM legacy_timeline_events e WHERE e.household_id=? AND e.created_at<=? ORDER BY e.id LIMIT 201 OFFSET ?"],
-        ['collections',"SELECT id,name,description,created_at,updated_at FROM legacy_collections WHERE household_id=? AND created_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-        ['collection_items',"SELECT i.id,i.collection_id,i.memory_id,i.position,i.created_at FROM legacy_collection_items i WHERE i.household_id=? AND i.created_at<=? ORDER BY i.id LIMIT 201 OFFSET ?"],
-        ['consent_receipts',"SELECT id,contributor_id,version,kind,audience,purpose,status,evidence_checksum,attested_at,expires_at,revoked_at FROM legacy_consents WHERE household_id=? AND attested_at<=? ORDER BY id LIMIT 201 OFFSET ?"],
-      ] as const;const [indexRaw,offsetRaw]=cursor.split(':'),index=Number(indexRaw||0),offset=Number(offsetRaw||0);if(index>=specs.length)return await advance('manifest',null);const [category,sql]=specs[index],page=await env.DB.prepare(sql).bind(op.household_id,snapshot,offset).all(),records=(page.results||[]).slice(0,200),bytes=new TextEncoder().encode(JSON.stringify({version:'nearlegacy-metadata-page-v1',category,offset,records})),checksum=await legacyHash(new TextDecoder().decode(bytes));await storeBytes('metadata',`${category}:${offset}`,`metadata/${category}-${offset}.json`,'application/json',bytes,checksum);return await advance('metadata',(page.results?.length||0)>200?`${index}:${offset+200}`:`${index+1}:0`);
-    }
-    const parts=await env.DB.prepare("SELECT id,source_kind,source_id,logical_path,checksum,byte_size FROM legacy_export_parts WHERE household_id=? AND export_id=? AND status='ready' AND source_kind IS NOT NULL ORDER BY ordinal").bind(op.household_id,op.id).all(),consents=await env.DB.prepare("SELECT c.id,c.contributor_id,c.version,c.kind,c.audience,c.purpose,c.status,c.evidence_checksum,c.attested_at,c.expires_at,c.revoked_at FROM legacy_export_consents x JOIN legacy_consents c ON c.id=x.consent_id AND c.household_id=x.household_id WHERE x.household_id=? AND x.export_id=? ORDER BY c.id LIMIT 50").bind(op.household_id,op.id).all();const files=(parts.results||[]).map(raw=>raw as Record<string,unknown>),mapFiles=(kind:string)=>files.filter(row=>row.source_kind===kind).map(row=>({id:String(row.id),path:String(row.logical_path),checksum:String(row.checksum),byteSize:Number(row.byte_size),...(kind==='transcript'?{recordingId:String(row.source_id)}:{})}));const receipts=(consents.results||[]).map(raw=>{const row=raw as Record<string,unknown>;return{id:String(row.id),contributorId:String(row.contributor_id),version:row.version as 'legacy-consent-v1'|'legacy-synthetic-v1',kind:row.kind as 'recording'|'transcription'|'synthetic',audience:'household' as const,purpose:row.purpose as 'private_archive'|'private_archive_narration',status:row.status as 'active'|'superseded'|'revoked'|'expired',attestedAt:new Date(Number(row.attested_at)).toISOString(),expiresAt:row.expires_at?new Date(Number(row.expires_at)).toISOString():null,revokedAt:row.revoked_at?new Date(Number(row.revoked_at)).toISOString():null,evidenceChecksum:String(row.evidence_checksum)}});const manifest=await buildLegacyExportManifest({householdId:op.household_id,generatedAt:new Date(now).toISOString(),recordings:mapFiles('recording'),transcripts:mapFiles('transcript'),photos:mapFiles('photo'),metadata:files.filter(row=>row.source_kind==='metadata').map(row=>({id:String(row.id),category:String(row.source_id).split(':')[0],path:String(row.logical_path),checksum:String(row.checksum),byteSize:Number(row.byte_size)})),consentReceipts:receipts});const bytes=new TextEncoder().encode(JSON.stringify(manifest)),checksum=await legacyHash(new TextDecoder().decode(bytes)),manifestId=await stableLegacyUuid(`export:${op.id}:manifest`),key=`legacy/${op.household_id}/export/${manifestId}.json`;await env.DB.prepare("INSERT OR IGNORE INTO legacy_export_parts (id,household_id,export_id,ordinal,source_kind,source_id,logical_path,content_type,storage_key,checksum,byte_size,status,created_at,updated_at) VALUES (?,?,?,0,'manifest','manifest','manifest.json','application/json',?,?,?,'copying',?,?)").bind(manifestId,op.household_id,op.id,key,checksum,bytes.byteLength,now,now).run();await putPrivateLegacyObject(bucket(),key,bytes,'application/json',checksum);const still=await env.DB.prepare("SELECT id FROM legacy_export_operations WHERE id=? AND household_id=? AND status='inventory' AND attempt_token=?").bind(op.id,op.household_id,token).all();if(!still.results?.length)throw new Error('export_fenced');const count=await env.DB.prepare("SELECT count(*) value FROM legacy_export_parts WHERE household_id=? AND export_id=? AND status='ready'").bind(op.household_id,op.id).all();await env.DB.batch([env.DB.prepare("UPDATE legacy_export_parts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='copying'").bind(now,manifestId,op.household_id),env.DB.prepare("UPDATE legacy_export_operations SET status='ready',manifest_key=?,manifest_checksum=?,part_count=?,attempts=0,next_attempt_at=NULL,error_code=NULL,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND household_id=? AND status='inventory' AND attempt_token=?").bind(key,checksum,Number((count.results?.[0] as Record<string,unknown>).value)+1,now,op.id,op.household_id,token)]);return{status:'completed',operationId:op.id};
-  }catch(error){const failed=Date.now(),dead=attempt>=5,code=(error instanceof Error?error.message:'export_failed').slice(0,100);await env.DB.prepare("UPDATE legacy_export_operations SET status=CASE WHEN status='expired' THEN 'expired' ELSE ? END,next_attempt_at=?,dead_lettered_at=?,error_code=?,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND household_id=? AND attempt_token=?").bind(dead?'dead_letter':'failed',dead?null:failed+Math.min(3600000,1000*2**Math.max(0,attempt-1)),dead?failed:null,code,failed,op.id,op.household_id,token).run();return{status:dead?'dead_letter':'retryable',operationId:op.id,error:code};}
 }
-
-export async function reconcileLegacyUploads(){const rows=await env.DB.prepare("SELECT id,household_id,storage_key,checksum,byte_size,status FROM legacy_upload_operations WHERE status IN ('staged','stored','cleanup_required') ORDER BY updated_at LIMIT 10").all();let reconciled=0;for(const raw of rows.results||[]){const row=raw as Record<string,unknown>;if(row.status==='cleanup_required'){try{await deletePrivateLegacyObject(bucket(),String(row.storage_key));await env.DB.prepare("UPDATE legacy_upload_operations SET status='deleted',updated_at=? WHERE id=? AND household_id=? AND status='cleanup_required'").bind(Date.now(),row.id,row.household_id).run();}catch(error){void error;}reconciled++;continue;}const head=await bucket().head(String(row.storage_key)).catch(()=>null);if(head&&head.size===row.byte_size&&head.customMetadata?.checksum===row.checksum)await env.DB.prepare("UPDATE legacy_upload_operations SET status=CASE WHEN status='staged' THEN 'stored' ELSE status END,updated_at=? WHERE id=? AND household_id=?").bind(Date.now(),row.id,row.household_id).run();reconciled++;}return reconciled;}
-
-export async function advanceLegacyTranscription(){
-  const found=await env.DB.prepare(`SELECT j.id,j.household_id,j.requested_by_user_id,j.reservation_id,j.status job_status,j.worker_lease_expires_at,b.id binding_id,b.recording_id,b.contributor_id,b.consent_id,b.provider_spend_reservation_id,r.duration_ms,m.storage_key,m.content_type
+export async function reconcileLegacyUploads() { const rows = await env.DB.prepare("SELECT id,household_id,storage_key,checksum,byte_size,status FROM legacy_upload_operations WHERE status IN ('staged','stored','cleanup_required') ORDER BY updated_at LIMIT 10").all(); let reconciled = 0; for (const raw of rows.results || []) {
+    const row = raw as Record<string, unknown>;
+    if (row.status === 'cleanup_required') {
+        try {
+            await deletePrivateLegacyObject(bucket(), String(row.storage_key));
+            await env.DB.prepare("UPDATE legacy_upload_operations SET status='deleted',updated_at=? WHERE id=? AND household_id=? AND status='cleanup_required'").bind(Date.now(), row.id, row.household_id).run();
+        }
+        catch (error) {
+            void error;
+        }
+        reconciled++;
+        continue;
+    }
+    if (!await legacyWorkAllowed(String(row.household_id)))
+        continue;
+    const head = await bucket().head(String(row.storage_key)).catch(() => null);
+    if (head && head.size === row.byte_size && head.customMetadata?.checksum === row.checksum)
+        await env.DB.prepare("UPDATE legacy_upload_operations SET status=CASE WHEN status='staged' THEN 'stored' ELSE status END,updated_at=? WHERE id=? AND household_id=?").bind(Date.now(), row.id, row.household_id).run();
+    reconciled++;
+} return reconciled; }
+export async function advanceLegacyTranscription() {
+    const found = await env.DB.prepare(`SELECT j.id,j.household_id,j.requested_by_user_id,j.reservation_id,j.status job_status,j.worker_attempt_token,j.worker_lease_expires_at,b.id binding_id,b.recording_id,b.contributor_id,b.consent_id,b.provider_spend_reservation_id,r.duration_ms,m.storage_key,m.content_type
     FROM jobs j JOIN legacy_job_bindings b ON b.job_id=j.id AND b.household_id=j.household_id AND b.status='active' JOIN legacy_recordings r ON r.id=b.recording_id AND r.household_id=b.household_id AND r.status='ready' JOIN media_assets m ON m.id=r.media_asset_id AND m.household_id=r.household_id AND m.status='ready'
-    WHERE j.type='archive_transcription' AND ((j.status='queued' AND (j.worker_lease_expires_at IS NULL OR j.worker_lease_expires_at<=?)) OR (j.status='running' AND j.worker_lease_expires_at<?)) ORDER BY j.created_at LIMIT 1`).bind(Date.now(),Date.now()).all();const row=found.results?.[0] as Record<string,unknown>|undefined;if(!row)return {status:"idle"};const token=crypto.randomUUID(),now=Date.now();if(row.job_status==='running'){await env.DB.batch([env.DB.prepare("UPDATE jobs SET status='failed',error_code='worker_lease_expired_charge_uncertain',completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_lease_expires_at<?").bind(now,now,row.id,row.household_id,now),env.DB.prepare("UPDATE usage_reservations SET status='released',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(now,now,row.reservation_id,row.household_id),env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(now,now,row.provider_spend_reservation_id,row.household_id),env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(now,row.provider_spend_reservation_id,row.household_id),env.DB.prepare("UPDATE legacy_job_bindings SET status='released',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(now,row.binding_id,row.household_id)]);return {status:"terminal",jobId:row.id};}const claim=await env.DB.prepare("UPDATE jobs SET status='running',attempts=attempts+1,worker_attempt_token=?,worker_lease_expires_at=?,started_at=COALESCE(started_at,?),updated_at=?,progress_stage='transcribing',progress_percent=20 WHERE id=? AND household_id=? AND status='queued' AND (worker_lease_expires_at IS NULL OR worker_lease_expires_at<=?)").bind(token,now+120000,now,now,row.id,row.household_id,now).run();if(!claim.meta.changes)return {status:"busy"};
-  let providerRequestStarted=false;
-  try{const object=await bucket().get(String(row.storage_key));if(!object)throw new Error("recording_missing");const apiKey=process.env.ELEVENLABS_API_KEY;if(!apiKey)throw new Error("provider_unavailable");const form=new FormData();form.set("file",new File([await object.arrayBuffer()],"recording",{type:String(row.content_type)}));form.set("model_id","scribe_v1");form.set("tag_audio_events","false");providerRequestStarted=true;const response=await fetch("https://api.elevenlabs.io/v1/speech-to-text",{method:"POST",headers:{"xi-api-key":apiKey,"Idempotency-Key":String(row.id)},body:form});if(!response.ok)throw new Error(`provider_${response.status}`);const payload=await response.json() as {text?:string;language_code?:string;request_id?:string;words?:Array<{text?:string;word?:string;start?:number;end?:number}>};const chunks=transcriptChunks(payload,Number(row.duration_ms));
-    const current=await env.DB.prepare("SELECT b.status,c.status consent_status,c.expires_at,n.status contributor_status,j.status job_status FROM legacy_job_bindings b JOIN legacy_consents c ON c.id=b.consent_id AND c.household_id=b.household_id JOIN contributors n ON n.id=b.contributor_id AND n.household_id=b.household_id JOIN jobs j ON j.id=b.job_id AND j.household_id=b.household_id WHERE b.id=? AND b.household_id=?").bind(row.binding_id,row.household_id).all();const state=current.results?.[0] as Record<string,unknown>|undefined;if(!state||state.status!=='active'||state.consent_status!=='active'||state.contributor_status!=='active'||state.job_status!=='running'||(typeof state.expires_at==='number'&&state.expires_at<=Date.now())){const fenced=Date.now();await env.DB.batch([env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(fenced,fenced,row.provider_spend_reservation_id,row.household_id),env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(fenced,row.provider_spend_reservation_id,row.household_id),env.DB.prepare("UPDATE usage_reservations SET status='released',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(fenced,fenced,row.reservation_id,row.household_id),env.DB.prepare("UPDATE jobs SET status='canceled',error_code='consent_fenced_after_provider',completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(fenced,fenced,row.id,row.household_id,token),env.DB.prepare("UPDATE legacy_job_bindings SET status='fenced',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(fenced,row.binding_id,row.household_id)]);return {status:"fenced",jobId:row.id};}
-    const transcriptId=crypto.randomUUID(),done=Date.now();await env.DB.batch([
-      env.DB.prepare("INSERT INTO legacy_transcripts (id,household_id,recording_id,consent_id,job_binding_id,provider_request_id,language,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'processing',?,?)").bind(transcriptId,row.household_id,row.recording_id,row.consent_id,row.binding_id,payload.request_id||null,payload.language_code||'en',done,done),
-      env.DB.prepare("UPDATE usage_reservations SET status='committed',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(done,done,row.reservation_id,row.household_id),
-      env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(done,done,row.provider_spend_reservation_id,row.household_id),
-      env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(done,row.provider_spend_reservation_id,row.household_id),
-      env.DB.prepare("UPDATE jobs SET status='succeeded',result=?,progress_stage='completed',progress_percent=100,completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(JSON.stringify({transcriptId}),done,done,row.id,row.household_id,token),
-      env.DB.prepare("UPDATE legacy_job_bindings SET status='published',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(done,row.binding_id,row.household_id),
-      env.DB.prepare("UPDATE legacy_transcripts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='processing'").bind(done,transcriptId,row.household_id),
-      ...chunks.map((chunk,index)=>env.DB.prepare("INSERT INTO legacy_transcript_segments (id,household_id,transcript_id,recording_id,contributor_id,ordinal,start_ms,end_ms,original_text,effective_text,provenance,status,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,'original_recording','ready',?,? FROM legacy_job_bindings WHERE id=? AND household_id=? AND status='published'").bind(crypto.randomUUID(),row.household_id,transcriptId,row.recording_id,row.contributor_id,index,chunk.startMs,chunk.endMs,chunk.text,chunk.text,done,done,row.binding_id,row.household_id)),
-    ]);return {status:"completed",jobId:row.id};
-  }catch(error){const failed=Date.now(),message=error instanceof Error?error.message.slice(0,100):'transcription_failed',attempts=Number((await env.DB.prepare("SELECT attempts FROM jobs WHERE id=? AND household_id=?").bind(row.id,row.household_id).all()).results?.[0]&&((await env.DB.prepare("SELECT attempts FROM jobs WHERE id=? AND household_id=?").bind(row.id,row.household_id).all()).results?.[0] as Record<string,unknown>).attempts||1),retryable=providerRequestStarted&&attempts<5&&(/provider_(429|5\d\d)/.test(message)||!message.startsWith("provider_") );if(retryable){await env.DB.prepare("UPDATE jobs SET status='queued',error_code=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=?,progress_stage='retry_wait',progress_percent=20 WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(message,failed,failed+Math.min(3600000,1000*2**Math.max(0,attempts-1)),row.id,row.household_id,token).run();return{status:"retryable",jobId:row.id};}await env.DB.batch([env.DB.prepare("UPDATE jobs SET status='failed',error_code=?,completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(attempts>=5?`dead_letter:${message}`:message,failed,failed,row.id,row.household_id,token),env.DB.prepare("UPDATE usage_reservations SET status='released',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(failed,failed,row.reservation_id,row.household_id),...(providerRequestStarted?[env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(failed,failed,row.provider_spend_reservation_id,row.household_id),env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(failed,row.provider_spend_reservation_id,row.household_id)]:[env.DB.prepare("UPDATE provider_spend_reservations SET status='released',updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(failed,row.provider_spend_reservation_id,row.household_id)]),env.DB.prepare("UPDATE legacy_job_bindings SET status='released',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(failed,row.binding_id,row.household_id)]);return {status:"terminal",jobId:row.id};}
+    WHERE j.type='archive_transcription' AND ((j.status='queued' AND (j.worker_lease_expires_at IS NULL OR j.worker_lease_expires_at<=?)) OR (j.status='running' AND j.worker_lease_expires_at<?)) ORDER BY j.created_at LIMIT 1`).bind(Date.now(), Date.now()).all();
+    const row = found.results?.[0] as Record<string, unknown> | undefined;
+    if (!row)
+        return { status: "idle" };
+    const rollout = await legacyFence(String(row.household_id));
+    if (!rollout)
+        return { status: "paused" };
+    const token = crypto.randomUUID(), now = Date.now();
+    if (row.job_status === 'running') {
+        const terminalOutbox=await legacyTerminalOutboxStatement(String(row.id),"failed");await env.DB.batch([env.DB.prepare("UPDATE jobs SET status='failed',error_code='worker_lease_expired_charge_uncertain',completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_lease_expires_at<?").bind(now, now, row.id, row.household_id, now), env.DB.prepare("UPDATE usage_reservations SET status='released',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(now, now, row.reservation_id, row.household_id), env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(now, now, row.provider_spend_reservation_id, row.household_id), env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(now, row.provider_spend_reservation_id, row.household_id), env.DB.prepare("UPDATE legacy_job_bindings SET status='released',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(now, row.binding_id, row.household_id),terminalOutbox]);
+        return { status: "terminal", jobId: row.id };
+    }
+    const claim = await env.DB.prepare("UPDATE jobs SET status='running',attempts=attempts+1,worker_attempt_token=?,worker_lease_expires_at=?,started_at=COALESCE(started_at,?),updated_at=?,progress_stage='transcribing',progress_percent=20 WHERE id=? AND household_id=? AND status='queued' AND (worker_lease_expires_at IS NULL OR worker_lease_expires_at<=?)").bind(token, now + 120000, now, now, row.id, row.household_id, now).run();
+    if (!claim.meta.changes)
+        return { status: "busy" };
+    let providerRequestStarted = false;
+    try {
+        const object = await bucket().get(String(row.storage_key));
+        if (!object)
+            throw new Error("recording_missing");
+        const apiKey = process.env.ELEVENLABS_API_KEY;
+        if (!apiKey)
+            throw new Error("provider_unavailable");
+        const form = new FormData();
+        form.set("file", new File([await object.arrayBuffer()], "recording", { type: String(row.content_type) }));
+        form.set("model_id", "scribe_v1");
+        form.set("tag_audio_events", "false");
+        await assertLegacyFence(String(row.household_id), rollout);
+        providerRequestStarted = true;
+        const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", { method: "POST", headers: { "xi-api-key": apiKey, "Idempotency-Key": String(row.id) }, body: form });
+        if (!response.ok)
+            throw new Error(`provider_${response.status}`);
+        const payload = await response.json() as {
+            text?: string;
+            language_code?: string;
+            request_id?: string;
+            words?: Array<{
+                text?: string;
+                word?: string;
+                start?: number;
+                end?: number;
+            }>;
+        };
+        const chunks = transcriptChunks(payload, Number(row.duration_ms));
+        const current = await env.DB.prepare("SELECT b.status,c.status consent_status,c.expires_at,n.status contributor_status,j.status job_status FROM legacy_job_bindings b JOIN legacy_consents c ON c.id=b.consent_id AND c.household_id=b.household_id JOIN contributors n ON n.id=b.contributor_id AND n.household_id=b.household_id JOIN jobs j ON j.id=b.job_id AND j.household_id=b.household_id WHERE b.id=? AND b.household_id=?").bind(row.binding_id, row.household_id).all();
+        const state = current.results?.[0] as Record<string, unknown> | undefined;
+        if (!state || state.status !== 'active' || state.consent_status !== 'active' || state.contributor_status !== 'active' || state.job_status !== 'running' || (typeof state.expires_at === 'number' && state.expires_at <= Date.now())) {
+            const fenced = Date.now();
+            await env.DB.batch([env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(fenced, fenced, row.provider_spend_reservation_id, row.household_id), env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(fenced, row.provider_spend_reservation_id, row.household_id), env.DB.prepare("UPDATE usage_reservations SET status='released',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(fenced, fenced, row.reservation_id, row.household_id), env.DB.prepare("UPDATE jobs SET status='canceled',error_code='consent_fenced_after_provider',completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(fenced, fenced, row.id, row.household_id, token), env.DB.prepare("UPDATE legacy_job_bindings SET status='fenced',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(fenced, row.binding_id, row.household_id)]);
+            return { status: "fenced", jobId: row.id };
+        }
+        await assertLegacyFence(String(row.household_id), rollout);
+        const transcriptId = crypto.randomUUID(), done = Date.now(), terminalOutbox = await legacyTerminalOutboxStatement(String(row.id), "succeeded");
+        await env.DB.batch([
+            env.DB.prepare("INSERT INTO legacy_transcripts (id,household_id,recording_id,consent_id,job_binding_id,provider_request_id,language,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'processing',?,?)").bind(transcriptId, row.household_id, row.recording_id, row.consent_id, row.binding_id, payload.request_id || null, payload.language_code || 'en', done, done),
+            env.DB.prepare("UPDATE usage_reservations SET status='committed',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(done, done, row.reservation_id, row.household_id),
+            env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(done, done, row.provider_spend_reservation_id, row.household_id),
+            env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(done, row.provider_spend_reservation_id, row.household_id),
+            env.DB.prepare("UPDATE jobs SET status='succeeded',result=?,progress_stage='completed',progress_percent=100,completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(JSON.stringify({ transcriptId }), done, done, row.id, row.household_id, token),
+            env.DB.prepare("UPDATE legacy_job_bindings SET status='published',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(done, row.binding_id, row.household_id),
+            env.DB.prepare("UPDATE legacy_transcripts SET status='ready',updated_at=? WHERE id=? AND household_id=? AND status='processing'").bind(done, transcriptId, row.household_id),
+            ...chunks.map((chunk, index) => env.DB.prepare("INSERT INTO legacy_transcript_segments (id,household_id,transcript_id,recording_id,contributor_id,ordinal,start_ms,end_ms,original_text,effective_text,provenance,status,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,'original_recording','ready',?,? FROM legacy_job_bindings WHERE id=? AND household_id=? AND status='published'").bind(crypto.randomUUID(), row.household_id, transcriptId, row.recording_id, row.contributor_id, index, chunk.startMs, chunk.endMs, chunk.text, chunk.text, done, done, row.binding_id, row.household_id)),
+            terminalOutbox,
+        ]);
+        return { status: "completed", jobId: row.id };
+    }
+    catch (error) {
+        if (error instanceof Error && error.message === "rollout_fenced") {
+            const paused = Date.now();
+            await env.DB.prepare("UPDATE jobs SET status='queued',error_code=?,worker_attempt_token=NULL,worker_lease_expires_at=?,updated_at=? WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(`rollout_paused:${rollout.version}`, paused + 60000, paused, row.id, row.household_id, token).run();
+            return { status: "paused", jobId: row.id };
+        }
+        const failed = Date.now(), message = error instanceof Error ? error.message.slice(0, 100) : 'transcription_failed', attempts = Number((await env.DB.prepare("SELECT attempts FROM jobs WHERE id=? AND household_id=?").bind(row.id, row.household_id).all()).results?.[0] && ((await env.DB.prepare("SELECT attempts FROM jobs WHERE id=? AND household_id=?").bind(row.id, row.household_id).all()).results?.[0] as Record<string, unknown>).attempts || 1), retryable = providerRequestStarted && attempts < 5 && (/provider_(429|5\d\d)/.test(message) || !message.startsWith("provider_"));
+        if (retryable) {
+            await env.DB.prepare("UPDATE jobs SET status='queued',error_code=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=?,progress_stage='retry_wait',progress_percent=20 WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(message, failed, failed + Math.min(3600000, 1000 * 2 ** Math.max(0, attempts - 1)), row.id, row.household_id, token).run();
+            return { status: "retryable", jobId: row.id };
+        }
+        const terminalStatus=attempts>=5?"dead_letter"as const:"failed"as const,terminalOutbox=await legacyTerminalOutboxStatement(String(row.id),terminalStatus);await env.DB.batch([env.DB.prepare("UPDATE jobs SET status='failed',error_code=?,completed_at=?,updated_at=?,worker_attempt_token=NULL,worker_lease_expires_at=NULL WHERE id=? AND household_id=? AND status='running' AND worker_attempt_token=?").bind(attempts >= 5 ? `dead_letter:${message}` : message, failed, failed, row.id, row.household_id, token), env.DB.prepare("UPDATE usage_reservations SET status='released',finalized_at=?,updated_at=? WHERE id=? AND household_id=? AND status='reserved'").bind(failed, failed, row.reservation_id, row.household_id), ...(providerRequestStarted ? [env.DB.prepare("UPDATE provider_spend_reservations SET status='charge_committed',actual_microcents=estimated_microcents,charge_committed_at=?,updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(failed, failed, row.provider_spend_reservation_id, row.household_id), env.DB.prepare("UPDATE provider_spend_reservations SET status='settled',updated_at=? WHERE id=? AND household_id=? AND status='charge_committed'").bind(failed, row.provider_spend_reservation_id, row.household_id)] : [env.DB.prepare("UPDATE provider_spend_reservations SET status='released',updated_at=? WHERE id=? AND household_id=? AND status='in_flight'").bind(failed, row.provider_spend_reservation_id, row.household_id)]), env.DB.prepare("UPDATE legacy_job_bindings SET status='released',updated_at=? WHERE id=? AND household_id=? AND status='active'").bind(failed, row.binding_id, row.household_id),terminalOutbox]);
+        return { status: "terminal", jobId: row.id };
+    }
 }

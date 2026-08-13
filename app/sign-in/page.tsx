@@ -15,12 +15,12 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   return <main className="auth-page">
     <div className="auth-card">
       <Brand />
-      <span className="eyebrow">Welcome to Nearnight</span>
+      <span className="eyebrow">Welcome to NearSleep</span>
       <h1 className="display">A private place for gentler nights</h1>
-      <p className="muted">Sign in with Google. Nearnight never receives your Google password.</p>
+      <p className="muted">Sign in with Google. NearSleep never receives your Google password.</p>
       <SignInOptions googleEnabled={providers.google} returnTo={returnTo} />
       <p className="auth-fine-print">For parents and caregivers 18+. By continuing, you agree to the <Link href="/terms">terms</Link> and acknowledge the <Link href="/privacy">privacy notice</Link>.</p>
-      <Link className="auth-back" href="/">← Back to Nearnight</Link>
+      <Link className="auth-back" href="/">← Back to NearSleep</Link>
     </div>
   </main>;
 }

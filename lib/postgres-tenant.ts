@@ -8,6 +8,7 @@ export async function withPostgresTenant<T>(
   context: { householdId: string; userId: string },
   operation: (client: TransactionConnection) => Promise<T>,
 ) {
+  if (client.checkedOutConnection !== true) throw new Error("A checked-out PostgreSQL connection is required.");
   if (!context.householdId || !context.userId) throw new Error("PostgreSQL tenant context is required.");
   await client.query("BEGIN");
   try {

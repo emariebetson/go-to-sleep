@@ -1,0 +1,1 @@
+export {D1_DOMAIN_REGISTRY,D1_DOMAIN_REGISTRY_CHECKSUM,D1_DOMAIN_REGISTRY_VERSION} from "./d1-domain-registry.generated";

@@ -388,7 +388,7 @@ export const entitlements = sqliteTable(
     id: text("id").primaryKey(),
     householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
     planId: text("plan_id").notNull(),
-    source: text("source", { enum: ["legacy", "stripe", "revenuecat", "manual"] }).notNull(),
+    source: text("source", { enum: ["legacy", "stripe", "revenuecat", "manual", "canary"] }).notNull(),
     status: text("status", { enum: ["active", "inactive", "grace", "revoked"] }).notNull(),
     allowanceMilliunits: integer("allowance_milliunits").notNull(),
     remainingMilliunits: integer("remaining_milliunits").notNull(),
@@ -407,6 +407,10 @@ export const entitlements = sqliteTable(
 );
 
 export const annualAllowanceRefills=sqliteTable("annual_allowance_refills",{entitlementId:text("entitlement_id").primaryKey().references(()=>entitlements.id,{onDelete:"cascade"}),householdId:text("household_id").notNull().references(()=>households.id,{onDelete:"cascade"}),anchorSeconds:integer("anchor_seconds").notNull(),refilledThroughSeconds:integer("refilled_through_seconds").notNull(),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),updatedAt:integer("updated_at",{mode:"timestamp_ms"}).notNull()},table=>[uniqueIndex("annual_allowance_household_entitlement_idx").on(table.householdId,table.entitlementId)]);
+
+export const canaryEntitlementAudit=sqliteTable("canary_entitlement_audit",{
+  id:text("id").primaryKey(),operation:text("operation",{enum:["issue","revoke"]}).notNull(),entitlementId:text("entitlement_id").notNull(),householdId:text("household_id").notNull().references(()=>households.id,{onDelete:"restrict"}),planId:text("plan_id",{enum:["nearyou_plus","nearyou_family"]}).notNull(),releaseId:text("release_id").notNull(),principal:text("principal").notNull(),reason:text("reason").notNull(),issuedAt:integer("issued_at").notNull(),notBefore:integer("not_before").notNull(),expiresAt:integer("expires_at").notNull(),idempotencyKey:text("idempotency_key").notNull().unique(),requestDigest:text("request_digest").notNull(),createdAt:integer("created_at").notNull(),
+});
 
 export const usageEvents = sqliteTable(
   "usage_events",
@@ -626,6 +630,8 @@ export const jobs = sqliteTable(
     progressStage: text("progress_stage").notNull().default("queued"),
     workerAttemptToken: text("worker_attempt_token"),
     workerLeaseExpiresAt: integer("worker_lease_expires_at", { mode: "timestamp_ms" }),
+    rolloutReleaseId: text("rollout_release_id"),
+    rolloutVersion: integer("rollout_version"),
     reservationId: text("reservation_id").references(() => usageReservations.id, { onDelete: "set null" }),
     consentId: text("consent_id").references(() => voiceConsents.id, { onDelete: "set null" }),
     consentVersion: text("consent_version"),
@@ -641,6 +647,12 @@ export const jobs = sqliteTable(
     index("jobs_story_dispatch_idx").on(table.type, table.status, table.workerLeaseExpiresAt, table.createdAt),
   ],
 );
+
+export const operationalOutcomeOutbox = sqliteTable("operational_outcome_outbox", {
+  id: text("id").primaryKey(), product: text("product", { enum: ["nearstory", "nearlegacy"] }).notNull(), operation: text("operation", { enum: ["attempt_started", "terminal"] }).notNull(),
+  jobId: text("job_id").notNull(), householdId: text("household_id").notNull(), attemptToken: text("attempt_token").notNull(), requestHash: text("request_hash").notNull(), releaseId: text("release_id").notNull(), releaseVersion: integer("release_version").notNull(), terminalStatus: text("terminal_status", { enum: ["succeeded", "failed", "dead_letter"] }),
+  deliveryStatus: text("delivery_status", { enum: ["pending", "leased", "delivered", "dead_letter"] }).notNull().default("pending"), attempts: integer("attempts").notNull().default(0), leaseToken: text("lease_token"), leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }), nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }).notNull(), payloadChecksum: text("payload_checksum").notNull(), createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(), updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(), deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+});
 
 export const storyExperiences = sqliteTable(
   "story_experiences",
@@ -1310,6 +1322,10 @@ export const mobileAccountBindings = sqliteTable("mobile_account_bindings", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  appId: text("app_id").notNull().default("unbound"),
+  environment: text("environment", { enum: ["SANDBOX", "PRODUCTION"] }).notNull().default("SANDBOX"),
+  bindingVersion: integer("binding_version").notNull().default(1),
+  status: text("status", { enum: ["active", "revoked"] }).notNull().default("active"),
 });
 
 export const integrationRightsReceipts = sqliteTable(
@@ -1342,3 +1358,38 @@ export const encryptedIntegrationTokens = sqliteTable(
   },
   (table) => [uniqueIndex("encrypted_integration_tokens_household_user_provider_idx").on(table.householdId, table.userId, table.provider)],
 );
+
+export const marketingWaitlistContacts = sqliteTable("marketing_waitlist_contacts", {
+  id: text("id").primaryKey(),
+  emailLookupHash: text("email_lookup_hash").notNull().unique(),
+  emailCiphertext: text("email_ciphertext").notNull(),
+  emailIv: text("email_iv").notNull(),
+  consentVersion: text("consent_version").notNull(),
+  consentedAt: integer("consented_at", { mode: "timestamp_ms" }).notNull(),
+  unsubscribedAt: integer("unsubscribed_at", { mode: "timestamp_ms" }),
+  version: integer("version").notNull().default(1),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const marketingWaitlistInterests = sqliteTable("marketing_waitlist_interests", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id").notNull().references(() => marketingWaitlistContacts.id, { onDelete: "cascade" }),
+  product: text("product", { enum: ["nearstory", "nearfamily", "nearlegacy"] }).notNull(),
+  signupSource: text("signup_source", { enum: ["home", "pricing"] }).notNull(),
+  joinedAt: integer("joined_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [uniqueIndex("marketing_waitlist_interest_contact_product_idx").on(table.contactId, table.product)]);
+
+export const marketingWaitlistSync = sqliteTable("marketing_waitlist_sync", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id").notNull().references(() => marketingWaitlistContacts.id, { onDelete: "cascade" }),
+  contactVersion: integer("contact_version").notNull(),
+  status: text("status", { enum: ["pending", "processing", "completed", "dead_letter"] }).notNull().default("pending"),
+  attemptToken: text("attempt_token"),
+  leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }),
+  errorCode: text("error_code"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [uniqueIndex("marketing_waitlist_sync_contact_version_idx").on(table.contactId, table.contactVersion), index("marketing_waitlist_sync_status_next_idx").on(table.status, table.nextAttemptAt)]);

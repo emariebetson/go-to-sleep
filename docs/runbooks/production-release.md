@@ -21,6 +21,12 @@ The current cutover CLI is a fail-closed deployment scaffold; infrastructure-spe
 - Accessibility: keyboard/screen reader, reduced motion, captions, contrast, microphone state, iOS/Android current and prior major versions.
 - Security: independent penetration test and zero unresolved critical/high findings.
 
+### NearFamily activation gate
+
+NearFamily remains compile-time dark until one exact release has authenticated, unexpired product-readiness evidence for the identity, household-member, entitlement, invitation, privacy/PAD, capacity, restore, load, and security probes. The same evidence must bind both reviewed iOS and Android artifacts, the exact service secret versions, the current schema/RLS checksum, and a successful controller-identity mapping. Before canary admission, rehearse a Family-to-Plus downgrade at real limits and prove that existing members, children, voices, and media remain intact; every new capacity-consuming mutation is rejected; delete/export/revoke/billing/member-departure remediation remains available; and all capacity conflicts return to zero after remediation.
+
+Source completion does not enable NearFamily. `NEARFAMILY_ROUTE_ENABLED` must remain literal false, Terraform service and scheduler readiness must remain false, and no rollout transition may occur until the supported-PostgreSQL catalog manifest is generated and reviewed and all live restore/load/security/accessibility/mobile/provider/24-hour canary evidence is verified. Activation begins with an invited household cohort and must preserve the audited kill switch and prior-version rollback path.
+
 ## Rollback and retention
 
 Retain the prior Sites version. Rollback is flag-first, then code. Never roll back a destructive migration. Raw clone samples delete after verification unless separately consented; working files expire in 7–30 days; account/consent deletion remains auditable without PII. Quarterly restore drills and annual archive export verification are required.

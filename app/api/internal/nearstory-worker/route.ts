@@ -5,6 +5,8 @@ import { jsonNoStore, readJsonObject } from "@/lib/http";
 import { featureFlagsFromEnv, nearStoryParentBetaFlagsEnabled } from "@/lib/nearyou-foundation";
 import { assertNearStoryWorkerReady } from "@/lib/nearstory-production-worker";
 import { advanceNextNearStoryStage, reconcileExhaustedNearStoryJobs, reconcileStoryCheckpointCleanup } from "@/lib/nearstory-stage-worker";
+import { env } from "cloudflare:workers";
+import { flushOperationalOutcomeOutbox } from "@/lib/operational-outcome-outbox";
 
 async function secretMatches(actual: string, expected: string) {
   const [leftBuffer, rightBuffer] = await Promise.all([crypto.subtle.digest("SHA-256", new TextEncoder().encode(actual)), crypto.subtle.digest("SHA-256", new TextEncoder().encode(expected))]);
@@ -21,9 +23,11 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>; try { body = await readJsonObject(request, 1_000); } catch { return jsonNoStore({ error: "A small JSON worker request is required." }, { status: 400 }); }
   if ((body.jobId !== undefined && (typeof body.jobId !== "string" || !body.jobId || body.jobId.length > 200)) || Object.keys(body).some((key) => key !== "jobId")) return jsonNoStore({ error: "jobId must be bounded when supplied." }, { status: 400 });
   try { await assertNearStoryWorkerReady(); } catch { return jsonNoStore({ error: "NearStory worker is not ready." }, { status: 503 }); }
+  await flushOperationalOutcomeOutbox((env as unknown as {DB: Parameters<typeof flushOperationalOutcomeOutbox>[0]}).DB,env as unknown as Record<string,unknown>,5);
   const heartbeat = new Date(); await getDb().update(nearStoryActivationState).set({ workerHeartbeatAt: heartbeat, checkedAt: heartbeat }).where(eq(nearStoryActivationState.id, "parent-beta"));
   await reconcileExhaustedNearStoryJobs(2);
   await reconcileStoryCheckpointCleanup(10);
   const result = await advanceNextNearStoryStage(typeof body.jobId === "string" ? body.jobId : undefined);
+  await flushOperationalOutcomeOutbox((env as unknown as {DB: Parameters<typeof flushOperationalOutcomeOutbox>[0]}).DB,env as unknown as Record<string,unknown>,5);
   return jsonNoStore({ result, heartbeatAt: heartbeat }, { status: result.status === "retryable" ? 503 : result.status === "busy" ? 409 : 200 });
 }

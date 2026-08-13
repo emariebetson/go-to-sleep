@@ -1,0 +1,11 @@
+export const PRIVATE_CANARY_D1_OBSERVATION_SQL=`SELECT unixepoch('subsec')*1000 observedAt,
+(SELECT count(*) FROM d1_migrations WHERE name='0026_canary_entitlements.sql') migrationCount,
+(SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN('canary_entitlement_audit_immutable_update','canary_entitlement_audit_immutable_delete')) immutableTriggers,
+(SELECT count(*) FROM operational_outcome_outbox WHERE release_id=?1 AND delivery_status IN('pending','leased','failed')) outboxPending,
+(SELECT count(*) FROM operational_outcome_outbox WHERE release_id=?1 AND delivery_status='dead_letter') outboxDeadLetters,
+(SELECT status FROM nearstory_activation_state WHERE id='parent-beta') activationStatus,
+(SELECT migration_version FROM nearstory_activation_state WHERE id='parent-beta') migrationVersion,
+(SELECT unixepoch(worker_heartbeat_at)*1000 FROM nearstory_activation_state WHERE id='parent-beta') heartbeatAt,
+(SELECT count(*) FROM entitlements e JOIN canary_entitlement_audit a ON a.entitlement_id=e.id AND a.operation='issue' WHERE a.release_id=?1 AND e.source='canary' AND e.status='active') activeCanaryRows,
+(SELECT count(*) FROM canary_entitlement_audit WHERE release_id=?1 AND operation='issue') releaseIssueRows,
+(SELECT count(*) FROM canary_entitlement_audit WHERE release_id=?1 AND operation='revoke') releaseRevokeRows`;

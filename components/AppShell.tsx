@@ -2,26 +2,26 @@ import { Link } from "./Link";
 import { getAppUser, isAdmin } from "@/lib/auth";
 import { Brand } from "./Brand";
 import { SignOutButton } from "./SignOutButton";
+import { appNavigationLinks, resolveFamilyNavigationAvailability } from "./app-navigation";
 
 type AppShellProps = {
   children: React.ReactNode;
-  active: "studio" | "stories" | "legacy" | "library" | "account" | "admin";
+  active: "studio" | "stories" | "family" | "legacy" | "library" | "account" | "admin";
+  familyAvailable?: boolean;
 };
 
-export async function AppShell({ children, active }: AppShellProps) {
+export async function AppShell({ children, active, familyAvailable }: AppShellProps) {
   const user = await getAppUser();
   const showAdmin = Boolean(user && isAdmin(user));
   const { storyReady } = await import("@/app/api/v1/stories/production");
   const showStories = await storyReady().catch(() => false);
   const { nearLegacyReady } = await import("@/app/api/v1/legacy/production");
   const showLegacy = await nearLegacyReady().catch(() => false);
-  const links = [
-    ["studio", "/studio", "Create a bedtime"],
-    ...(showStories ? [["stories", "/stories", "Create a story"] as const] : []),
-    ...(showLegacy ? [["legacy", "/legacy", "Family archive"] as const] : []),
-    ["library", "/library", "My nights"],
-    ["account", "/account", "Voice & account"],
-  ] as const;
+  const showFamily = await resolveFamilyNavigationAvailability(familyAvailable, async () => {
+    const { nearFamilyPageAvailability } = await import("@/app/family/availability");
+    return nearFamilyPageAvailability().catch(() => ({ available: false as const }));
+  });
+  const links = appNavigationLinks({ showStories, showLegacy, familyAvailable: showFamily });
 
   return (
     <div className="app-page">

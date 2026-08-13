@@ -21,7 +21,7 @@ export function SiteFooter() {
           </nav>
         </div>
         <div className="footer-bottom">
-          <span>© {new Date().getFullYear()} Nearnight, a NearSleep experience by NearYou. Made for the long nights.</span>
+          <span>© {new Date().getFullYear()} NearSleep by NearYou. Made for the long nights.</span>
           <span>Not medical advice or a sleep-training program.</span>
         </div>
       </div>
