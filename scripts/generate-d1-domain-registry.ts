@@ -11,7 +11,7 @@ const explicitKeys: Record<string, string[]> = {
   legacy_rate_limits: ["household_id", "user_id", "operation"],
 };
 // Cross-system delivery bookkeeping is operational evidence, not historical user-domain state.
-const nonDomainTables = new Set(["operational_outcome_outbox", "household_capacity_state"]);
+const nonDomainTables = new Set(["operational_outcome_outbox"]);
 const entries = [] as Array<{ exportName: string; table: string; columns: string[]; primaryKey: string[]; scope: { kind: "tenant"; column: "household_id" } | { kind: "global" } }>;
 
 for (const [exportName, value] of Object.entries(schema)) {

@@ -50,9 +50,8 @@ function safeCount(value: unknown) {
 export function createNearFamilySummaryService(db: NearFamilyDb) {
   return async (householdId: string): Promise<NearFamilySummary> => {
     if (!/^[-A-Za-z0-9_]{1,200}$/.test(householdId)) throw new Error("NearFamily household invalid");
-    const row = await db.prepare(`SELECT p.plan_id,p.members,p.children,p.voices,p.storage_bytes,p.member_limit,p.child_limit,p.voice_limit,p.storage_limit,s.state,s.exceeded_json
-      FROM household_capacity_projection p JOIN household_capacity_state s ON s.household_id=p.household_id AND s.plan_id=p.plan_id AND s.state=p.state AND s.exceeded_json=p.exceeded_json
-      WHERE p.household_id=? LIMIT 1`).bind(householdId).first<CapacityRow>();
+    const row = await db.prepare(`SELECT plan_id,members,children,voices,storage_bytes,member_limit,child_limit,voice_limit,storage_limit,state,exceeded_json
+      FROM household_capacity_projection WHERE household_id=? LIMIT 1`).bind(householdId).first<CapacityRow>();
     if (!row || row.plan_id !== "nearyou_family") throw new Error("NearFamily entitlement required");
     if (row.state !== "within_limit" && row.state !== "restricted") throw new Error("NearFamily capacity invalid");
     let parsed: unknown;
