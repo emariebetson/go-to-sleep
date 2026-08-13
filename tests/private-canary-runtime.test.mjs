@@ -26,13 +26,8 @@ test("release runbook has exact migration and private binding verification with 
   assert.match(runbook, /Do not deploy|No product activation/i);
 });
 
-test("the new Sites migration keeps every deployment statement on one physical line", () => {
+test("the Sites migration is inert table-only until authenticated trigger bootstrap", () => {
   const migration = readFileSync(new URL("../drizzle/0026_canary_entitlements.sql", import.meta.url), "utf8");
-  const statements = migration
-    .split("--> statement-breakpoint")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  assert.ok(statements.length > 1);
-  for (const statement of statements) assert.doesNotMatch(statement, /\r?\n/);
+  assert.match(migration, /^CREATE TABLE `canary_entitlement_audit`/);
+  assert.doesNotMatch(migration, /CREATE TRIGGER|statement-breakpoint/);
 });
