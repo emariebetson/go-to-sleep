@@ -65,3 +65,10 @@
 - Add structured logs, tracing, privacy-safe analytics, error monitoring, provider spend/margin dashboards, alerts, and feature kill switches.
 - Run unit, route integration, provider contract, AI safety/provenance, E2E, accessibility, load, restore, and deletion tests.
 - Publish each successful gated release to the existing Sites project, retain the prior version for rollback, and keep gated features off until their external approvals are complete.
+
+## NearFamily higher-capacity tier completion gate
+
+- Treat NearFamily as a server-owned capacity tier and discovery bundle over the existing adult-managed household foundation, not as a child account, child microphone, billing, or posthumous-synthesis capability.
+- Persist and validate exact member/invitation, child, live-voice, and ready-media usage. A downgrade creates a non-destructive restricted state: existing data remains accessible, capacity growth stops, and delete/export/revoke/billing/member-departure remediation remains available.
+- Require exact signed identity/member/entitlement/invite/privacy probes, reviewed iOS and Android artifacts, downgrade remediation with zero unresolved conflicts, the current schema/RLS and secret versions, restore/load/security/accessibility evidence, and the durable 24-hour canary before any invited rollout.
+- Keep the public NearFamily route literal-off and Terraform service/scheduler readiness false until a separate reviewed activation change. Source tests or documentation alone never authorize rollout.
