@@ -1,4 +1,5 @@
 name: production-evidence
+# Manual evidence collection only. This workflow does not deploy or enable product flags.
 on:
   workflow_dispatch:
 permissions:
