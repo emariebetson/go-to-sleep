@@ -406,6 +406,18 @@ export const entitlements = sqliteTable(
   ],
 );
 
+export const householdCapacityState = sqliteTable(
+  "household_capacity_state",
+  {
+    householdId: text("household_id").primaryKey().references(() => households.id, { onDelete: "cascade" }),
+    planId: text("plan_id").notNull(),
+    state: text("state", { enum: ["within_limit", "restricted"] }).notNull(),
+    exceededJson: text("exceeded_json").notNull(),
+    evaluatedAt: integer("evaluated_at", { mode: "timestamp_ms" }).notNull(),
+    version: integer("version").notNull(),
+  },
+);
+
 export const annualAllowanceRefills=sqliteTable("annual_allowance_refills",{entitlementId:text("entitlement_id").primaryKey().references(()=>entitlements.id,{onDelete:"cascade"}),householdId:text("household_id").notNull().references(()=>households.id,{onDelete:"cascade"}),anchorSeconds:integer("anchor_seconds").notNull(),refilledThroughSeconds:integer("refilled_through_seconds").notNull(),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),updatedAt:integer("updated_at",{mode:"timestamp_ms"}).notNull()},table=>[uniqueIndex("annual_allowance_household_entitlement_idx").on(table.householdId,table.entitlementId)]);
 
 export const usageEvents = sqliteTable(
