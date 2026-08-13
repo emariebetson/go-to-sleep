@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { verifyPrivateCanaryRuntimeSource } from "../scripts/verify-private-canary-runtime.ts";
+import { verifySitesMigrationMirror } from "../scripts/verify-sites-package.ts";
 
 test("private canary runtime declares exact non-secret and service bindings while remaining dark", () => {
   const result = verifyPrivateCanaryRuntimeSource();
@@ -30,4 +31,8 @@ test("the incompatible canary schema is excluded from deployable Sites migration
   const pending = readFileSync(new URL("../docs/pending/0026_canary_entitlements.sql.disabled", import.meta.url), "utf8");
   assert.match(pending, /^CREATE TABLE `canary_entitlement_audit`/);
   assert.throws(() => readFileSync(new URL("../drizzle/0026_canary_entitlements.sql", import.meta.url), "utf8"), /ENOENT/);
+});
+
+test("the built Sites archive cannot retain migrations removed from source", () => {
+  assert.deepEqual(verifySitesMigrationMirror(), { migrationCount: 26 });
 });
