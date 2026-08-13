@@ -39,6 +39,7 @@ test("catalog records the reviewed absence of NearYou role memberships",()=>{
 test("catalog CLI reports only bounded failure classes",()=>{
   assert.equal(catalogCandidateFailureCode(new Error("catalog candidate incomplete")),"catalog-candidate-incomplete");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed")),"catalog-security-invariant");
+  assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:forced-rls:household_members")),"catalog-forced-rls:household_members");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:public-execute:nearyou.safe_name(text)")),"catalog-public-execute:nearyou.safe_name(text)");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:public-execute:unknown")),"catalog-public-execute:unknown");
   assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed:public-execute:postgres://secret")),"catalog-security-invariant");

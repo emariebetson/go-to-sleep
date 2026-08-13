@@ -17,6 +17,7 @@ export async function generateCatalogCandidate(input: { databaseUrl: string; out
 export function catalogCandidateFailureCode(error: unknown) {
   if (error instanceof Error && error.message === "catalog candidate incomplete") return "catalog-candidate-incomplete";
   if (error instanceof Error && error.message === "catalog security invariant failed") return "catalog-security-invariant";
+  if (error instanceof Error && /^catalog security invariant failed:forced-rls:(?:none|unknown|[a-z_]{1,63}(?:,[a-z_]{1,63})*)$/.test(error.message)) return error.message.replace("catalog security invariant failed:forced-rls:", "catalog-forced-rls:");
   if (error instanceof Error && /^catalog security invariant failed:public-execute:(?:unknown|nearyou\.[A-Za-z0-9_]+\([^\r\n;]{0,500}\)(?:;nearyou\.[A-Za-z0-9_]+\([^\r\n;]{0,500}\))*)$/.test(error.message)) return error.message.replace("catalog security invariant failed:public-execute:", "catalog-public-execute:");
   if (error instanceof Error && error.message.startsWith("catalog security invariant failed:public-execute:")) return "catalog-security-invariant";
   return "catalog-query-failed";
