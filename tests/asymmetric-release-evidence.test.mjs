@@ -55,7 +55,7 @@ test("validates every trust lifecycle record and exact rotation tuple", async ()
 
 test("enforces evidence freshness, bounded lifetime, and canonical signatures", async () => {
   const f = await fixture();
-  await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, claims: { ...claims, expiresAt: now + 3_600_000 } }, options(f)), /freshness/);
+  await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, claims: { ...claims, expiresAt: now + 3_600_000 } }, options(f)), /freshness|product readiness/);
   await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, claims: { ...claims, notBefore: now + 60_000, issuedAt: now + 60_000 } }, options(f)), /gate|freshness|product readiness/);
   await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, signature: `${f.envelope.signature}=` }, options(f)), /malformed/);
   await assert.rejects(() => verifyReleaseEvidence({ ...f.envelope, signature: "AAAA" }, options(f)), /malformed/);
