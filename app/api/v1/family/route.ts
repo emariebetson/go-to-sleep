@@ -1,18 +1,18 @@
 import { env } from "cloudflare:workers";
 import { requireHouseholdContext } from "@/lib/api-v1-context";
-import { jsonNoStore } from "@/lib/http";
 import { createNearFamilySummaryService } from "@/lib/nearfamily-service";
 import { createPostgresHouseholdProductAccess } from "@/lib/product-release-readiness-service";
+import { nearFamilySourceActivated } from "@/lib/nearfamily-activation";
+import { createNearFamilyGetHandler } from "@/lib/nearfamily-route";
 
 // NearFamily is a bundle over existing identity/member/entitlement/invitation
-// capabilities, not a separately deployed processor. Its public bundle route
-// remains compile-time dark until the reviewed activation change lands.
-const NEARFAMILY_ROUTE_ENABLED=false as const;
-export async function GET(request:Request){
-  if(!NEARFAMILY_ROUTE_ENABLED)return jsonNoStore({error:"NearFamily is not available."},{status:404});
-  const{householdId}=await requireHouseholdContext(request,"entitlement:read");
-  const pg=(env as unknown as{READINESS_PG?:{query<T>(sql:string,args:unknown[]):Promise<{rows:T[]}>}}).READINESS_PG;
-  if(!pg||!await createPostgresHouseholdProductAccess(pg)("nearfamily",householdId))return jsonNoStore({error:"NearFamily is not available."},{status:404});
-  try{return jsonNoStore(await createNearFamilySummaryService(env.DB)(householdId));}
-  catch{return jsonNoStore({error:"NearFamily is not available."},{status:404});}
-}
+// capabilities, not a separately deployed processor.
+export const GET = createNearFamilyGetHandler({
+  sourceActivated: nearFamilySourceActivated,
+  requireHousehold: async request => (await requireHouseholdContext(request, "entitlement:read")).householdId,
+  authorizeProduct: async householdId => {
+    const pg = (env as unknown as { READINESS_PG?: { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }> } }).READINESS_PG;
+    return Boolean(pg && await createPostgresHouseholdProductAccess(pg)("nearfamily", householdId));
+  },
+  loadSummary: createNearFamilySummaryService(env.DB),
+});
