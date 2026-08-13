@@ -15,7 +15,9 @@ import { composeReleaseClaims } from "../scripts/compose-release-claims.ts";
 import { operationalArtifact } from "../scripts/evidence-artifact.ts";
 import { canonicalEvidence } from "../lib/asymmetric-release-evidence.ts";
 import { buildRlsEvidence } from "../scripts/rls-evidence.ts";
-import { LIVE_CATALOG_QUERY, LIVE_CATALOG_SECURITY_QUERY } from "../scripts/postgres-catalog.ts";
+import { LIVE_CATALOG_QUERY, LIVE_CATALOG_SECURITY_QUERY, validateCatalogRows } from "../scripts/postgres-catalog.ts";
+
+test("catalog identities remain text beyond PostgreSQL name length and duplicates fail closed",()=>{assert.match(LIVE_CATALOG_QUERY,/SELECT kind::text,identity::text,definition::text/);assert.match(LIVE_CATALOG_QUERY,/n\.nspname::text identity/);const prefix="nearyou."+"f".repeat(60),rows=[{kind:"function",identity:`${prefix}a(integer)`,definition:"a"},{kind:"function",identity:`${prefix}b(integer)`,definition:"b"}];assert.doesNotThrow(()=>validateCatalogRows(rows));assert.throws(()=>validateCatalogRows([rows[0],{...rows[0]}]),/duplicate/)});
 import { resolveAxeSource } from "../scripts/accessibility-runtime.ts";
 
 const hash = (c) => c.repeat(64);
