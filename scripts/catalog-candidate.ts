@@ -14,4 +14,9 @@ export async function generateCatalogCandidate(input: { databaseUrl: string; out
     await writeFile(input.output, JSON.stringify(artifact, null, 2) + "\n", { flag: "wx" }); return artifact;
   } finally { await pg.close(); }
 }
-if (import.meta.url === `file://${process.argv[1]}`) { const output = process.argv[2], url = process.env.READINESS_CONTROL_DATABASE_URL; if (!url || !output) throw new Error("catalog candidate configuration missing"); generateCatalogCandidate({ databaseUrl: url, output }).catch(() => { process.stderr.write("catalog candidate failed\n"); process.exitCode = 1; }); }
+export function catalogCandidateFailureCode(error: unknown) {
+  if (error instanceof Error && error.message === "catalog candidate incomplete") return "catalog-candidate-incomplete";
+  if (error instanceof Error && error.message === "catalog security invariant failed") return "catalog-security-invariant";
+  return "catalog-query-failed";
+}
+if (import.meta.url === `file://${process.argv[1]}`) { const output = process.argv[2], url = process.env.READINESS_CONTROL_DATABASE_URL; if (!url || !output) throw new Error("catalog candidate configuration missing"); generateCatalogCandidate({ databaseUrl: url, output }).catch((error) => { process.stderr.write(`${catalogCandidateFailureCode(error)}\n`); process.exitCode = 1; }); }

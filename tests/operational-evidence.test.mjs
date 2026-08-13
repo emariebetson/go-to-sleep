@@ -5,7 +5,7 @@ import { buildOperationalEvidence, validateCanaryWindow } from "../scripts/opera
 import { collectHttpLoad, collectRestore, collectCanary, collectAccessibility, collectMedia, collectSecurity, CanarySampleStore } from "../scripts/collect-operational-gate.ts";
 import { createPostgresCanarySampleStore } from "../lib/postgres-canary-evidence.ts";
 import { reportProductOutcome } from "../lib/product-outcome-telemetry.ts";
-import { generateCatalogCandidate } from "../scripts/catalog-candidate.ts";
+import { catalogCandidateFailureCode, generateCatalogCandidate } from "../scripts/catalog-candidate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -34,6 +34,12 @@ test("catalog candidate and promotion bind complete live security to the current
 test("catalog records the reviewed absence of NearYou role memberships",()=>{
   assert.match(LIVE_CATALOG_QUERY,/SELECT 'membership','<none>',''/);
   assert.match(LIVE_CATALOG_QUERY,/NOT EXISTS[\s\S]*pg_auth_members/);
+});
+
+test("catalog CLI reports only bounded failure classes",()=>{
+  assert.equal(catalogCandidateFailureCode(new Error("catalog candidate incomplete")),"catalog-candidate-incomplete");
+  assert.equal(catalogCandidateFailureCode(new Error("catalog security invariant failed")),"catalog-security-invariant");
+  assert.equal(catalogCandidateFailureCode(new Error("postgres://secret unexpected syntax")),"catalog-query-failed");
 });
 
 test("catalog candidate rejects missing FORCE RLS and PUBLIC function execution",async()=>{const rows=REQUIRED_CATALOG_KINDS.map((kind,index)=>({kind,identity:`i${index}`,definition:`d${index}`})),directory=await mkdtemp(join(tmpdir(),"nearyou-catalog-security-"));try{for(const security of [{forced_rls:["household_members"],public_execute_count:"0"},{forced_rls:["household_members","tenant_records"],public_execute_count:"1"}])await assert.rejects(()=>generateCatalogCandidate({databaseUrl:"postgres://fixture",output:join(directory,`${Math.random()}-catalog-manifest.candidate.json`),connect:async()=>({query:async sql=>({rows:sql.includes("public_execute_count")?[security]:rows}),close:async()=>{}})}),/security invariant/)}finally{await rm(directory,{recursive:true,force:true})}});
