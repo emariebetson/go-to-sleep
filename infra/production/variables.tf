@@ -54,6 +54,11 @@ variable "deployment_approved" {
 
   default = false
 }
+variable "evidence_collection_approved" {
+  type        = bool
+  default     = false
+  description = "Separate reviewed approval for operational evidence sampling only; never enables products."
+}
 variable "scheduler_paused" {
 
   type = bool

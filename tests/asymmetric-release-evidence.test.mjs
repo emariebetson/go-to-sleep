@@ -13,6 +13,7 @@ const result = {
   load: { requests: 10000, errorRateBps: 5, p95Ms: 200, maxErrorRateBps: 25, maxP95Ms: 500 },
   accessibility: { checks: 80, violations: 0 },
   security: { critical: 0, high: 0, scanArtifact: hash("e"), penTestArtifact: hash("f") },
+  canary: { startedAt: now - 86_401_000, endedAt: now - 1000, heartbeatCount: 1440, deadLetters: 0, completedJobs: 100, failedJobs: 0, reconciliationArtifact:"8".repeat(64),terminalCount:100,terminalDigest:"9".repeat(64),pending:0,outboxDeadLetters:0 },
 };
 const gate = (kind) => ({ kind, policyVersion: 1, releaseId, schema, artifact: hash("c"), verifiedAt: now - 1000, results: result[kind] });
 const productReadiness=["nearstory","nearfamily","nearlegacy"].map(product=>({product,environment:"production",region:"us-central1",releaseId,artifact:hash("7"),imageDigest:hash("8"),expiresAt:now+60_000,controllerMapping:{verified:true,artifact:hash("9"),verifiedAt:now-1000},secretVersions:{runtime:"projects/prod/secrets/runtime/versions/7"},capacity:{queueDepth:1,maxQueueDepth:10,errorRateBps:1,maxErrorRateBps:10,soakStartedAt:now-3700000,soakEndedAt:now-1000},probes:Object.fromEntries((product==="nearfamily"?["identity","member","entitlement","invite","privacy"]:["worker","scheduler","processor"]).map(name=>[name,{identity:`probe:${name}`,passed:true,verifiedAt:now-1000}])),mobilePlatforms:product==="nearfamily"?["ios","android"]:[]}));

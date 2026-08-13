@@ -1319,6 +1319,25 @@ resource "google_cloud_run_v2_service" "legacy" {
 
 
       image = var.legacy_image_digest
+      env {
+        name  = "EVIDENCE_COLLECTION_APPROVED"
+        value = tostring(var.evidence_collection_approved)
+      }
+
+      env {
+        name  = "OUTCOME_RUNTIME"
+        value = "cloudrun"
+      }
+
+      env {
+        name  = "OUTCOME_ENDPOINT"
+        value = "${var.scheduler_audience}/api/internal/product-outcomes"
+      }
+
+      env {
+        name  = "OUTCOME_AUDIENCE"
+        value = var.scheduler_audience
+      }
 
 
 

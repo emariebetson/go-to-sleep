@@ -7,7 +7,7 @@ const migrations = [
   "0004_salty_sugar_man.sql", "0005_pronunciation_frequency_layers.sql", "0006_nearyou_shared_foundation.sql",
   "0007_nearsleep_production_upgrade.sql", "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql",
   "0010_child_profile_pronunciation.sql", "0011_household_billing_accounts.sql", "0012_nearsleep_library_privacy.sql",
-  "0013_nearstory_parent_beta.sql",
+  "0013_nearstory_parent_beta.sql", "0021_story_rollout_telemetry.sql", "0022_operational_outcome_outbox.sql",
 ];
 
 class Statement {
@@ -123,6 +123,7 @@ assert.equal(db.prepare("SELECT count(*) value FROM story_experiences WHERE id=?
 assert.equal(db.prepare("SELECT remaining_milliunits value FROM entitlements WHERE id='ent_one'").get().value, 40_000);
 
 const rootJobId = db.prepare("SELECT job_id value FROM story_experiences WHERE id=?").get(lostBody.story.id).value;
+assert.match(db.prepare("SELECT request_hash value FROM jobs WHERE id=?").get(rootJobId).value, /^[a-f0-9]{64}$/);
 const consentState = db.prepare("SELECT l.status leaseStatus,l.expires_at expiresAt,s.status storyStatus,c.status consentStatus,v.status voiceStatus,v.current_consent_id currentConsent,l.consent_id leaseConsent,v.provider_voice_id providerVoice FROM story_experiences s JOIN voice_consent_leases l ON l.id=s.consent_lease_id JOIN voice_consents c ON c.id=l.consent_id JOIN voices v ON v.id=l.voice_id WHERE s.id=?").get(lostBody.story.id);
 assert.deepEqual({ ...consentState, expiresAt: undefined }, { leaseStatus: "active", expiresAt: undefined, storyStatus: "queued", consentStatus: "active_verified", voiceStatus: "ready", currentConsent: "consent_one", leaseConsent: "consent_one", providerVoice: "pv_one" });
 assert.ok(consentState.expiresAt > Date.now());

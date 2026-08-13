@@ -1,0 +1,134 @@
+name: production-evidence
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  postgres-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Apply PostgreSQL migrations 0001-0005 in reviewed order
+        env: { READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres" }
+        run: for migration in postgres/migrations/0001_*.sql postgres/migrations/0002_*.sql postgres/migrations/0003_*.sql postgres/migrations/0004_*.sql postgres/migrations/0005_*.sql; do psql "$READINESS_CONTROL_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"; done
+      - name: Generate review-only live catalog candidate
+        env: { READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres" }
+        run: node --import tsx scripts/catalog-candidate.ts postgres/catalog-manifest.candidate.json
+      - name: Execute RLS role gate
+        env: { PGPASSWORD: postgres }
+        run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -1 -f scripts/postgres-rls-gate.sql
+      - uses: actions/upload-artifact@v4
+        with: { name: catalog-manifest-review-candidate, path: postgres/catalog-manifest.candidate.json }
+  operational-evidence:
+    runs-on: ubuntu-latest
+    environment: production-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm install --no-save playwright@1.55.0 axe-core@4.13.0 && npx playwright install --with-deps chromium
+      - id: google-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 900s
+      - name: load operational-evidence
+        env:
+          LOAD_URLS: ${{ vars.LOAD_URLS }}
+          LOAD_REQUESTS: ${{ vars.LOAD_REQUESTS }}
+          LOAD_MAX_P95_MS: ${{ vars.LOAD_MAX_P95_MS }}
+          LOAD_MAX_ERROR_BPS: ${{ vars.LOAD_MAX_ERROR_BPS }}
+        run: node --import tsx scripts/collect-operational-gate.ts load evidence/load.json
+      - name: restore operational-evidence
+        env:
+          CLOUD_SQL_RESTORE_OPERATION: ${{ secrets.CLOUD_SQL_RESTORE_OPERATION }}
+          RESTORE_EXPECTED_CHECKSUM: ${{ secrets.RESTORE_EXPECTED_CHECKSUM }}
+          RESTORE_EXPECTED_CATALOG_CHECKSUM: ${{ secrets.RESTORE_EXPECTED_CATALOG_CHECKSUM }}
+          RESTORED_DATABASE_URL: ${{ secrets.RESTORED_DATABASE_URL }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: node --import tsx scripts/restore-evidence-cli.ts evidence/restore.json
+      - name: accessibility operational-evidence
+        env: { ACCESSIBILITY_URLS: "${{ vars.ACCESSIBILITY_URLS }}" }
+        run: node --import tsx scripts/accessibility-gate.ts evidence/accessibility.json
+      - name: authenticated OWASP ZAP staging evidence
+        run: docker run --rm -v "$PWD/evidence:/zap/wrk:rw" zaproxy/zap-stable@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef zap-baseline.py -t "${{ vars.SECURITY_STAGING_URL }}" -J zap.json
+      - name: security operational-evidence
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.3 detect --source=/repo --report-format=json --report-path=/repo/evidence/gitleaks.json --no-banner
+          docker run --rm -v "$PWD:/src" semgrep/semgrep:1.130.0 semgrep scan --config=p/owasp-top-ten --json --output=/src/evidence/semgrep.json /src
+          node --import tsx scripts/security-evidence-cli.ts evidence/security.json evidence/gitleaks.json evidence/semgrep.json evidence/zap.json
+      - name: media operational-evidence
+        env:
+          STORY_CANARY_URL: ${{ vars.STORY_CANARY_URL }}
+          LEGACY_CANARY_URL: ${{ vars.LEGACY_CANARY_URL }}
+          MEDIA_CANARY_TOKEN: ${{ secrets.MEDIA_CANARY_TOKEN }}
+          MEDIA_CANARY_SERVICE_ACCOUNT: ${{ vars.MEDIA_CANARY_SERVICE_ACCOUNT }}
+          MEDIA_CANARY_AUDIENCE: ${{ vars.MEDIA_CANARY_AUDIENCE }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          RELEASE_ID: ${{ vars.RELEASE_ID }}
+        run: node --import tsx scripts/media-evidence-cli.ts evidence/media.json
+      - name: Mint fresh reconciliation identity
+        id: reconciliation-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ vars.OUTCOME_RECONCILIATION_AUDIENCE }}
+      - name: finalize durable 24h canary operational-evidence
+        env:
+          READINESS_CONTROL_DATABASE_URL: ${{ secrets.READINESS_CONTROL_DATABASE_URL }}
+          RELEASE_ID: ${{ vars.RELEASE_ID }}
+          OUTCOME_RECONCILIATION_URL: ${{ vars.OUTCOME_RECONCILIATION_URL }}
+          OUTCOME_RECONCILIATION_AUDIENCE: ${{ vars.OUTCOME_RECONCILIATION_AUDIENCE }}
+          CANARY_METRICS_TOKEN: ${{ steps.reconciliation-auth.outputs.id_token }}
+        run: node --import tsx scripts/canary-evidence-cli.ts finalize > evidence/canary.json
+      - name: Compose exact release claims from operational artifacts
+        env:
+          RELEASE_ID: ${{ vars.RELEASE_ID }}
+          EVIDENCE_PRINCIPAL: ${{ vars.EVIDENCE_PRINCIPAL }}
+          EVIDENCE_KEY_ID: ${{ vars.EVIDENCE_KEY_ID }}
+          EVIDENCE_KEY_VERSION: ${{ vars.EVIDENCE_KEY_VERSION }}
+          RELEASE_CLAIMS_TEMPLATE_JSON: ${{ secrets.RELEASE_CLAIMS_TEMPLATE_JSON }}
+        run: node --import tsx scripts/compose-release-claims.ts evidence evidence/release-claims.json
+      - name: KMS sign, production verify, and atomically consume nonce
+        id: kms-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 900s
+      - name: KMS sign and production verify
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.kms-auth.outputs.access_token }}
+          READINESS_CONTROL_DATABASE_URL: ${{ secrets.READINESS_CONTROL_DATABASE_URL }}
+          KMS_PROJECT: ${{ vars.KMS_PROJECT }}
+          KMS_LOCATION: ${{ vars.KMS_LOCATION }}
+          KMS_KEY_RING: ${{ vars.KMS_KEY_RING }}
+          KMS_KEY: ${{ vars.KMS_KEY }}
+          EVIDENCE_PRINCIPAL: ${{ vars.EVIDENCE_PRINCIPAL }}
+          EVIDENCE_KEY_ID: ${{ vars.EVIDENCE_KEY_ID }}
+          EVIDENCE_KEY_VERSION: ${{ vars.EVIDENCE_KEY_VERSION }}
+          EVIDENCE_TRUST_JSON: ${{ secrets.EVIDENCE_TRUST_JSON }}
+        run: node --import tsx scripts/sign-verify-release-evidence.ts evidence/release-claims.json evidence/release-evidence.immutable.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/release-evidence.immutable.json
+          if-no-files-found: error
+          retention-days: 90

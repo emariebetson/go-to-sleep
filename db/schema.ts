@@ -626,6 +626,8 @@ export const jobs = sqliteTable(
     progressStage: text("progress_stage").notNull().default("queued"),
     workerAttemptToken: text("worker_attempt_token"),
     workerLeaseExpiresAt: integer("worker_lease_expires_at", { mode: "timestamp_ms" }),
+    rolloutReleaseId: text("rollout_release_id"),
+    rolloutVersion: integer("rollout_version"),
     reservationId: text("reservation_id").references(() => usageReservations.id, { onDelete: "set null" }),
     consentId: text("consent_id").references(() => voiceConsents.id, { onDelete: "set null" }),
     consentVersion: text("consent_version"),
@@ -641,6 +643,12 @@ export const jobs = sqliteTable(
     index("jobs_story_dispatch_idx").on(table.type, table.status, table.workerLeaseExpiresAt, table.createdAt),
   ],
 );
+
+export const operationalOutcomeOutbox = sqliteTable("operational_outcome_outbox", {
+  id: text("id").primaryKey(), product: text("product", { enum: ["nearstory", "nearlegacy"] }).notNull(), operation: text("operation", { enum: ["attempt_started", "terminal"] }).notNull(),
+  jobId: text("job_id").notNull(), householdId: text("household_id").notNull(), attemptToken: text("attempt_token").notNull(), requestHash: text("request_hash").notNull(), releaseId: text("release_id").notNull(), releaseVersion: integer("release_version").notNull(), terminalStatus: text("terminal_status", { enum: ["succeeded", "failed", "dead_letter"] }),
+  deliveryStatus: text("delivery_status", { enum: ["pending", "leased", "delivered", "dead_letter"] }).notNull().default("pending"), attempts: integer("attempts").notNull().default(0), leaseToken: text("lease_token"), leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }), nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }).notNull(), payloadChecksum: text("payload_checksum").notNull(), createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(), updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(), deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+});
 
 export const storyExperiences = sqliteTable(
   "story_experiences",
@@ -1310,6 +1318,10 @@ export const mobileAccountBindings = sqliteTable("mobile_account_bindings", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  appId: text("app_id").notNull().default("unbound"),
+  environment: text("environment", { enum: ["SANDBOX", "PRODUCTION"] }).notNull().default("SANDBOX"),
+  bindingVersion: integer("binding_version").notNull().default(1),
+  status: text("status", { enum: ["active", "revoked"] }).notNull().default("active"),
 });
 
 export const integrationRightsReceipts = sqliteTable(
