@@ -5,8 +5,8 @@ import { verifyPrivateCanaryRuntimeSource } from "../scripts/verify-private-cana
 
 test("private canary runtime declares exact non-secret and service bindings while remaining dark", () => {
   const result = verifyPrivateCanaryRuntimeSource();
-  assert.equal(result.readyForProvisioning, true);
-  assert.deepEqual(result.missing, []);
+  assert.equal(result.readyForProvisioning, false);
+  assert.deepEqual(result.missing, ["0026_canary_entitlements.sql"]);
   assert.equal(result.productActivation, false);
   assert.equal(result.internalRouteActivation, false);
   assert.equal(result.migration, "0026_canary_entitlements.sql");
@@ -26,8 +26,8 @@ test("release runbook has exact migration and private binding verification with 
   assert.match(runbook, /Do not deploy|No product activation/i);
 });
 
-test("the Sites migration is inert table-only until authenticated trigger bootstrap", () => {
-  const migration = readFileSync(new URL("../drizzle/0026_canary_entitlements.sql", import.meta.url), "utf8");
-  assert.match(migration, /^CREATE TABLE `canary_entitlement_audit`/);
-  assert.doesNotMatch(migration, /CREATE TRIGGER|statement-breakpoint/);
+test("the incompatible canary schema is excluded from deployable Sites migrations", () => {
+  const pending = readFileSync(new URL("../docs/pending/0026_canary_entitlements.sql.disabled", import.meta.url), "utf8");
+  assert.match(pending, /^CREATE TABLE `canary_entitlement_audit`/);
+  assert.throws(() => readFileSync(new URL("../drizzle/0026_canary_entitlements.sql", import.meta.url), "utf8"), /ENOENT/);
 });
