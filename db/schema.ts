@@ -388,7 +388,7 @@ export const entitlements = sqliteTable(
     id: text("id").primaryKey(),
     householdId: text("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
     planId: text("plan_id").notNull(),
-    source: text("source", { enum: ["legacy", "stripe", "revenuecat", "manual"] }).notNull(),
+    source: text("source", { enum: ["legacy", "stripe", "revenuecat", "manual", "canary"] }).notNull(),
     status: text("status", { enum: ["active", "inactive", "grace", "revoked"] }).notNull(),
     allowanceMilliunits: integer("allowance_milliunits").notNull(),
     remainingMilliunits: integer("remaining_milliunits").notNull(),
@@ -407,6 +407,10 @@ export const entitlements = sqliteTable(
 );
 
 export const annualAllowanceRefills=sqliteTable("annual_allowance_refills",{entitlementId:text("entitlement_id").primaryKey().references(()=>entitlements.id,{onDelete:"cascade"}),householdId:text("household_id").notNull().references(()=>households.id,{onDelete:"cascade"}),anchorSeconds:integer("anchor_seconds").notNull(),refilledThroughSeconds:integer("refilled_through_seconds").notNull(),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),updatedAt:integer("updated_at",{mode:"timestamp_ms"}).notNull()},table=>[uniqueIndex("annual_allowance_household_entitlement_idx").on(table.householdId,table.entitlementId)]);
+
+export const canaryEntitlementAudit=sqliteTable("canary_entitlement_audit",{
+  id:text("id").primaryKey(),operation:text("operation",{enum:["issue","revoke"]}).notNull(),entitlementId:text("entitlement_id").notNull(),householdId:text("household_id").notNull().references(()=>households.id,{onDelete:"restrict"}),planId:text("plan_id",{enum:["nearyou_plus","nearyou_family"]}).notNull(),releaseId:text("release_id").notNull(),principal:text("principal").notNull(),reason:text("reason").notNull(),issuedAt:integer("issued_at").notNull(),notBefore:integer("not_before").notNull(),expiresAt:integer("expires_at").notNull(),idempotencyKey:text("idempotency_key").notNull().unique(),requestDigest:text("request_digest").notNull(),createdAt:integer("created_at").notNull(),
+});
 
 export const usageEvents = sqliteTable(
   "usage_events",
