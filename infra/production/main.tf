@@ -31,7 +31,7 @@ locals {
     local.catalog_manifest_checksum != "0000000000000000000000000000000000000000000000000000000000000000" &&
     try(local.catalog_manifest.generatedFrom, "") == "reviewed-supported-postgresql-16" &&
     try(local.catalog_manifest.reviewRequired, true) == false &&
-    try(local.catalog_manifest.migrationHead, "") == "0005_operational_evidence" &&
+    try(local.catalog_manifest.migrationHead, "") == "0006_private_canary_observation" &&
     try(local.catalog_manifest.schema, "") == "nearyou" &&
     try(local.catalog_manifest.forbidPublicExecute, false) == true &&
     try(local.catalog_manifest.requireForcedRls, []) == ["household_members", "tenant_records"] &&

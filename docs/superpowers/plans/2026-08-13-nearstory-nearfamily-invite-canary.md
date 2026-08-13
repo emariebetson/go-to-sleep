@@ -59,4 +59,3 @@
 - [ ] Enable only the exact invited household hashes; do not enable a percentage rollout.
 - [ ] Verify both web journeys from a clean browser session and retain the prior Sites/runtime version for rollback.
 - [ ] Start the durable 24-hour operational canary; broader/public access remains blocked until its signed evidence passes.
-

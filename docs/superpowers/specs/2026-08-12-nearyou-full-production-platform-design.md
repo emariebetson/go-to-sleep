@@ -1,7 +1,7 @@
 # NearYou Full Production Platform Design
 
-**Date:** August 12, 2026  
-**Status:** Approved direction (Option A), written specification pending final review  
+**Date:** August 12, 2026
+**Status:** Approved direction (Option A), written specification pending final review
 **Controlling objective:** Implement and independently verify the full production platform plan for NearFamily, NearStory, and NearLegacy while every product flag remains disabled until source and operational gates pass.
 
 ## Scope

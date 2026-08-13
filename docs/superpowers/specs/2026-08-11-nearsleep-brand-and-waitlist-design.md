@@ -1,6 +1,6 @@
 # NearSleep Brand and Product Waitlist Design
 
-**Status:** Approved design, pending user review of this written specification  
+**Status:** Approved design, pending user review of this written specification
 **Date:** August 11, 2026
 
 ## Goal

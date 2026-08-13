@@ -140,4 +140,3 @@
 - [ ] Submit a canary waitlist signup, confirm one encrypted D1 contact and one Google Sheet row, then exercise unsubscribe synchronization.
 - [ ] If hosted credentials or the external scheduler are unavailable, report the exact activation hold and leave the form fail-closed rather than weakening the design.
 - [ ] Record rollback version and final evidence.
-

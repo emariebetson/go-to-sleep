@@ -1,6 +1,5 @@
 name: canary-evidence-sampler
 on:
-  schedule: [{ cron: "* * * * *" }]
   workflow_dispatch:
 permissions: { contents: read, id-token: write }
 jobs:
