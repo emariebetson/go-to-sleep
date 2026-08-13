@@ -46,6 +46,13 @@ test("rollout audit trigger helper is policy-owned and not publicly executable",
   assert.match(migration, /REVOKE ALL ON FUNCTION nearyou\.reject_product_audit_mutation\(\) FROM PUBLIC/);
 });
 
+test("cutover checksum helper is policy-owned and not publicly executable", () => {
+  const migration = readFileSync(new URL("../postgres/migrations/0003_cutover_runtime.sql", import.meta.url), "utf8");
+  assert.match(migration, /ALTER FUNCTION nearyou\.cutover_state_checksum\(text\) OWNER TO nearyou_cutover_policy_owner/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION nearyou\.cutover_state_checksum\(text\) FROM PUBLIC/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION nearyou\.cutover_state_checksum\(text\) TO nearyou_cutover_policy_owner/);
+});
+
 test("tenant RLS avoids recursive membership policies and grants app-scoped writes", () => {
   const memberPolicy = sql.match(/CREATE POLICY member_select[\s\S]*?;/)?.[0] || "";
   assert.match(memberPolicy, /is_active_household_member\(household_id\)/);

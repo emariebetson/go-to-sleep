@@ -62,6 +62,9 @@ CREATE TABLE nearyou.cutover_operation_manifests (
 CREATE TABLE nearyou.cutover_target_rows(release_id text NOT NULL REFERENCES nearyou.cutover_runtime_state(release_id),household_id text NOT NULL,source_table text NOT NULL,source_id text NOT NULL,payload jsonb NOT NULL,source_sequence bigint NOT NULL CHECK(source_sequence>0),source_page_checksum text NOT NULL CHECK(source_page_checksum~'^[a-f0-9]{64}$'),PRIMARY KEY(release_id,household_id,source_table,source_id));
 ALTER TABLE nearyou.cutover_target_rows ADD COLUMN canonical_row_digest bytea CHECK(octet_length(canonical_row_digest)=32);
 CREATE FUNCTION nearyou.cutover_state_checksum(p_release text) RETURNS TABLE(checksum text,row_count bigint) LANGUAGE sql STABLE SECURITY DEFINER SET search_path=nearyou,nearyou_crypto,pg_temp AS $$ SELECT encode(digest(coalesce(string_agg(canonical_row_digest,'' ORDER BY convert_to(household_id,E'UTF8'),convert_to(source_table,E'UTF8'),convert_to(source_id,E'UTF8')),''::bytea),'sha256'),'hex'),count(*) FROM nearyou.cutover_target_rows WHERE release_id=p_release HAVING count(*)=count(canonical_row_digest) $$;
+ALTER FUNCTION nearyou.cutover_state_checksum(text) OWNER TO nearyou_cutover_policy_owner;
+REVOKE ALL ON FUNCTION nearyou.cutover_state_checksum(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION nearyou.cutover_state_checksum(text) TO nearyou_cutover_policy_owner;
 CREATE TABLE nearyou.rollback_runtime_state (
  release_id text PRIMARY KEY REFERENCES nearyou.cutover_runtime_state(release_id), capture_id text NOT NULL, drain_token text NOT NULL, status text NOT NULL CHECK(status IN ('drained','completed')),
  fence bigint NOT NULL CHECK(fence>0), high_water bigint NOT NULL CHECK(high_water>=0), cursor bigint, prior_manifest_checksum text NOT NULL CHECK(prior_manifest_checksum ~ '^[a-f0-9]{64}$'),
