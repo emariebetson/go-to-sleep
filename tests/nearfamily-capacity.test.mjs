@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { decideHouseholdCapacity, capacityMutationAllowed } from "../lib/nearfamily-capacity.ts";
+import { createNearFamilySummaryService } from "../lib/nearfamily-service.ts";
 
 const exactFamilyUsage = {
   members: 5,
@@ -92,4 +93,26 @@ test("a downgrade restricts new capacity without deleting data and remediation c
   for (let index = 2; index < 4; index += 1) database.prepare("UPDATE child_profiles SET archived_at=?,updated_at=? WHERE id=?").run(now, now, `child_${index}`);
   const remediated=database.prepare("SELECT state,exceeded_json FROM household_capacity_state WHERE household_id='house_1'").get();assert.equal(remediated.state,"within_limit");assert.equal(remediated.exceeded_json,"[]");
   assert.throws(() => database.prepare("UPDATE household_capacity_state SET version=1,state='within_limit',exceeded_json='[]' WHERE household_id='house_1'").run(), /capacity_state_authoritative/);
+});
+
+test("NearFamily summary returns the exact safe bundle shape", async () => {
+  const calls=[];
+  const db={prepare(sql){calls.push(sql);return{bind(householdId){assert.equal(householdId,"house_1");return{first:async()=>({
+    plan_id:"nearyou_family",state:"restricted",exceeded_json:'["children"]',members:4,children:6,voices:2,storage_bytes:25_000_000_000,
+    member_limit:5,child_limit:5,voice_limit:2,storage_limit:25_000_000_000,
+  })}}}}};
+  const summary=await createNearFamilySummaryService(db)("house_1");
+  assert.deepEqual(summary,{
+    planId:"nearyou_family",
+    capacity:{state:"restricted",usage:{members:4,children:6,voices:2,storageBytes:25_000_000_000},limits:{members:5,children:5,voices:2,storageBytes:25_000_000_000},exceeded:["children"]},
+    features:{nearsleep:true,nearstoryParentControlled:true,childAccounts:false,childMicrophone:false,posthumousSynthesis:false},
+  });
+  assert.equal(calls.length,1);assert.match(calls[0],/household_capacity_projection/);assert.match(calls[0],/household_capacity_state/);
+});
+
+test("NearFamily summary rejects missing and non-Family effective entitlements",async()=>{
+  for(const row of [null,{plan_id:"nearyou_plus",state:"within_limit",exceeded_json:"[]",members:1,children:1,voices:1,storage_bytes:1,member_limit:2,child_limit:2,voice_limit:1,storage_limit:5_000_000_000}]){
+    const db={prepare(){return{bind(){return{first:async()=>row}}}}};
+    await assert.rejects(()=>createNearFamilySummaryService(db)("house_1"),/NearFamily entitlement required/);
+  }
 });
