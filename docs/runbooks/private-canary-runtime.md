@@ -16,8 +16,10 @@ Provision these non-secret, reviewed values through the hosting environment: `CA
 
 ## Migration execution
 
+Migration `0026_canary_entitlements.sql` is intentionally excluded from the deployable `drizzle/` directory after the Sites executor rejected it. Its reviewed draft is preserved at `docs/pending/0026_canary_entitlements.sql.disabled`. The source verifier must remain red and both routes must remain dark until a disposable Sites database proves an authenticated, atomic trigger-bootstrap design.
+
 1. Create a D1 backup/recovery point and record its identifier outside source control.
-2. Preview the exact pending migration with Wrangler against the intended database. Confirm the final pending file is `0026_canary_entitlements.sql` and that no unexpected migration is listed.
+2. Do not rename or copy the pending draft into `drizzle/` until that separate review is complete.
 3. Apply using the supported deployment migration identity: `wrangler d1 migrations apply site-creator-d1 --remote --config <reviewed-production-config>`.
 4. Read back `d1_migrations` and verify `0026_canary_entitlements` is recorded exactly once.
 5. Query only counts and schema metadata: confirm `canary_entitlement_audit` exists, both immutability triggers exist, and zero canary rows exist before the authorized operation.
