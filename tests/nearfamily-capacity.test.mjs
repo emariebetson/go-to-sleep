@@ -55,7 +55,7 @@ const migrations = [
   "0006_nearyou_shared_foundation.sql", "0007_nearsleep_production_upgrade.sql",
   "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql",
   "0010_child_profile_pronunciation.sql", "0011_household_billing_accounts.sql",
-  "0012_nearsleep_library_privacy.sql", "0023_nearfamily_capacity.sql", "0024_nearfamily_capacity_authority.sql",
+  "0012_nearsleep_library_privacy.sql", "0023_nearfamily_capacity.sql", "0024_nearfamily_capacity_authority.sql", "0025_nearfamily_tenant_binding.sql",
 ];
 
 function applyMigration(database, name) {
@@ -137,4 +137,21 @@ test("canonical entitlement tie-break and clock expiry drive projection without 
   const expired=database.prepare("SELECT plan_id,state,exceeded_json FROM household_capacity_projection WHERE household_id='house_1'").get();
   assert.equal(expired.plan_id,"nearyou_plus");assert.equal(expired.state,"restricted");assert.deepEqual(JSON.parse(expired.exceeded_json),["children"]);
   assert.throws(()=>database.prepare("INSERT INTO child_profiles(id,household_id,nickname,normalized_nickname,pronunciation,created_at,updated_at) VALUES('child_after_expiry','house_1','After','after','',?,?)").run(now,now),/household_capacity_restricted|household_child_limit_reached/);
+});
+
+test("counted household records cannot bypass capacity by tenant reassignment",()=>{
+  const database=familyDatabase(),now=Date.now();
+  database.prepare("INSERT INTO users(id,email,subscription_status,credits_remaining,created_at,updated_at) VALUES('adult_2','two@example.test','active',1,?,?)").run(now,now);
+  database.prepare("INSERT INTO households(id,name,owner_user_id,created_at,updated_at) VALUES('house_2','Two','adult_2',?,?)").run(now,now);
+  database.prepare("INSERT INTO household_members(id,household_id,user_id,role,status,created_at,updated_at) VALUES('member_2','house_2','adult_2','owner','active',?,?)").run(now,now);
+  database.prepare("INSERT INTO entitlements(id,household_id,plan_id,source,status,allowance_milliunits,remaining_milliunits,valid_from,created_at,updated_at) VALUES('grant_2','house_2','nearyou_family','manual','active',120000,120000,?,?,?)").run(now-1000,now,now);
+  database.prepare("INSERT INTO child_profiles(id,household_id,nickname,normalized_nickname,pronunciation,created_at,updated_at) VALUES('child_other','house_2','Other','other','',?,?)").run(now,now);
+  database.prepare("INSERT INTO household_invitations(id,household_id,invited_by_user_id,invited_email,role,status,token_hash,expires_at,created_at,updated_at) VALUES('invite_other','house_2','adult_2','invite@example.test','listener','pending','token-other',?,?,?)").run(now+60_000,now,now);
+  database.prepare("UPDATE entitlements SET plan_id='nearyou_plus',updated_at=updated_at+1 WHERE id='grant_1'").run();
+  for(const statement of [
+    "UPDATE child_profiles SET household_id='house_1' WHERE id='child_other'",
+    "UPDATE household_members SET household_id='house_1' WHERE id='member_2'",
+    "UPDATE household_invitations SET household_id='house_1' WHERE id='invite_other'",
+  ])assert.throws(()=>database.exec(statement),/household_binding_immutable/);
+  assert.equal(database.prepare("SELECT children FROM household_capacity_projection WHERE household_id='house_1'").get().children,5);
 });
