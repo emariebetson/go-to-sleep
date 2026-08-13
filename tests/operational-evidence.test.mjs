@@ -15,7 +15,7 @@ import { composeReleaseClaims } from "../scripts/compose-release-claims.ts";
 import { operationalArtifact } from "../scripts/evidence-artifact.ts";
 import { canonicalEvidence } from "../lib/asymmetric-release-evidence.ts";
 import { buildRlsEvidence } from "../scripts/rls-evidence.ts";
-import { LIVE_CATALOG_QUERY } from "../scripts/postgres-catalog.ts";
+import { LIVE_CATALOG_QUERY, LIVE_CATALOG_SECURITY_QUERY } from "../scripts/postgres-catalog.ts";
 
 const hash = (c) => c.repeat(64);
 const base = { releaseId: "rel_12345678", artifact: hash("a"), schemaChecksum: hash("b"), startedAt: 1_700_000_000_000, endedAt: 1_700_086_400_000 };
@@ -34,6 +34,7 @@ test("catalog candidate and promotion bind complete live security to the current
 test("catalog records the reviewed absence of NearYou role memberships",()=>{
   assert.match(LIVE_CATALOG_QUERY,/SELECT 'membership','<none>',''/);
   assert.match(LIVE_CATALOG_QUERY,/NOT EXISTS[\s\S]*pg_auth_members/);
+  assert.match(LIVE_CATALOG_SECURITY_QUERY,/jsonb_agg\(c\.relname ORDER BY c\.relname\)/);
 });
 
 test("catalog CLI reports only bounded failure classes",()=>{
