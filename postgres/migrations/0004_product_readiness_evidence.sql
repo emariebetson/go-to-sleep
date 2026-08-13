@@ -9,7 +9,10 @@ CREATE TABLE nearyou.product_rollout_state(product text PRIMARY KEY CHECK(produc
 INSERT INTO nearyou.product_rollout_state(product,mode,percent) VALUES('nearstory','off',0),('nearfamily','off',0),('nearlegacy','off',0);
 CREATE TABLE nearyou.product_rollout_audit(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,product text NOT NULL,prior_version bigint NOT NULL,new_version bigint NOT NULL,prior_mode text NOT NULL,new_mode text NOT NULL,percent integer NOT NULL,release_id text,evidence_digest text,principal text NOT NULL,created_at timestamptz NOT NULL DEFAULT statement_timestamp());
 CREATE TABLE nearyou.product_canary_invites(product text NOT NULL,household_hash text NOT NULL,release_id text NOT NULL,expires_at timestamptz NOT NULL,PRIMARY KEY(product,household_hash,release_id));
-ALTER TABLE nearyou.product_readiness_evidence,nearyou.product_rollout_state,nearyou.product_rollout_audit,nearyou.product_canary_invites OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.product_readiness_evidence OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.product_rollout_state OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.product_rollout_audit OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.product_canary_invites OWNER TO nearyou_release_policy_owner;
 ALTER SEQUENCE nearyou.product_rollout_audit_id_seq OWNER TO nearyou_release_policy_owner;
 CREATE FUNCTION nearyou.reject_product_audit_mutation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN RAISE EXCEPTION 'product rollout audit immutable'; END $$;
 CREATE TRIGGER product_rollout_audit_immutable BEFORE UPDATE OR DELETE ON nearyou.product_rollout_audit FOR EACH ROW EXECUTE FUNCTION nearyou.reject_product_audit_mutation();

@@ -5,6 +5,32 @@ import { withPostgresTenant } from "../lib/postgres-tenant.ts";
 
 const sql = readFileSync(new URL("../postgres/migrations/0001_nearyou_tenant_foundation.sql", import.meta.url), "utf8");
 
+function hasTopLevelComma(value) {
+  let depth = 0;
+  for (const character of value) {
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+    else if (character === "," && depth === 0) return true;
+  }
+  return false;
+}
+
+function multiObjectOwnerStatements(source) {
+  return source
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter((statement) => /^ALTER\s+(?:FUNCTION|TABLE|SEQUENCE)\s+/i.test(statement) && /\sOWNER\s+TO\s+/i.test(statement))
+    .filter((statement) => hasTopLevelComma(statement.replace(/^ALTER\s+(?:FUNCTION|TABLE|SEQUENCE)\s+/i, "").split(/\sOWNER\s+TO\s+/i)[0]));
+}
+
+test("PostgreSQL ownership changes target exactly one object per ALTER statement", () => {
+  const migrations = ["0001_nearyou_tenant_foundation.sql", "0002_release_evidence_trust.sql", "0003_cutover_runtime.sql", "0004_product_readiness_evidence.sql", "0005_operational_evidence.sql"]
+    .map((name) => readFileSync(new URL(`../postgres/migrations/${name}`, import.meta.url), "utf8"))
+    .join("\n");
+  assert.equal(multiObjectOwnerStatements("ALTER FUNCTION nearyou.one(text,text), nearyou.two(text) OWNER TO owner").length, 1);
+  assert.deepEqual(multiObjectOwnerStatements(migrations), []);
+});
+
 test("tenant RLS avoids recursive membership policies and grants app-scoped writes", () => {
   const memberPolicy = sql.match(/CREATE POLICY member_select[\s\S]*?;/)?.[0] || "";
   assert.match(memberPolicy, /is_active_household_member\(household_id\)/);
