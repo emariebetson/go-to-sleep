@@ -43,3 +43,16 @@ test("Drizzle migration metadata tracks every migration through 0016", () => {
     assert.equal(snapshot.dialect, "sqlite");
   }
 });
+
+test("every packaged post-0016 migration contains executable SQL", () => {
+  for (let index = 17; index <= 25; index += 1) {
+    const prefix = String(index).padStart(4, "0");
+    const name = [
+      "cutover_source_runtime", "cutover_inventory_fence.generated", "mobile_entitlement_runtime",
+      "product_release_readiness", "story_rollout_telemetry", "operational_outcome_outbox",
+      "nearfamily_capacity", "nearfamily_capacity_authority", "nearfamily_tenant_binding",
+    ][index - 17];
+    const executable = source(`drizzle/${prefix}_${name}.sql`).replace(/^\s*--.*$/gm, "").trim();
+    assert.notEqual(executable, "", `${prefix} cannot be a comment-only production migration`);
+  }
+});
