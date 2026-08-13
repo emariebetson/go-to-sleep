@@ -9,7 +9,7 @@ import {execFileSync} from "node:child_process";
 import {readFileSync,readdirSync} from "node:fs";
 
 test("domain registry exactly covers every domain sqliteTable export with ordered columns, keys and explicit scope",()=>{
- const nonDomainTables=new Set(["operational_outcome_outbox"]),actual=[];for(const [exportName,value] of Object.entries(schema)){try{const config=getTableConfig(value);if(config.name&&config.columns.length&&!nonDomainTables.has(config.name))actual.push([exportName,config.name,config.columns.map(column=>column.name)])}catch{continue}}
+ const nonDomainTables=new Set(["operational_outcome_outbox","canary_entitlement_audit"]),actual=[];for(const [exportName,value] of Object.entries(schema)){try{const config=getTableConfig(value);if(config.name&&config.columns.length&&!nonDomainTables.has(config.name))actual.push([exportName,config.name,config.columns.map(column=>column.name)])}catch{continue}}
  assert.equal(actual.length,104);assert.equal(D1_DOMAIN_REGISTRY.length,actual.length);
  for(const [exportName,table,columns] of actual){const entry=D1_DOMAIN_REGISTRY.find(candidate=>candidate.table===table);assert.ok(entry,`missing ${table}`);assert.equal(entry.exportName,exportName);assert.deepEqual(entry.columns,columns);assert.ok(entry.primaryKey.length);for(const key of entry.primaryKey)assert.ok(columns.includes(key));assert.equal(entry.scope.kind,columns.includes("household_id")?"tenant":"global");}
  assert.equal(new Set(D1_DOMAIN_REGISTRY.map(entry=>entry.table)).size,104);

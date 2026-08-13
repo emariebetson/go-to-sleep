@@ -123,7 +123,7 @@ test("Story dead-letter telemetry retains the exact rollout grant and Cloudflare
   assert.match(migration,/rollout_release_id/);assert.match(migration,/rollout_version/);
   assert.deepEqual(Object.keys(hosting).sort(),["d1","project_id","r2"]);
   for(const name of ["OUTCOME_RUNTIME","OUTCOME_ENDPOINT","OUTCOME_AUDIENCE","OUTCOME_WIF_AUDIENCE","OUTCOME_SERVICE_ACCOUNT"])assert.ok(bindings.required_worker_bindings.vars.includes(name));
-  assert.deepEqual(bindings.required_worker_bindings.services,["OUTCOME_SUBJECT_TOKEN"]);
+  assert.deepEqual(bindings.required_worker_bindings.services,["OUTCOME_SUBJECT_TOKEN","READINESS_PG"]);
   const migrationJob=readFileSync(new URL("../infra/production/storage-queues.tf",import.meta.url),"utf8");
   const migrationContainer=migrationJob.slice(migrationJob.indexOf('command = ["node", "/app/dist/scripts/migrate.js"]'),migrationJob.indexOf("NEARYOU_READINESS_DATABASE_USER"));
   assert.doesNotMatch(migrationContainer,/OUTCOME_|EVIDENCE_COLLECTION_APPROVED/);

@@ -16,6 +16,7 @@
     "db:local:apply": "wrangler d1 migrations apply site-creator-d1 --local --config wrangler.local.jsonc",
     "platform:evidence-lint": "tsx scripts/release-readiness.ts",
     "platform:postgres-cutover": "tsx scripts/postgres-cutover.ts"
+    ,"platform:verify-private-canary": "tsx scripts/verify-private-canary-runtime.ts"
     ,"platform:register-rollout-controller": "tsx scripts/migrate.ts --register-rollout-controller"
   },
   "dependencies": {
