@@ -1,9 +1,5 @@
 {
   "project_id": "appgprj_6a79f8a66eb4819198bb42a2b26addea",
   "d1": "DB",
-  "r2": "AUDIO",
-  "required_worker_bindings": {
-    "vars": ["EVIDENCE_COLLECTION_APPROVED", "OUTCOME_RUNTIME", "OUTCOME_ENDPOINT", "OUTCOME_AUDIENCE", "OUTCOME_WIF_AUDIENCE", "OUTCOME_SERVICE_ACCOUNT"],
-    "services": ["OUTCOME_SUBJECT_TOKEN"]
-  }
+  "r2": "AUDIO"
 }

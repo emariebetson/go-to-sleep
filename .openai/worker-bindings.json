@@ -1,0 +1,13 @@
+{
+  "required_worker_bindings": {
+    "vars": [
+      "EVIDENCE_COLLECTION_APPROVED",
+      "OUTCOME_RUNTIME",
+      "OUTCOME_ENDPOINT",
+      "OUTCOME_AUDIENCE",
+      "OUTCOME_WIF_AUDIENCE",
+      "OUTCOME_SERVICE_ACCOUNT"
+    ],
+    "services": ["OUTCOME_SUBJECT_TOKEN"]
+  }
+}

@@ -116,12 +116,14 @@ test("Story dead-letter telemetry retains the exact rollout grant and Cloudflare
   const story=readFileSync(new URL("../lib/nearstory-stage-worker.ts",import.meta.url),"utf8");
   const migration=readFileSync(new URL("../drizzle/0021_story_rollout_telemetry.sql",import.meta.url),"utf8");
   const hosting=JSON.parse(readFileSync(new URL("../.openai/hosting.json",import.meta.url),"utf8"));
+  const bindings=JSON.parse(readFileSync(new URL("../.openai/worker-bindings.json",import.meta.url),"utf8"));
   assert.match(story,/rolloutReleaseId:grant\.releaseId,rolloutVersion:grant\.version/);
   assert.match(story,/releaseId:record\.rolloutReleaseId,releaseVersion:record\.rolloutVersion/);
   assert.doesNotMatch(story,/rel_worker_exhausted/);
   assert.match(migration,/rollout_release_id/);assert.match(migration,/rollout_version/);
-  for(const name of ["OUTCOME_RUNTIME","OUTCOME_ENDPOINT","OUTCOME_AUDIENCE","OUTCOME_WIF_AUDIENCE","OUTCOME_SERVICE_ACCOUNT"])assert.ok(hosting.required_worker_bindings.vars.includes(name));
-  assert.deepEqual(hosting.required_worker_bindings.services,["OUTCOME_SUBJECT_TOKEN"]);
+  assert.deepEqual(Object.keys(hosting).sort(),["d1","project_id","r2"]);
+  for(const name of ["OUTCOME_RUNTIME","OUTCOME_ENDPOINT","OUTCOME_AUDIENCE","OUTCOME_WIF_AUDIENCE","OUTCOME_SERVICE_ACCOUNT"])assert.ok(bindings.required_worker_bindings.vars.includes(name));
+  assert.deepEqual(bindings.required_worker_bindings.services,["OUTCOME_SUBJECT_TOKEN"]);
   const migrationJob=readFileSync(new URL("../infra/production/storage-queues.tf",import.meta.url),"utf8");
   const migrationContainer=migrationJob.slice(migrationJob.indexOf('command = ["node", "/app/dist/scripts/migrate.js"]'),migrationJob.indexOf("NEARYOU_READINESS_DATABASE_USER"));
   assert.doesNotMatch(migrationContainer,/OUTCOME_|EVIDENCE_COLLECTION_APPROVED/);
