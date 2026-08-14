@@ -4,14 +4,17 @@ import test from "node:test";
 
 test("public waitlist route is bounded, same-origin, encrypted, and atomically outboxed", async () => {
   const source = await readFile(new URL("../app/api/v1/marketing/waitlist/route.ts", import.meta.url), "utf8");
+  const service = await readFile(new URL("../lib/marketing-waitlist.ts", import.meta.url), "utf8");
   assert.match(source, /assertTrustedMutationOrigin\(request\)/);
+  assert.match(source, /idempotency-key/);
+  assert.match(source, /recordWaitlistSignup/);
   assert.match(source, /readJsonObject\(request, 4_096\)/);
   assert.match(source, /normalizeWaitlistInput/);
-  assert.match(source, /emailLookupHash/);
-  assert.match(source, /encryptWaitlistEmail/);
-  assert.match(source, /marketing_waitlist_sync/);
-  assert.match(source, /env\.DB\.batch/);
-  assert.match(source, /ensureMarketingWaitlistSchema/);
+  assert.match(service, /emailLookupHash/);
+  assert.match(service, /encryptWaitlistEmail/);
+  assert.match(service, /marketing_waitlist_sync/);
+  assert.match(service, /database\.batch/);
+  assert.match(service, /ensureMarketingWaitlistSchema/);
   assert.doesNotMatch(source, /console\.(log|error)\([^)]*email/);
 });
 

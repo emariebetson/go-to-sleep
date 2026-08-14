@@ -51,7 +51,7 @@ export async function processOneWaitlistSync(runtime: RuntimeEnv, encryptionKey:
     await runtime.DB.prepare("UPDATE marketing_waitlist_sync SET status='completed',attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(Date.now(), claim.id, token).run();
     return { processed: 1 };
   } catch {
-    await runtime.DB.prepare("UPDATE marketing_waitlist_sync SET status=CASE WHEN attempt_count>=5 THEN 'dead_letter' ELSE 'pending' END,next_attempt_at=?,error_code='sync_failed',attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(Date.now() + 60_000, Date.now(), claim.id, token).run();
+    await runtime.DB.prepare("UPDATE marketing_waitlist_sync SET status=CASE WHEN attempt_count>=5 THEN 'dead_letter' ELSE 'pending' END,next_attempt_at=?,error_code=CASE WHEN error_code LIKE 'request_sha256:%' THEN error_code ELSE 'sync_failed' END,attempt_token=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND attempt_token=?").bind(Date.now() + 60_000, Date.now(), claim.id, token).run();
     throw new Error("waitlist_sync_failed");
   }
 }

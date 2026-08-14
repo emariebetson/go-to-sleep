@@ -21,17 +21,22 @@ async function render(path = "/") {
   }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("server-renders the NearSleep landing page and coming-soon product family", async () => {
+test("server-renders the NearYou Still company home and the moved NearSleep hub", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
+  assert.match(html, /Near you, <em>still/);
   assert.match(html, /NearSleep/);
   assert.match(html, /NearStory/);
   assert.match(html, /NearFamily/);
   assert.match(html, /NearLegacy/);
-  assert.match(html, /Your voice/);
-  assert.match(html, /Create tonight/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
+
+  const nearSleepResponse = await render("/nearsleep");
+  assert.equal(nearSleepResponse.status, 200);
+  const nearSleep = await nearSleepResponse.text();
+  assert.match(nearSleep, /Your voice/);
+  assert.match(nearSleep, /Create tonight/);
 });
 
 test("navigation uses deployment-safe native links", async () => {

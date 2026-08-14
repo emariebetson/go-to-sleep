@@ -1,28 +1,24 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const candidateHost = requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "nearnight.app";
-  const host = /^[a-z0-9.-]+(?::\d+)?$/i.test(candidateHost) ? candidateHost : "nearnight.app";
-  const protocol = host.startsWith("localhost") ? "http" : "https";
-  const metadataBase = new URL(`${protocol}://${host}`);
+export function generateMetadata(): Metadata {
+  const metadataBase = new URL("https://nearyoustill.com");
   return {
     metadataBase,
-    applicationName: "NearSleep by NearYou",
-    title: { default: "NearSleep — Your voice, their gentlest bedtime", template: "%s · NearSleep" },
-    description: "Create calming, personalized bedtime audio for your baby in the voice they know best—yours.",
+    applicationName: "NearYou Still",
+    title: { default: "NearYou Still — Near you, still.", template: "%s · NearYou Still" },
+    description: "Thoughtful tools that help families keep comfort, stories, connection, and memories near.",
     openGraph: {
-      title: "NearSleep — Your voice, their gentlest bedtime",
-      description: "Personalized baby bedtime stories in a parent's familiar voice.",
+      title: "NearYou Still — Near you, still.",
+      description: "Thoughtful tools for the moments families choose to keep close.",
       type: "website",
-      images: [{ url: new URL("/og.png", metadataBase), width: 1200, height: 630, alt: "NearSleep — Your voice. Their gentlest bedtime." }],
+      siteName: "NearYou Still",
+      images: [{ url: new URL("/og-nearyoustill.png", metadataBase), width: 1200, height: 630, alt: "NearYou Still — Near you, still." }],
     },
-    twitter: { card: "summary_large_image", images: [new URL("/og.png", metadataBase)] },
+    twitter: { card: "summary_large_image", images: [new URL("/og-nearyoustill.png", metadataBase)] },
     other: {
       "nearyou-umbrella": "NearYou",
-      "nearyou-product-family": "NearSleep",
+      "nearyou-public-namespace": "NearYouStill",
       "nearyou-compatible-product": "Nearnight",
       "nearyou-api-version": "v1",
     },

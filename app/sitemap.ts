@@ -1,9 +1,13 @@
 import type { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = process.env.PUBLIC_APP_URL || "https://nearnight.app";
+  const base = "https://nearyoustill.com";
   return [
     ["", 1, "weekly"],
+    ["/nearsleep", 1, "weekly"],
+    ["/nearstory", 0.7, "monthly"],
+    ["/nearfamily", 0.7, "monthly"],
+    ["/nearlegacy", 0.7, "monthly"],
     ["/pricing", 0.8, "monthly"],
     ["/safety", 0.8, "monthly"],
     ["/privacy", 0.3, "yearly"],

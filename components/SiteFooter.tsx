@@ -1,5 +1,5 @@
 import { Link } from "./Link";
-import { Brand } from "./Brand";
+import { CompanyBrand } from "./CompanyBrand";
 
 export function SiteFooter() {
   return (
@@ -7,13 +7,14 @@ export function SiteFooter() {
       <div className="container">
         <div className="footer-top">
           <div>
-            <Brand light />
+            <CompanyBrand light />
             <p style={{ maxWidth: 330, fontSize: ".85rem", marginTop: 14 }}>
-              Familiar-voice bedtime audio, created by parents and played by parents.
+              Thoughtful tools that help families keep what matters near.
             </p>
           </div>
           <nav className="footer-links" aria-label="Footer navigation">
-            <Link href="/#how-it-works">How it works</Link>
+            <Link href="/#products">Products</Link>
+            <Link href="/nearsleep">NearSleep</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/safety">Safety</Link>
             <Link href="/privacy">Privacy</Link>
@@ -21,8 +22,8 @@ export function SiteFooter() {
           </nav>
         </div>
         <div className="footer-bottom">
-          <span>© {new Date().getFullYear()} NearSleep by NearYou. Made for the long nights.</span>
-          <span>Not medical advice or a sleep-training program.</span>
+          <span>© {new Date().getFullYear()} NearYou. Near you, still.</span>
+          <span>NearYouStill is our public home—not a separate company or plan.</span>
         </div>
       </div>
     </footer>
