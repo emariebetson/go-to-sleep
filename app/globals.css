@@ -207,10 +207,13 @@ img { max-width: 100%; }
 .product-waitlist-cta-default,.product-waitlist-cta-hover { display:flex; align-items:center; justify-content:center; gap:8px; transition:transform .28s cubic-bezier(.22,1,.36,1),opacity .2s ease; }
 .product-waitlist-cta-hover { position:absolute; inset:0; z-index:1; color:#fff; background:var(--card-cta-accent,var(--periwinkle-deep)); opacity:0; transform:translateY(105%); }
 .product-waitlist-cta-hover > span { transition:transform .28s cubic-bezier(.22,1,.36,1); transform:translateX(-4px); }
+.product-waitlist-cta:focus-visible .product-waitlist-cta-default { opacity:0; transform:translateY(-105%); }
+.product-waitlist-cta:focus-visible .product-waitlist-cta-hover { opacity:1; transform:translateY(0); }
+.product-waitlist-cta:focus-visible .product-waitlist-cta-hover > span { transform:translateX(0); }
 @media (hover: hover) and (pointer: fine) {
-  .product-waitlist-cta:hover .product-waitlist-cta-default,.product-waitlist-cta:focus-visible .product-waitlist-cta-default { opacity:0; transform:translateY(-105%); }
-  .product-waitlist-cta:hover .product-waitlist-cta-hover,.product-waitlist-cta:focus-visible .product-waitlist-cta-hover { opacity:1; transform:translateY(0); }
-  .product-waitlist-cta:hover .product-waitlist-cta-hover > span,.product-waitlist-cta:focus-visible .product-waitlist-cta-hover > span { transform:translateX(0); }
+  .product-waitlist-cta:hover .product-waitlist-cta-default { opacity:0; transform:translateY(-105%); }
+  .product-waitlist-cta:hover .product-waitlist-cta-hover { opacity:1; transform:translateY(0); }
+  .product-waitlist-cta:hover .product-waitlist-cta-hover > span { transform:translateX(0); }
 }
 .status-badge { display:inline-flex; padding:6px 10px; border-radius:999px; background:var(--mist); color:var(--periwinkle-deep); font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 .status-badge.available { background:#e4eee3; color:#34583a; }

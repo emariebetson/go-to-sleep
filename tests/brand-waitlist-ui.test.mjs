@@ -35,10 +35,17 @@ test("waitlist form requires explicit consent and exposes accessible status", as
 });
 
 test("coming-soon product cards reveal an accessible animated waitlist invitation", async () => {
-  const [family, styles] = await Promise.all([
+  const [family, styles, home, pricing, nearSleep] = await Promise.all([
     text("components/ProductFamily.tsx"),
     text("app/globals.css"),
+    text("app/page.tsx"),
+    text("app/pricing/page.tsx"),
+    text("app/nearsleep/page.tsx"),
   ]);
+  assert.match(home, /<ProductFamily source="home" animatedWaitlistCta \/>/);
+  assert.doesNotMatch(pricing, /animatedWaitlistCta/);
+  assert.doesNotMatch(nearSleep, /animatedWaitlistCta/);
+  assert.match(family, /animatedWaitlistCta && product\.availability === "coming_soon"/);
   assert.match(family, /product\.availability === "coming_soon"/);
   assert.match(family, /className="btn btn-secondary product-waitlist-cta"/);
   assert.match(family, /className="product-waitlist-cta-default"/);
@@ -51,4 +58,6 @@ test("coming-soon product cards reveal an accessible animated waitlist invitatio
   assert.match(styles, /\.product-waitlist-cta:focus-visible/);
   assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\)/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.ok(styles.indexOf(".product-waitlist-cta:focus-visible") < styles.indexOf("@media (hover: hover) and (pointer: fine)"));
+  assert.ok(styles.lastIndexOf(".product-waitlist-cta:hover") > styles.indexOf("@media (hover: hover) and (pointer: fine)"));
 });
