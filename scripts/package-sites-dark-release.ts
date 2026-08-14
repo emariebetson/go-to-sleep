@@ -42,15 +42,19 @@ async function sha256(path: string) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
-export async function stageDarkSitesRelease(input: { root: URL; stageDirectory: string }) {
-  if ((await readdir(input.stageDirectory)).length !== 0) throw new Error("Sites stage must be empty");
-  const root = fileURLToPath(input.root);
+async function validateSourceMigrations(root: string) {
   const actualNames = (await readdir(join(root, "drizzle"))).filter((name) => name.endsWith(".sql")).sort();
   if (JSON.stringify(actualNames) !== JSON.stringify(FILES.map(([name]) => name))) throw new Error("Sites migration source set invalid");
   for (const [name, expected] of FILES) {
     const path = join(root, "drizzle", name);
     if (!(await stat(path)).isFile() || await sha256(path) !== expected) throw new Error("Sites migration source checksum invalid");
   }
+}
+
+export async function stageDarkSitesRelease(input: { root: URL; stageDirectory: string }) {
+  if ((await readdir(input.stageDirectory)).length !== 0) throw new Error("Sites stage must be empty");
+  const root = fileURLToPath(input.root);
+  await validateSourceMigrations(root);
 
   await mkdir(join(input.stageDirectory, "drizzle"), { recursive: true });
   for (const [name] of DEPLOYED) await cp(join(root, "drizzle", name), join(input.stageDirectory, "drizzle", name));
@@ -64,6 +68,37 @@ export async function stageDarkSitesRelease(input: { root: URL; stageDirectory: 
     deployedMigrations: Object.freeze(DEPLOYED.map(([name]) => name)),
     deferredMigrations: Object.freeze(DEFERRED.map(([name]) => name)),
   });
+}
+
+export async function packageExistingSitesRelease(input: { root: URL; archive: string; officialHelper: string }) {
+  if (!input.archive.startsWith("/") || !input.officialHelper.startsWith("/")) throw new Error("Sites package paths invalid");
+  const stage = await mkdtemp(join(tmpdir(), "nearyou-sites-existing-stage-"));
+  const extracted = await mkdtemp(join(tmpdir(), "nearyou-sites-existing-verify-"));
+  try {
+    const root = fileURLToPath(input.root);
+    await validateSourceMigrations(root);
+    await cp(join(root, "dist"), join(stage, "dist"), { recursive: true });
+    await rm(join(stage, "dist/.openai/drizzle"), { recursive: true, force: true });
+    await mkdir(join(stage, ".openai"), { recursive: true });
+    await cp(join(root, ".openai/hosting.json"), join(stage, ".openai/hosting.json"));
+    await mkdir(dirname(input.archive), { recursive: true });
+    await execFile(input.officialHelper, [stage, input.archive]);
+    await execFile("tar", ["-xzf", input.archive, "-C", extracted]);
+    await readdir(join(extracted, "dist/.openai/drizzle")).then(
+      () => { throw new Error("Sites existing-schema package contains migrations"); },
+      (error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; },
+    );
+    if (!(await stat(join(extracted, "dist/server/index.js"))).isFile() || !(await stat(join(extracted, "dist/.openai/hosting.json"))).isFile()) throw new Error("Sites package runtime invalid");
+    return Object.freeze({
+      requiredSchemaHead: DEPLOYED.at(-1)![0],
+      requiredMigrations: Object.freeze(DEPLOYED.map(([name]) => name)),
+      packagedMigrations: Object.freeze([] as string[]),
+      archive: input.archive,
+    });
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+    await rm(extracted, { recursive: true, force: true });
+  }
 }
 
 export async function packageDarkSitesRelease(input: { root: URL; archive: string; officialHelper: string }) {

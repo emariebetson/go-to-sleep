@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { packageDarkSitesRelease, stageDarkSitesRelease } from "../scripts/package-sites-dark-release.ts";
+import { packageDarkSitesRelease, packageExistingSitesRelease, stageDarkSitesRelease } from "../scripts/package-sites-dark-release.ts";
 
 test("Sites dark release packages only the live D1 migration prefix and preserves later source migrations", async () => {
   const root = new URL("../", import.meta.url);
@@ -46,6 +46,22 @@ test("official Sites archive contains the exact 0000 through 0016 byte-identical
     });
     assert.equal(result.deployedMigrations.length, 17);
     assert.equal(result.deferredMigrations.length, 9);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("existing-schema Sites archive contains no migration payload and retains the runtime", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "nearyou-sites-existing-"));
+  const archive = join(temp, "site.tar.gz");
+  try {
+    const result = await packageExistingSitesRelease({
+      root: new URL("../", import.meta.url),
+      archive,
+      officialHelper: "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+    });
+    assert.equal(result.requiredSchemaHead, "0016_marketing_waitlist.sql");
+    assert.equal(result.packagedMigrations.length, 0);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
