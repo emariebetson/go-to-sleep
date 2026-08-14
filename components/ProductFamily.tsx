@@ -1,7 +1,7 @@
 import { Link } from "./Link";
 import { PRODUCTS } from "@/lib/nearyoustill-products";
 
-export function ProductFamily({ source }: { source: "home" | "pricing" }) {
+export function ProductFamily({ source, animatedWaitlistCta = false }: { source: "home" | "pricing"; animatedWaitlistCta?: boolean }) {
   void source;
   return <section className="section product-family" id="products">
     <div className="container">
@@ -10,7 +10,12 @@ export function ProductFamily({ source }: { source: "home" | "pricing" }) {
         {PRODUCTS.map((product) => <article className={`product-card product-card-${product.accent}`} key={product.slug}>
           <span className={`status-badge ${product.availability === "live" ? "available" : ""}`}>{product.availability === "live" ? "Available now" : "Coming soon"}</span>
           <h3>{product.name}</h3><p>{product.description}</p>
-          <Link className={product.availability === "live" ? "btn btn-primary" : "btn btn-secondary"} href={product.path}>{product.availability === "live" ? "Explore NearSleep" : `Meet ${product.name}`}</Link>
+          {animatedWaitlistCta && product.availability === "coming_soon"
+            ? <Link className="btn btn-secondary product-waitlist-cta" href={product.path}>
+                <span className="product-waitlist-cta-default">{`Meet ${product.name}`}</span>
+                <span aria-hidden="true" className="product-waitlist-cta-hover">Join the waitlist <span>→</span></span>
+              </Link>
+            : <Link className={product.availability === "live" ? "btn btn-primary" : "btn btn-secondary"} href={product.path}>{product.availability === "live" ? "Explore NearSleep" : `Meet ${product.name}`}</Link>}
         </article>)}
       </div>
     </div>

@@ -46,7 +46,7 @@ export default function CompanyHome() {
           </div>
         </div>
       </section>
-      <ProductFamily source="home" />
+      <ProductFamily source="home" animatedWaitlistCta />
       <section className="company-promise section">
         <div className="container center">
           <span className="eyebrow">Our promise</span>
