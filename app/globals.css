@@ -200,6 +200,18 @@ img { max-width: 100%; }
 .product-card { padding:30px; border:1px solid var(--line); border-radius:24px; background:var(--paper); box-shadow:0 10px 35px rgba(48,52,83,.06); }
 .product-card h3 { margin:14px 0 8px; font-family:var(--font-display),serif; font-size:2rem; }
 .product-card p { color:var(--ink-soft); }
+.product-card-story { --card-cta-accent:#666c9d; }
+.product-card-family { --card-cta-accent:#597057; }
+.product-card-legacy { --card-cta-accent:#865f4c; }
+.product-waitlist-cta { position:relative; min-width:190px; overflow:hidden; isolation:isolate; }
+.product-waitlist-cta-default,.product-waitlist-cta-hover { display:flex; align-items:center; justify-content:center; gap:8px; transition:transform .28s cubic-bezier(.22,1,.36,1),opacity .2s ease; }
+.product-waitlist-cta-hover { position:absolute; inset:0; z-index:1; color:#fff; background:var(--card-cta-accent,var(--periwinkle-deep)); opacity:0; transform:translateY(105%); }
+.product-waitlist-cta-hover > span { transition:transform .28s cubic-bezier(.22,1,.36,1); transform:translateX(-4px); }
+@media (hover: hover) and (pointer: fine) {
+  .product-waitlist-cta:hover .product-waitlist-cta-default,.product-waitlist-cta:focus-visible .product-waitlist-cta-default { opacity:0; transform:translateY(-105%); }
+  .product-waitlist-cta:hover .product-waitlist-cta-hover,.product-waitlist-cta:focus-visible .product-waitlist-cta-hover { opacity:1; transform:translateY(0); }
+  .product-waitlist-cta:hover .product-waitlist-cta-hover > span,.product-waitlist-cta:focus-visible .product-waitlist-cta-hover > span { transform:translateX(0); }
+}
 .status-badge { display:inline-flex; padding:6px 10px; border-radius:999px; background:var(--mist); color:var(--periwinkle-deep); font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 .status-badge.available { background:#e4eee3; color:#34583a; }
 .product-card details { margin-top:18px; }
@@ -267,4 +279,7 @@ img { max-width: 100%; }
   .session-card { grid-template-columns:50px 1fr; }.session-card .status-pill { grid-column:2; justify-self:start; }.metric-grid { grid-template-columns:1fr 1fr; }
 }
 
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior:auto!important; animation:none!important; transition:none!important; }
+  .product-waitlist-cta-default,.product-waitlist-cta-hover,.product-waitlist-cta-hover > span { transition:none!important; }
+}
