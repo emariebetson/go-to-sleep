@@ -28,7 +28,13 @@ Record the operator, America/Chicago timestamp, repository commit/tag, Sites ver
 
 ### Sites D1 migration boundary for the dark website release
 
-The production D1 schema currently ends at `0016_marketing_waitlist.sql`. Package this website release with `scripts/package-sites-dark-release.ts`, which includes the exact `0000`–`0016` prefix and removes stale built migration copies before invoking the official Sites packager. Migrations `0017`–`0025` remain reviewed source material but are deliberately deferred from the Sites artifact while NearStory, NearFamily, NearLegacy, canary, and infrastructure gates remain dark. Do not treat this packaging boundary as permission to activate those products. A later release must use a separately reviewed, Sites-compatible migration path and live ledger evidence before changing the boundary.
+The production D1 schema currently ends at `0016_marketing_waitlist.sql`. Sites rejected archives that repeated even this already-live prefix with `incomplete input`, while the live database remained unchanged. For this existing production database, package the website with `packageExistingSitesRelease` from `scripts/package-sites-dark-release.ts`: it validates the exact source migration set and hashes, invokes the official Sites packager, and then requires the final archive to contain no migration payload. Use this mode only after read-only live-schema inspection confirms the required `0016` tables. The separate prefix mode remains a blank-database verification tool, not the production deployment artifact. Migrations `0017`–`0025` remain reviewed source material and are deliberately excluded while NearStory, NearFamily, NearLegacy, canary, and infrastructure gates remain dark. Do not treat this packaging boundary as permission to activate those products. A later release must use a separately reviewed, Sites-compatible migration path and live ledger evidence before changing the boundary.
+
+```sh
+node --import tsx scripts/package-sites-dark-release.ts --mode existing-schema --archive "$ARCHIVE" --helper "$SITES_HELPER"
+```
+
+The CLI has no default packaging mode and rejects an invocation that omits `--mode existing-schema`.
 9. Enable the `www` redirect. Re-run acceptance. Then separately enable `CANONICAL_HOST_REDIRECT_ENABLED=true` for old-host page traffic.
 10. Observe for at least 24 hours. After seven clean days, remove the former Google callback and separately review denial or redirection of remaining old-host API traffic.
 
