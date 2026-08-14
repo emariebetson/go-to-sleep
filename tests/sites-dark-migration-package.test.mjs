@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { packageDarkSitesRelease, packageExistingSitesRelease, stageDarkSitesRelease } from "../scripts/package-sites-dark-release.ts";
+
+const execFile = promisify(execFileCallback);
 
 test("Sites dark release packages only the live D1 migration prefix and preserves later source migrations", async () => {
   const root = new URL("../", import.meta.url);
@@ -62,6 +66,32 @@ test("existing-schema Sites archive contains no migration payload and retains th
     });
     assert.equal(result.requiredSchemaHead, "0016_marketing_waitlist.sql");
     assert.equal(result.packagedMigrations.length, 0);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("production CLI requires existing-schema mode and emits an archive without migrations", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "nearyou-sites-existing-cli-"));
+  const archive = join(temp, "site.tar.gz");
+  const node = process.execPath;
+  try {
+    await execFile(node, [
+      "--import", "tsx",
+      new URL("../scripts/package-sites-dark-release.ts", import.meta.url).pathname,
+      "--mode", "existing-schema",
+      "--archive", archive,
+      "--helper", "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+    ]);
+    const { stdout } = await execFile("tar", ["-tzf", archive]);
+    assert.match(stdout, /^dist\/server\/index\.js$/m);
+    assert.doesNotMatch(stdout, /dist\/\.openai\/drizzle/);
+    await assert.rejects(execFile(node, [
+      "--import", "tsx",
+      new URL("../scripts/package-sites-dark-release.ts", import.meta.url).pathname,
+      "--archive", archive,
+      "--helper", "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+    ]));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

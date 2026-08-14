@@ -127,13 +127,13 @@ export async function packageDarkSitesRelease(input: { root: URL; archive: strin
 }
 
 function parseArgs(args: string[]) {
-  if (args.length !== 4 || args[0] !== "--archive" || args[2] !== "--helper") throw new Error("Sites package arguments invalid");
-  return { archive: resolve(args[1]!), officialHelper: resolve(args[3]!) };
+  if (args.length !== 6 || args[0] !== "--mode" || args[1] !== "existing-schema" || args[2] !== "--archive" || args[4] !== "--helper") throw new Error("Sites package arguments invalid");
+  return { archive: resolve(args[3]!), officialHelper: resolve(args[5]!) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const options = parseArgs(process.argv.slice(2));
-  packageDarkSitesRelease({ root: new URL("../", import.meta.url), ...options })
+  packageExistingSitesRelease({ root: new URL("../", import.meta.url), ...options })
     .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`))
     .catch(() => { process.stderr.write("Sites dark package failed\n"); process.exitCode = 1; });
 }
