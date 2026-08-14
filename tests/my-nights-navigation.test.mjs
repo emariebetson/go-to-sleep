@@ -1,17 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mock, test } from "node:test";
+import test from "node:test";
+import { safeRelativeReturnPath, signInPath } from "../lib/auth-navigation.ts";
+import { myNightsHref } from "../lib/my-nights-navigation.ts";
 
-mock.module("@/lib/auth", {
-  exports: {
-    signInPath(returnTo) {
-      return `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
-    },
-  },
-});
-
-test("My nights opens the private dashboard for an authenticated user", async () => {
-  const { myNightsHref } = await import("../lib/my-nights-navigation.ts");
+test("My nights opens the private dashboard for an authenticated user", () => {
   assert.equal(
     myNightsHref({
       userId: "u",
@@ -23,9 +16,16 @@ test("My nights opens the private dashboard for an authenticated user", async ()
   );
 });
 
-test("My nights sends an unauthenticated user through sign in and back to the library", async () => {
-  const { myNightsHref } = await import("../lib/my-nights-navigation.ts");
+test("My nights sends an unauthenticated user through sign in and back to the library", () => {
   assert.equal(myNightsHref(null), "/sign-in?returnTo=%2Flibrary");
+});
+
+test("sign-in navigation preserves safe relative destinations and rejects auth or external destinations", () => {
+  assert.equal(signInPath("/pricing?plan=plus#checkout"), "/sign-in?returnTo=%2Fpricing%3Fplan%3Dplus%23checkout");
+  assert.equal(safeRelativeReturnPath("https://attacker.example/library"), "/studio");
+  assert.equal(safeRelativeReturnPath("//attacker.example/library"), "/studio");
+  assert.equal(safeRelativeReturnPath("/api/auth/callback/google"), "/studio");
+  assert.equal(safeRelativeReturnPath("/sign-in"), "/studio");
 });
 
 test("SiteHeader resolves My nights from the current session", () => {
