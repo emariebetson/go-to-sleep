@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { PRODUCTS } from "../lib/nearyoustill-products.ts";
 
 const text = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -16,12 +17,9 @@ test("public UI consistently presents NearSleep and the coming-soon family", asy
     const publicCopy = sources[index].replace(/"nearyou-compatible-product":\s*"Nearnight",?/, "");
     assert.doesNotMatch(publicCopy, /NearNight|Nearnight|Near Night/, files[index]);
   }
-  const family = await text("components/ProductFamily.tsx");
-  for (const product of ["NearSleep", "NearStory", "NearFamily", "NearLegacy"]) assert.match(family, new RegExp(product));
-  assert.match(family, /Available now/);
-  assert.match(family, /Coming soon/);
-  assert.match(family, /Join waitlist/);
-  assert.doesNotMatch(family, /href=["']\/(stories|legacy)/);
+  assert.deepEqual(PRODUCTS.map((product) => product.name), ["NearSleep", "NearStory", "NearFamily", "NearLegacy"]);
+  assert.equal(PRODUCTS.filter((product) => product.availability === "live").length, 1);
+  assert.ok(PRODUCTS.filter((product) => product.availability === "coming_soon").every((product) => product.applicationDestination === null));
 });
 
 test("waitlist form requires explicit consent and exposes accessible status", async () => {

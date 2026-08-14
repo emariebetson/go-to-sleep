@@ -1,6 +1,9 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { signInPath } from "@/lib/auth-navigation";
+
+export { safeRelativeReturnPath, signInPath } from "@/lib/auth-navigation";
 
 export type AppUser = {
   userId: string;
@@ -80,21 +83,6 @@ export async function requirePageUser(returnTo: string): Promise<AppUser> {
   if (user) return user;
   if (process.env.NODE_ENV !== "production") return previewUser;
   redirect(signInPath(returnTo));
-}
-
-export function signInPath(returnTo = "/studio") {
-  return `/sign-in?returnTo=${encodeURIComponent(safeRelativeReturnPath(returnTo))}`;
-}
-
-export function safeRelativeReturnPath(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/studio";
-  try {
-    const url = new URL(value, "https://nearnight.local");
-    if (url.origin !== "https://nearnight.local" || url.pathname.startsWith("/api/auth") || url.pathname === "/sign-in") return "/studio";
-    return `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    return "/studio";
-  }
 }
 
 export function isAdmin(user: AppUser): boolean {

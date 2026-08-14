@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { featureFlagsFromEnv, nearSleepLibraryPrivacyEnabled } from "@/lib/nearyou-foundation";
+import { canonicalRedirect } from "@/lib/canonical-host";
 
 interface Env {
   ASSETS: Fetcher;
@@ -16,6 +17,7 @@ interface Env {
   NEARYOU_ENABLE_NEARSLEEP_LIBRARY_RECONCILIATION?: string;
   NEARYOU_ENABLE_STORY?: string;
   NEARYOU_ENABLE_LEGACY_ARCHIVE?: string;
+  CANONICAL_HOST_REDIRECT_ENABLED?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -39,6 +41,9 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    const redirect = canonicalRedirect(request, env.CANONICAL_HOST_REDIRECT_ENABLED === "true");
+    if (redirect) return redirect;
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];

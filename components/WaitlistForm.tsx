@@ -2,9 +2,10 @@
 
 import { FormEvent, useRef, useState } from "react";
 import { Link } from "./Link";
+import { recordGrowthEvent } from "./GrowthAnalytics";
 
 type Product = "nearstory" | "nearfamily" | "nearlegacy";
-type Props = { initialProduct: Product; source: "home" | "pricing" };
+type Props = { initialProduct: Product; source: "home" | "pricing" | "nearstory" | "nearfamily" | "nearlegacy" };
 const labels: Record<Product, string> = { nearstory: "NearStory", nearfamily: "NearFamily", nearlegacy: "NearLegacy" };
 
 export function WaitlistForm({ initialProduct, source }: Props) {
@@ -33,6 +34,7 @@ export function WaitlistForm({ initialProduct, source }: Props) {
       const result = await response.json() as { products?: Product[]; error?: string };
       if (!response.ok) throw new Error(result.error || "We could not save your signup right now.");
       setStatus(`You're on the ${result.products?.map((product) => labels[product]).join(", ")} waitlist.`);
+      for (const product of result.products || []) recordGrowthEvent({ event: "expansion_interest_confirmed", properties: { product, source } });
       form.reset();
       requestId.current = crypto.randomUUID();
     } catch (error) {

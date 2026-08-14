@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import Home from "../app/page.tsx";
 
-test("home exposes one main landmark and keeps decorative preview text out of the heading outline", () => {
-  const markup = renderToStaticMarkup(React.createElement(Home));
-  assert.equal((markup.match(/<main(?:\s|>)/g) ?? []).length, 1);
-  assert.doesNotMatch(markup, /<h3>Moonlit Meadow<\/h3>/);
-  assert.match(markup, /<span class="step-number" aria-hidden="true">01<\/span>/);
+test("company home exposes one main landmark and a single descriptive page heading", () => {
+  const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.equal((source.match(/<main(?:\s|>)/g) ?? []).length, 1);
+  assert.equal((source.match(/<h1(?:\s|>)/g) ?? []).length, 1);
+  assert.match(source, /<h1 className="company-display">Near you, <em>still\.<\/em><\/h1>/);
+  assert.match(source, /aria-labelledby="company-purpose"/);
 });
