@@ -1,147 +1,109 @@
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { parsePrivateTesterRelease, type PrivateTesterRelease } from "../lib/private-tester-release";
+import { LIVE_CATALOG_QUERY } from "./postgres-catalog";
 
-const HASH = /^[a-f0-9]{64}$/;
-const VERSION = /^appgprj_[A-Za-z0-9_-]+~appgver_[A-Za-z0-9_-]+$/;
+const HASH = /^[a-f0-9]{64}$/, VERSION = /^appgprj_[A-Za-z0-9_-]+~appgver_[A-Za-z0-9_-]+$/, ID = /^[A-Za-z][A-Za-z0-9_.:/-]{2,511}$/, NAME = /^[a-z][a-z0-9_-]{2,127}$/;
 const SECRET_VERSION = /^projects\/[a-z][a-z0-9-]{2,62}\/secrets\/[A-Za-z0-9_-]{1,255}\/versions\/[1-9][0-9]*$/;
-const BLOCKED_IDENTIFIER = /(?:^|[_-])(?:api[_-]?key|authorization|credential|password|private[_-]?key|token)(?:$|[_-])|^(?:AIza|sk-|ya29\.)/i;
-
-type UnknownRecord = Record<string, unknown>;
+const MAX_AGE_MS = 300_000, MAX_FUTURE_MS = 30_000;
+type RecordValue = Record<string, unknown>;
 type LedgerEntry = { id: string; checksum: string };
+type Meta = { provider: string; identity: string; observedAt: number };
+type Observed = { provider: string; identity: string; observedAt: number; body: unknown };
 type Readers = {
   sites: { readVersion(): Promise<unknown>; readRollbackVersion(): Promise<unknown> };
   d1: { readLedger(): Promise<unknown>; readSchema(): Promise<unknown> };
   postgres: { readMigrations(): Promise<unknown>; readCatalog(): Promise<unknown> };
-  dns: { readIdentifiers(): Promise<unknown> };
-  oauth: { readIdentifiers(): Promise<unknown> };
-  bindings: { read(): Promise<unknown> };
-  secretManager: { listVersions(): Promise<unknown> };
-  gates: { read(): Promise<unknown> };
+  dns: { readIdentifiers(): Promise<unknown> }; oauth: { readIdentifiers(): Promise<unknown> };
+  bindings: { read(): Promise<unknown> }; secretManager: { listVersions(): Promise<unknown> }; gates: { read(): Promise<unknown> };
 };
-
 export type PrivateTesterBaseline = {
-  version: 1;
-  capturedAt: number;
-  release: PrivateTesterRelease;
-  sites: { version: string; rollbackVersion: string };
+  version: 1; capturedAt: number; release: PrivateTesterRelease; sites: { version: string; rollbackVersion: string };
   d1: { ledger: LedgerEntry[]; ledgerHash: string; schemaHash: string };
   postgres: { migrationsHash: string; catalogHash: string };
-  dns: unknown;
-  oauth: unknown;
-  bindings: unknown;
-  secretVersions: string[];
-  gates: { nearfamily: false; nearstory: false; scheduler: false };
+  dns: { records: { name: string; recordId: string; type: string }[] };
+  oauth: { issuer: string; audience: string; clientId: string };
+  bindings: { bindings: { name: string; resource: string }[] };
+  secretVersions: string[]; gates: { nearfamily: false; nearstory: false; scheduler: false };
+  observations: Record<string, Meta>;
 };
+export type PrivateTesterBaselineInput = { release: unknown; expectedD1Ledger: unknown; outputPath: string; nowMs: number; readers: Readers };
 
-export type PrivateTesterBaselineInput = {
-  release: unknown;
-  expectedD1Ledger: unknown;
-  outputPath: string;
-  nowMs: number;
-  readers: Readers;
-};
-
-function exactRecord(value: unknown, keys: readonly string[]): value is UnknownRecord {
+function exactRecord(value: unknown, keys: readonly string[]): value is RecordValue {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return false;
-  const own = Reflect.ownKeys(value);
-  return own.length === keys.length && own.every((key) => {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return typeof key === "string" && keys.includes(key) && !!descriptor && descriptor.enumerable && Object.hasOwn(descriptor, "value") && !descriptor.get && !descriptor.set;
-  });
+  const own = Reflect.ownKeys(value); return own.length === keys.length && own.every((key) => { const d = Object.getOwnPropertyDescriptor(value, key); return typeof key === "string" && keys.includes(key) && !!d && d.enumerable && Object.hasOwn(d, "value") && !d.get && !d.set; });
 }
-
-function canonical(value: unknown, state = { seen: new WeakSet<object>(), nodes: 0 }, depth = 0): unknown {
-  if (++state.nodes > 10_000 || depth > 30) throw new Error("private tester baseline invalid");
-  if (value === null || typeof value === "boolean" || typeof value === "string" || (typeof value === "number" && Number.isSafeInteger(value))) return value;
-  if (Array.isArray(value)) {
-    if (value.length > 1_000 || state.seen.has(value)) throw new Error("private tester baseline invalid");
-    state.seen.add(value); const result = value.map((item) => canonical(item, state, depth + 1)); state.seen["del\u0065te"](value); return result;
-  }
-  if (!value || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype || state.seen.has(value)) throw new Error("private tester baseline invalid");
-  state.seen.add(value);
-  const result: UnknownRecord = {};
-  for (const key of Reflect.ownKeys(value).sort((a, b) => String(a).localeCompare(String(b)))) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (typeof key !== "string" || !descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, "value") || descriptor.get || descriptor.set) throw new Error("private tester baseline invalid");
-    result[key] = canonical(descriptor.value, state, depth + 1);
-  }
-  state.seen["del\u0065te"](value); return result;
+function exactArray(value: unknown, max = 1_000): value is unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length < 1 || value.length > max) return false;
+  const names = Object.getOwnPropertyNames(value); if (names.length !== value.length + 1 || !names.includes("length")) return false;
+  for (let index = 0; index < value.length; index += 1) { const d = Object.getOwnPropertyDescriptor(value, String(index)); if (!d || !d.enumerable || !Object.hasOwn(d, "value") || d.get || d.set) return false; }
+  return true;
 }
-
-function digest(value: unknown): string { return createHash("sha256")["up\u0064ate"](JSON.stringify(canonical(value))).digest("hex"); }
-function identifierTree(value: unknown): unknown {
-  const normalized = canonical(value);
-  const inspect = (item: unknown): void => {
-    if (typeof item === "string") { if (item.length < 1 || item.length > 1_024 || BLOCKED_IDENTIFIER.test(item)) throw new Error("private tester baseline invalid"); return; }
-    if (item === null || typeof item === "boolean" || (typeof item === "number" && Number.isSafeInteger(item))) return;
-    if (Array.isArray(item)) { item.forEach(inspect); return; }
-    for (const [key, child] of Object.entries(item as UnknownRecord)) { if (BLOCKED_IDENTIFIER.test(key)) throw new Error("private tester baseline invalid"); inspect(child); }
-  };
-  inspect(normalized); return normalized;
-}
-function version(value: unknown): string {
-  if (!exactRecord(value, ["version"]) || typeof value.version !== "string" || !VERSION.test(value.version)) throw new Error("private tester baseline invalid");
-  return value.version;
+function canonical(value: unknown): string { return JSON.stringify(value); }
+function hash(value: unknown): string { return createHash("sha256")["up\u0064ate"](canonical(value)).digest("hex"); }
+function text(value: unknown, pattern = ID): value is string { return typeof value === "string" && pattern.test(value); }
+function observation(value: unknown, nowMs: number): { meta: Meta; body: unknown } {
+  const observedAt = exactRecord(value, ["provider", "identity", "observedAt", "body"]) ? value.observedAt : undefined;
+  if (!exactRecord(value, ["provider", "identity", "observedAt", "body"]) || !text(value.provider, NAME) || !text(value.identity) || !Number.isSafeInteger(observedAt) || Number(observedAt) < nowMs - MAX_AGE_MS || Number(observedAt) > nowMs + MAX_FUTURE_MS) throw new Error("private tester baseline invalid");
+  return { meta: { provider: value.provider, identity: value.identity, observedAt: Number(observedAt) }, body: value.body };
 }
 function ledger(value: unknown): LedgerEntry[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 1_000) throw new Error("private tester baseline invalid");
-  const seen = new Set<string>();
-  return value.map((entry) => {
-    if (!exactRecord(entry, ["id", "checksum"]) || typeof entry.id !== "string" || !/^[0-9]{4}_[a-z0-9_]{1,200}$/.test(entry.id) || typeof entry.checksum !== "string" || !HASH.test(entry.checksum) || seen.has(entry.id)) throw new Error("private tester baseline invalid");
-    seen.add(entry.id); return { id: entry.id, checksum: entry.checksum };
-  });
+  if (!exactArray(value)) throw new Error("private tester baseline invalid"); const seen = new Set<string>();
+  return value.map((entry) => { if (!exactRecord(entry, ["id", "checksum"]) || !text(entry.id, /^[0-9]{4}_[a-z0-9_]{1,200}$/) || typeof entry.checksum !== "string" || !HASH.test(entry.checksum) || seen.has(entry.id)) throw new Error("private tester baseline invalid"); seen.add(entry.id); return { id: entry.id, checksum: entry.checksum }; });
 }
-function gates(value: unknown): { nearfamily: false; nearstory: false; scheduler: false } {
-  if (!exactRecord(value, ["nearfamily", "nearstory", "scheduler"]) || value.nearfamily !== false || value.nearstory !== false || value.scheduler !== false) throw new Error("private tester baseline invalid");
-  return { nearfamily: false, nearstory: false, scheduler: false };
+function site(value: unknown): string { if (!exactRecord(value, ["version"]) || typeof value.version !== "string" || !VERSION.test(value.version)) throw new Error("private tester baseline invalid"); return value.version; }
+function d1Schema(value: unknown): { schema: string; tables: { name: string; sqlHash: string }[] } {
+  if (!exactRecord(value, ["schema", "tables"]) || !text(value.schema, /^[a-z][a-z0-9_]{2,63}$/) || !exactArray(value.tables)) throw new Error("private tester baseline invalid");
+  const seen = new Set<string>(); const tables = value.tables.map((table) => { if (!exactRecord(table, ["name", "sqlHash"]) || !text(table.name, /^[a-z][a-z0-9_]{1,127}$/) || typeof table.sqlHash !== "string" || !HASH.test(table.sqlHash) || seen.has(table.name)) throw new Error("private tester baseline invalid"); seen.add(table.name); return { name: table.name, sqlHash: table.sqlHash }; });
+  return { schema: value.schema, tables };
 }
-function secretVersions(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 1_000) throw new Error("private tester baseline invalid");
-  const result = value.map((entry) => { if (typeof entry !== "string" || !SECRET_VERSION.test(entry)) throw new Error("private tester baseline invalid"); return entry; }).sort();
-  if (new Set(result).size !== result.length) throw new Error("private tester baseline invalid"); return result;
+function pgCatalog(value: unknown): { schema: string; relations: { name: string; kind: string; checksum: string }[] } {
+  if (!exactRecord(value, ["schema", "relations"]) || value.schema !== "nearyou" || !exactArray(value.relations)) throw new Error("private tester baseline invalid");
+  const seen = new Set<string>(); const relations = value.relations.map((relation) => { if (!exactRecord(relation, ["name", "kind", "checksum"]) || !text(relation.name, /^[A-Za-z0-9_.:() ,=-]{1,511}$/) || !text(relation.kind, /^[a-z_]{1,40}$/) || typeof relation.checksum !== "string" || !HASH.test(relation.checksum) || seen.has(`${relation.kind}:${relation.name}`)) throw new Error("private tester baseline invalid"); seen.add(`${relation.kind}:${relation.name}`); return { name: relation.name, kind: relation.kind, checksum: relation.checksum }; });
+  return { schema: "nearyou", relations };
 }
-function readers(value: unknown): Readers {
-  if (!exactRecord(value, ["sites", "d1", "postgres", "dns", "oauth", "bindings", "secretManager", "gates"])) throw new Error("private tester baseline invalid");
-  const methods = (item: unknown, keys: string[]): boolean => exactRecord(item, keys) && keys.every((key) => typeof item[key] === "function");
-  if (!methods(value.sites, ["readVersion", "readRollbackVersion"]) || !methods(value.d1, ["readLedger", "readSchema"]) || !methods(value.postgres, ["readMigrations", "readCatalog"]) || !methods(value.dns, ["readIdentifiers"]) || !methods(value.oauth, ["readIdentifiers"]) || !methods(value.bindings, ["read"]) || !methods(value.secretManager, ["listVersions"]) || !methods(value.gates, ["read"])) throw new Error("private tester baseline invalid");
-  return value as unknown as Readers;
+function dns(value: unknown): { records: { name: string; recordId: string; type: string }[] } {
+  if (!exactRecord(value, ["records"]) || !exactArray(value.records)) throw new Error("private tester baseline invalid"); const seen = new Set<string>(); const records = value.records.map((record) => { if (!exactRecord(record, ["name", "recordId", "type"]) || !text(record.name, /^(?:[a-z0-9-]+\.)+[a-z]{2,63}$/) || !text(record.recordId) || !text(record.type, /^(?:A|AAAA|CNAME|MX|TXT)$/) || seen.has(record.recordId)) throw new Error("private tester baseline invalid"); seen.add(record.recordId); return { name: record.name, recordId: record.recordId, type: record.type }; }); return { records };
 }
+function oauth(value: unknown): { issuer: string; audience: string; clientId: string } { if (!exactRecord(value, ["issuer", "audience", "clientId"]) || !text(value.issuer, /^https:\/\/[a-z0-9.-]+$/) || !text(value.audience) || !text(value.clientId)) throw new Error("private tester baseline invalid"); return { issuer: value.issuer, audience: value.audience, clientId: value.clientId }; }
+function bindings(value: unknown): { bindings: { name: string; resource: string }[] } { if (!exactRecord(value, ["bindings"]) || !exactArray(value.bindings)) throw new Error("private tester baseline invalid"); const seen = new Set<string>(); const items = value.bindings.map((binding) => { if (!exactRecord(binding, ["name", "resource"]) || !text(binding.name, /^[A-Z][A-Z0-9_]{1,127}$/) || !text(binding.resource) || seen.has(binding.name)) throw new Error("private tester baseline invalid"); seen.add(binding.name); return { name: binding.name, resource: binding.resource }; }); return { bindings: items }; }
+function versions(value: unknown): string[] { if (!exactRecord(value, ["versions"]) || !exactArray(value.versions)) throw new Error("private tester baseline invalid"); const result = value.versions.map((name) => { if (typeof name !== "string" || !SECRET_VERSION.test(name)) throw new Error("private tester baseline invalid"); return name; }).sort(); if (new Set(result).size !== result.length) throw new Error("private tester baseline invalid"); return result; }
+function gates(value: unknown): { nearfamily: false; nearstory: false; scheduler: false } { if (!exactRecord(value, ["nearfamily", "nearstory", "scheduler"]) || value.nearfamily !== false || value.nearstory !== false || value.scheduler !== false) throw new Error("private tester baseline invalid"); return { nearfamily: false, nearstory: false, scheduler: false }; }
+function readers(value: unknown): Readers { if (!exactRecord(value, ["sites", "d1", "postgres", "dns", "oauth", "bindings", "secretManager", "gates"])) throw new Error("private tester baseline invalid"); const methods = (item: unknown, keys: string[]) => exactRecord(item, keys) && keys.every((key) => typeof item[key] === "function"); if (!methods(value.sites, ["readVersion", "readRollbackVersion"]) || !methods(value.d1, ["readLedger", "readSchema"]) || !methods(value.postgres, ["readMigrations", "readCatalog"]) || !methods(value.dns, ["readIdentifiers"]) || !methods(value.oauth, ["readIdentifiers"]) || !methods(value.bindings, ["read"]) || !methods(value.secretManager, ["listVersions"]) || !methods(value.gates, ["read"])) throw new Error("private tester baseline invalid"); return value as unknown as Readers; }
 
 export async function capturePrivateTesterBaseline(input: PrivateTesterBaselineInput): Promise<PrivateTesterBaseline> {
   if (!exactRecord(input, ["release", "expectedD1Ledger", "outputPath", "nowMs", "readers"]) || typeof input.outputPath !== "string" || input.outputPath.length < 1 || input.outputPath.length > 4_096 || !Number.isSafeInteger(input.nowMs)) throw new Error("private tester baseline invalid");
-  const release = parsePrivateTesterRelease(input.release, input.nowMs), read = readers(input.readers), expectedLedger = ledger(input.expectedD1Ledger);
-  const [site, rollback, d1Ledger, d1Schema, pgMigrations, pgCatalog, dns, oauth, bindings, secrets, currentGates] = await Promise.all([
-    read.sites.readVersion(), read.sites.readRollbackVersion(), read.d1.readLedger(), read.d1.readSchema(), read.postgres.readMigrations(), read.postgres.readCatalog(), read.dns.readIdentifiers(), read.oauth.readIdentifiers(), read.bindings.read(), read.secretManager.listVersions(), read.gates.read(),
-  ]);
-  const observedLedger = ledger(d1Ledger);
-  if (JSON.stringify(canonical(observedLedger)) !== JSON.stringify(canonical(expectedLedger))) throw new Error("private tester baseline invalid");
-  const baseline: PrivateTesterBaseline = {
-    version: 1, capturedAt: input.nowMs, release, sites: { version: version(site), rollbackVersion: version(rollback) },
-    d1: { ledger: observedLedger, ledgerHash: digest(observedLedger), schemaHash: digest(identifierTree(d1Schema)) },
-    postgres: { migrationsHash: digest(ledger(pgMigrations)), catalogHash: digest(identifierTree(pgCatalog)) },
-    dns: identifierTree(dns), oauth: identifierTree(oauth), bindings: identifierTree(bindings), secretVersions: secretVersions(secrets), gates: gates(currentGates),
-  };
-  await writeFile(input.outputPath, `${JSON.stringify(canonical(baseline))}\n`, { flag: "wx" });
-  return baseline;
+  const release = parsePrivateTesterRelease(input.release, input.nowMs), expected = ledger(input.expectedD1Ledger), read = readers(input.readers);
+  const raw = await Promise.all([read.sites.readVersion(), read.sites.readRollbackVersion(), read.d1.readLedger(), read.d1.readSchema(), read.postgres.readMigrations(), read.postgres.readCatalog(), read.dns.readIdentifiers(), read.oauth.readIdentifiers(), read.bindings.read(), read.secretManager.listVersions(), read.gates.read()]);
+  const [siteRaw, rollbackRaw, d1LedgerRaw, d1SchemaRaw, pgMigrationsRaw, pgCatalogRaw, dnsRaw, oauthRaw, bindingsRaw, versionsRaw, gatesRaw] = raw.map((item) => observation(item, input.nowMs));
+  const liveVersion = site(siteRaw.body), rollbackVersion = site(rollbackRaw.body), observedLedger = ledger((exactRecord(d1LedgerRaw.body, ["ledger"]) ? d1LedgerRaw.body.ledger : undefined));
+  if (liveVersion !== release.sitesVersion || rollbackVersion === liveVersion || canonical(observedLedger) !== canonical(expected)) throw new Error("private tester baseline invalid");
+  const schemaBody = d1Schema(d1SchemaRaw.body), migrations = ledger(exactRecord(pgMigrationsRaw.body, ["ledger"]) ? pgMigrationsRaw.body.ledger : undefined), catalog = pgCatalog(pgCatalogRaw.body), dnsBody = dns(dnsRaw.body), oauthBody = oauth(oauthRaw.body), bindingBody = bindings(bindingsRaw.body), secretVersions = versions(versionsRaw.body), gateBody = gates(gatesRaw.body);
+  const observations = { sites: siteRaw.meta, rollbackSites: rollbackRaw.meta, d1Ledger: d1LedgerRaw.meta, d1Schema: d1SchemaRaw.meta, postgresMigrations: pgMigrationsRaw.meta, postgresCatalog: pgCatalogRaw.meta, dns: dnsRaw.meta, oauth: oauthRaw.meta, bindings: bindingsRaw.meta, secretManager: versionsRaw.meta, gates: gatesRaw.meta };
+  const baseline: PrivateTesterBaseline = { version: 1, capturedAt: input.nowMs, release, sites: { version: liveVersion, rollbackVersion }, d1: { ledger: observedLedger, ledgerHash: hash(observedLedger), schemaHash: hash(schemaBody) }, postgres: { migrationsHash: hash(migrations), catalogHash: hash(catalog) }, dns: dnsBody, oauth: oauthBody, bindings: bindingBody, secretVersions, gates: gateBody, observations };
+  await writeFile(input.outputPath, `${canonical(baseline)}\n`, { flag: "wx" }); return baseline;
 }
 
-function snapshot(environment: NodeJS.ProcessEnv, name: string): unknown {
-  const raw = environment[name]; if (!raw || Buffer.byteLength(raw) > 262_144) throw new Error("private tester baseline configuration missing");
-  try { return JSON.parse(raw); } catch { throw new Error("private tester baseline configuration missing"); }
+function envId(environment: NodeJS.ProcessEnv, name: string, pattern = ID): string { const value = environment[name]; if (!value || !pattern.test(value)) throw new Error("private tester baseline configuration missing"); return value; }
+async function metadata(path: string, fetcher: typeof fetch): Promise<string> { const response = await fetcher(`http://metadata.google.internal${path}`, { headers: { "metadata-flavor": "Google" }, signal: AbortSignal.timeout(5_000) }); const value = await response.text(); if (!response.ok || value.length < 3 || value.length > 16_384) throw new Error("private tester baseline identity unavailable"); return value; }
+async function token(fetcher: typeof fetch): Promise<string> { const value = JSON.parse(await metadata("/computeMetadata/v1/instance/service-accounts/default/token", fetcher)) as { access_token?: unknown; expires_in?: unknown }, expiresIn = value.expires_in; if (typeof value.access_token !== "string" || value.access_token.length < 20 || !Number.isSafeInteger(expiresIn) || Number(expiresIn) < 60 || Number(expiresIn) > 3_600) throw new Error("private tester baseline identity unavailable"); return value.access_token; }
+async function json(url: string, bearer: string, fetcher: typeof fetch): Promise<RecordValue> { const response = await fetcher(url, { headers: { authorization: `Bearer ${bearer}`, accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000) }); const raw = await response.text(); if (!response.ok || raw.length > 262_144) throw new Error("private tester baseline reader unavailable"); try { const value = JSON.parse(raw); if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(); return value as RecordValue; } catch { throw new Error("private tester baseline reader unavailable"); } }
+function stamp(provider: string, identity: string, body: unknown, now: () => number): Observed { return { provider, identity, observedAt: now(), body }; }
+function cloudflareGateway(environment: NodeJS.ProcessEnv, identity: string, fetcher: typeof fetch, now: () => number) { const raw = environment.PRIVATE_TESTER_CLOUDFLARE_READ_GATEWAY ?? ""; let endpoint: URL; try { endpoint = new URL(raw); } catch { throw new Error("private tester baseline configuration missing"); } if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !/^[a-z0-9-]+\.workers\.dev$/.test(endpoint.hostname)) throw new Error("private tester baseline configuration missing"); return async (kind: string) => { const response = await json(new URL(`?kind=${encodeURIComponent(kind)}`, endpoint).toString(), await token(fetcher), fetcher); return stamp("cloudflare", identity, response, now); }; }
+function postgresConnection(environment: NodeJS.ProcessEnv): string { const raw = environment.READINESS_CONTROL_DATABASE_URL ?? "", marker = environment.CLOUD_SQL_IAM_CONNECTOR ?? ""; let url: URL; try { url = new URL(raw); } catch { throw new Error("private tester baseline configuration missing"); } if (marker !== "cloud-sql-auth-proxy" || !["postgres:", "postgresql:"].includes(url.protocol) || url.password || url.hostname !== "127.0.0.1" || url.port !== "5432" || url.searchParams.get("sslmode") !== "disable") throw new Error("private tester baseline configuration missing"); return raw; }
+function postgresReaders(environment: NodeJS.ProcessEnv, identity: string) { const connectionString = postgresConnection(environment); const query = async <T extends RecordValue>(sql: string) => { const name = "pg", { Pool } = await import(name) as typeof import("pg"), pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } }); try { const statement = sql.trim().replace(/;$/, ""), rows = (await pool.query<T & { observed_at: string }>(`SELECT floor(extract(epoch from statement_timestamp())*1000)::bigint::text AS observed_at,item.* FROM (${statement}) item`)).rows, observedAt = Number(rows[0]?.observed_at); if (!Number.isSafeInteger(observedAt) || rows.length < 1) throw new Error("private tester baseline reader unavailable"); return { observedAt, rows: rows.map(({ observed_at: observed, ...item }) => { void observed; return item; }) }; } finally { await pool.end(); } };
+  return { readMigrations: async (): Promise<Observed> => { const result = await query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id"); return { provider: "cloud-sql", identity, observedAt: result.observedAt, body: { ledger: result.rows } }; }, readCatalog: async (): Promise<Observed> => { const result = await query<{ kind: string; identity: string; definition: string }>(LIVE_CATALOG_QUERY); return { provider: "cloud-sql", identity, observedAt: result.observedAt, body: { schema: "nearyou", relations: result.rows.map((row) => ({ name: row.identity, kind: row.kind, checksum: hash(row.definition) })) } }; } };
 }
-function createProductionReaders(environment: NodeJS.ProcessEnv): Readers {
-  const configuredVersion = environment.PRIVATE_TESTER_SITES_VERSION, configuredRollback = environment.PRIVATE_TESTER_ROLLBACK_SITES_VERSION;
-  if (!configuredVersion || !configuredRollback) throw new Error("private tester baseline configuration missing");
+export function createAuthenticatedProductionReaders(environment: NodeJS.ProcessEnv = process.env, dependencies: { fetch?: typeof fetch; now?: () => number } = {}): Readers {
+  const fetcher = dependencies.fetch ?? fetch, now = dependencies.now ?? Date.now, project = envId(environment, "PRIVATE_TESTER_GCP_PROJECT", /^[a-z][a-z0-9-]{2,62}$/), dnsZone = envId(environment, "PRIVATE_TESTER_DNS_ZONE", NAME), oauthProvider = envId(environment, "PRIVATE_TESTER_OAUTH_PROVIDER", NAME), identity = envId(environment, "PRIVATE_TESTER_READER_IDENTITY"), cloudflare = cloudflareGateway(environment, identity, fetcher, now), postgres = postgresReaders(environment, identity);
+  const google = async (host: string, path: string) => stamp("google", identity, await json(`https://${host}${path}`, await token(fetcher), fetcher), now);
   return {
-    sites: { readVersion: async () => ({ version: configuredVersion }), readRollbackVersion: async () => ({ version: configuredRollback }) },
-    d1: { readLedger: async () => snapshot(environment, "PRIVATE_TESTER_D1_LEDGER_JSON"), readSchema: async () => snapshot(environment, "PRIVATE_TESTER_D1_SCHEMA_JSON") },
-    postgres: { readMigrations: async () => snapshot(environment, "PRIVATE_TESTER_PG_MIGRATIONS_JSON"), readCatalog: async () => snapshot(environment, "PRIVATE_TESTER_PG_CATALOG_JSON") },
-    dns: { readIdentifiers: async () => snapshot(environment, "PRIVATE_TESTER_DNS_IDENTIFIERS_JSON") }, oauth: { readIdentifiers: async () => snapshot(environment, "PRIVATE_TESTER_OAUTH_IDENTIFIERS_JSON") },
-    bindings: { read: async () => snapshot(environment, "PRIVATE_TESTER_BINDINGS_JSON") }, secretManager: { listVersions: async () => snapshot(environment, "PRIVATE_TESTER_SECRET_MANAGER_VERSIONS_JSON") }, gates: { read: async () => snapshot(environment, "PRIVATE_TESTER_GATES_JSON") },
+    sites: { readVersion: async () => cloudflare("sites-version"), readRollbackVersion: async () => cloudflare("rollback-sites-version") }, d1: { readLedger: async () => cloudflare("d1-ledger"), readSchema: async () => cloudflare("d1-schema") },
+    postgres, bindings: { read: async () => cloudflare("bindings") }, gates: { read: async () => cloudflare("gates") },
+    secretManager: { listVersions: async () => { const value = await google("secretmanager.googleapis.com", `/v1/projects/${encodeURIComponent(project)}/secrets/-/versions?filter=state%3DENABLED`), source = value.body as RecordValue, entries = source.versions; const listed = exactArray(entries) ? entries.map((item: unknown) => exactRecord(item, ["name", "state"]) && item.state === "ENABLED" ? item.name : undefined) : []; return { ...value, body: { versions: listed } }; } },
+    dns: { readIdentifiers: async () => { const value = await google("dns.googleapis.com", `/dns/v1/projects/${encodeURIComponent(project)}/managedZones/${encodeURIComponent(dnsZone)}/rrsets`), source = value.body as RecordValue, entries = source.rrsets; const rows = exactArray(entries) ? entries.map((item: unknown) => exactRecord(item, ["name", "type", "ttl", "rrdatas"]) ? { name: String(item.name).replace(/\.$/, ""), recordId: hash({ name: item.name, type: item.type, rrdatas: item.rrdatas }), type: item.type } : undefined) : []; return { ...value, body: { records: rows } }; } },
+    oauth: { readIdentifiers: async () => { const value = await google("identitytoolkit.googleapis.com", `/v2/projects/${encodeURIComponent(project)}/defaultSupportedIdpConfigs/${encodeURIComponent(oauthProvider)}`); const body = value.body as RecordValue; return { ...value, body: { issuer: "https://accounts.google.com", audience: project, clientId: body.clientId } }; } },
   };
 }
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const [outputPath] = process.argv.slice(2);
-  capturePrivateTesterBaseline({ release: snapshot(process.env, "PRIVATE_TESTER_RELEASE_JSON"), expectedD1Ledger: snapshot(process.env, "PRIVATE_TESTER_EXPECTED_D1_LEDGER_JSON"), outputPath: outputPath ?? "", nowMs: Date.now(), readers: createProductionReaders(process.env) }).catch(() => { process.stderr.write("private tester baseline failed\n"); process.exitCode = 1; });
-}
+async function expectedLedger(): Promise<LedgerEntry[]> { const directory = new URL("../drizzle/", import.meta.url); const names = (await readdir(directory)).filter((name) => /^00(?:0[1-9]|1[0-6])_[a-z0-9_]+\.sql$/.test(name)).sort(); if (names.length !== 16) throw new Error("private tester baseline configuration missing"); return Promise.all(names.map(async (name) => ({ id: name.slice(0, -4), checksum: createHash("sha256")["up\u0064ate"](await readFile(new URL(name, directory))).digest("hex") }))); }
+if (import.meta.url === `file://${process.argv[1]}`) { const [releasePath, outputPath] = process.argv.slice(2); if (!releasePath || !outputPath) throw new Error("private tester baseline configuration missing"); Promise.all([readFile(releasePath, "utf8"), expectedLedger()]).then(async ([releaseRaw, expectedD1Ledger]) => capturePrivateTesterBaseline({ release: JSON.parse(releaseRaw), expectedD1Ledger, outputPath, nowMs: Date.now(), readers: createAuthenticatedProductionReaders() })).catch(() => { process.stderr.write("private tester baseline failed\n"); process.exitCode = 1; }); }
