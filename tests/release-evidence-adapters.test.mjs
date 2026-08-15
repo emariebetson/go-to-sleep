@@ -90,6 +90,29 @@ test("deployment manifest migration binds exact schema, identities, time, replay
   assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION nearyou\.consume_release_evidence|ALTER FUNCTION nearyou\.consume_release_evidence/);
 });
 
+test("deployment manifest SQL time contract accepts allowed skew and rejects invalid lifetimes", () => {
+  const sql = readFileSync(new URL("../postgres/migrations/0007_private_tester_deployment_manifest.sql", import.meta.url), "utf8");
+  assert.match(sql, /CHECK \(expires_at - issued_at > interval '0 seconds' AND expires_at - issued_at <= interval '15 minutes'\)/);
+  assert.doesNotMatch(sql, /expires_at <= consumed_at \+ interval '15 minutes'/);
+  assert.doesNotMatch(sql, /expires_at_ms>server_now_ms\+900000/);
+
+  const rejection = sql.match(/IF (not_before_ms>issued_at_ms[\s\S]*?) THEN RETURN false; END IF;/)?.[1];
+  assert.ok(rejection, "migration time rejection predicate is executable by this contract test");
+  const javascript = rejection
+    .replace(/expires_at_ms IS DISTINCT FROM floor\(extract\(epoch FROM p_expiry\)\*1000\)::bigint/g, "expires_at_ms !== p_expiry_ms")
+    .replace(/\bOR\b/g, "||");
+  assert.doesNotMatch(javascript, /\b(?:AND|IS|FROM|interval)\b/);
+  const rejects = Function("not_before_ms", "issued_at_ms", "expires_at_ms", "server_now_ms", "p_expiry_ms", `"use strict"; return Boolean(${javascript});`);
+  const serverNow = 1_800_000_000_000;
+  const evaluate = ({ issuedAt, notBefore = issuedAt, expiresAt }) => rejects(notBefore, issuedAt, expiresAt, serverNow, expiresAt);
+
+  assert.equal(evaluate({ issuedAt: serverNow + 1, expiresAt: serverNow + 1 + 900_000 }), false, "+1ms composer skew with exact lifetime is valid");
+  assert.equal(evaluate({ issuedAt: serverNow + 29_999, expiresAt: serverNow + 29_999 + 900_000 }), false, "+29999ms composer skew with exact lifetime is valid");
+  assert.equal(evaluate({ issuedAt: serverNow + 30_001, expiresAt: serverNow + 30_001 + 900_000 }), true, ">30s future issuance is invalid");
+  assert.equal(evaluate({ issuedAt: serverNow, expiresAt: serverNow + 900_001 }), true, ">15m signed lifetime is invalid");
+  assert.equal(evaluate({ issuedAt: serverNow - 1, expiresAt: serverNow }), true, "expired claims are invalid");
+});
+
 async function kmsFixture(overrides = {}) {
   const pair = await crypto.subtle.generateKey({ name: "RSA-PSS", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
   const encoded = Buffer.from(await crypto.subtle.exportKey("spki", pair.publicKey)).toString("base64"); const lines = encoded.match(/.{1,64}/g).join("\n");
