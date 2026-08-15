@@ -5,7 +5,6 @@ declare namespace Cloudflare {
     VERSION_METADATA: { id: string; tag: string; timestamp: string };
     PRIVATE_TESTER_BASELINE_OIDC_SUBJECT: string;
     PRIVATE_TESTER_BASELINE_RELEASE_JSON: string;
-    PRIVATE_TESTER_ROLLBACK_SITES_VERSION: string;
     PRIVATE_TESTER_SCHEDULER_ENABLED: "false";
   }
 }

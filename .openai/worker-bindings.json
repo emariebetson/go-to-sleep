@@ -13,7 +13,6 @@
       ,"CANARY_OIDC_JWKS_URL"
       ,"PRIVATE_TESTER_BASELINE_OIDC_SUBJECT"
       ,"PRIVATE_TESTER_BASELINE_RELEASE_JSON"
-      ,"PRIVATE_TESTER_ROLLBACK_SITES_VERSION"
       ,"PRIVATE_TESTER_SCHEDULER_ENABLED"
       ,"NEARYOU_ENABLE_STORY"
       ,"NEARYOU_ENABLE_LEGACY_ARCHIVE"
@@ -35,10 +34,9 @@
       "subject_binding": "PRIVATE_TESTER_BASELINE_OIDC_SUBJECT",
       "jwks_url": "https://www.googleapis.com/oauth2/v3/certs"
     },
-    "live_bindings": ["DB", "AUDIO", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"],
+    "runtime_bindings": ["DB", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"],
     "version_metadata_tag": "release.commitSha",
     "default_dark_bindings": ["NEARYOU_ENABLE_STORY", "NEARYOU_ENABLE_LEGACY_ARCHIVE", "PRIVATE_TESTER_SCHEDULER_ENABLED"],
-    "release_binding": "PRIVATE_TESTER_BASELINE_RELEASE_JSON",
-    "rollback_binding": "PRIVATE_TESTER_ROLLBACK_SITES_VERSION"
+    "release_binding": "PRIVATE_TESTER_BASELINE_RELEASE_JSON"
   }
 }

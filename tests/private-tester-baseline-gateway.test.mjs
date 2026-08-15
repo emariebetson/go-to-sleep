@@ -1,34 +1,43 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assertPrivateTesterDeploymentContract, createGoogleServiceIdentityAuthenticator, createPrivateTesterBaselineGateway, createPrivateTesterBaselineRuntime } from "../lib/private-tester-baseline-gateway.ts";
 
 const now = Date.parse("2026-08-14T18:00:00.000Z");
-const trust = Object.freeze({
-  issuer: "https://accounts.google.com",
-  audience: "https://nearyoustill.com",
-  subject: "109876543210987654321",
-});
-const release = Object.freeze({
-  releaseId: "rel_20260814_private_01",
-  commitSha: "a".repeat(40),
-  sitesVersion: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_example",
-  startsAt: "2026-08-14T18:00:00.000Z",
-  expiresAt: "2026-08-21T18:00:00.000Z",
-  products: ["nearfamily", "nearstory"],
-});
+const trust = Object.freeze({ issuer: "https://accounts.google.com", audience: "https://nearyoustill.com", subject: "109876543210987654321" });
+const release = Object.freeze({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_example", startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
+const workerRuntime = Object.freeze({ id: "11111111-1111-4111-8111-111111111111", commitSha: "a".repeat(40), deployedAt: "2026-08-14T17:59:00.000Z" });
+const migrationNames = [
+  "0001_google_apple_auth.sql", "0002_sharp_shinobi_shaw.sql", "0003_white_groot.sql", "0004_salty_sugar_man.sql",
+  "0005_pronunciation_frequency_layers.sql", "0006_nearyou_shared_foundation.sql", "0007_nearsleep_production_upgrade.sql",
+  "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql", "0010_child_profile_pronunciation.sql",
+  "0011_household_billing_accounts.sql", "0012_nearsleep_library_privacy.sql", "0013_nearstory_parent_beta.sql",
+  "0014_nearlegacy_archive.sql", "0015_platform_release_foundation.sql", "0016_marketing_waitlist.sql",
+];
+const migrationRows = migrationNames.map((name, index) => ({ id: index + 1, name, applied_at: `2026-08-14 17:${String(index).padStart(2, "0")}:00` }));
+const schemaRows = Object.freeze([
+  { type: "index", name: "accounts_email_idx", tbl_name: "accounts", rootpage: 3, sql: "CREATE INDEX accounts_email_idx ON accounts(email)" },
+  { type: "index", name: "sqlite_autoindex_accounts_1", tbl_name: "accounts", rootpage: 4, sql: null },
+  { type: "table", name: "accounts", tbl_name: "accounts", rootpage: 2, sql: "CREATE TABLE accounts(id TEXT PRIMARY KEY,email TEXT)" },
+  { type: "trigger", name: "accounts_touch", tbl_name: "accounts", rootpage: 0, sql: "CREATE TRIGGER accounts_touch AFTER UPDATE ON accounts BEGIN SELECT 1; END" },
+  { type: "view", name: "account_ids", tbl_name: "account_ids", rootpage: 0, sql: "CREATE VIEW account_ids AS SELECT id FROM accounts" },
+]);
+const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, sql: row.sql })))).digest("hex");
+const ledgerQuery = "SELECT id,name,applied_at FROM d1_migrations ORDER BY id";
+const schemaQuery = "SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name";
 
-test("exact-binds the gateway contract to the Sites deployment manifest", () => {
+test("deployment contract distinguishes configured runtime bindings from provider-observed resource identities", () => {
   const bindings = JSON.parse(readFileSync(new URL("../.openai/worker-bindings.json", import.meta.url), "utf8"));
   const hosting = JSON.parse(readFileSync(new URL("../.openai/hosting.json", import.meta.url), "utf8"));
   assert.doesNotThrow(() => assertPrivateTesterDeploymentContract(bindings, hosting));
-  const missingLiveBinding = structuredClone(bindings);
-  missingLiveBinding.private_tester_baseline_gateway.live_bindings.pop();
-  assert.throws(() => assertPrivateTesterDeploymentContract(missingLiveBinding, hosting), /deployment contract invalid/);
+  assert.deepEqual(bindings.private_tester_baseline_gateway.runtime_bindings, ["DB", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"]);
+  assert.equal(Object.hasOwn(bindings.private_tester_baseline_gateway, "live_bindings"), false);
+  assert.equal(Object.hasOwn(bindings.private_tester_baseline_gateway, "rollback_binding"), false);
+  const missingRuntimeBinding = structuredClone(bindings);
+  missingRuntimeBinding.private_tester_baseline_gateway.runtime_bindings.pop();
+  assert.throws(() => assertPrivateTesterDeploymentContract(missingRuntimeBinding, hosting), /deployment contract invalid/);
   assert.throws(() => assertPrivateTesterDeploymentContract(bindings, { ...hosting, project_id: "appgprj_wrong" }), /deployment contract invalid/);
-  const missingDarkBinding = structuredClone(bindings);
-  missingDarkBinding.required_worker_bindings.vars = missingDarkBinding.required_worker_bindings.vars.filter((name) => name !== "NEARYOU_ENABLE_STORY");
-  assert.throws(() => assertPrivateTesterDeploymentContract(missingDarkBinding, hosting), /deployment contract invalid/);
 });
 
 test("verifies a Google standard service identity token with exact issuer, audience, and subject", async () => {
@@ -47,121 +56,87 @@ test("verifies a Google standard service identity token with exact issuer, audie
 
 test("authenticates before parsing the route or loading server evidence", async () => {
   let loaded = false;
-  const request = new Request("https://nearyoustill.com/api/internal/private-tester-baseline/sites-version");
+  const request = new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger");
   Object.defineProperty(request, "url", { get: () => { throw new Error("route parsed before authentication"); } });
-  const gateway = createPrivateTesterBaselineGateway({
-    trust,
-    authenticate: async () => { throw new Error("service_oidc_invalid"); },
-    load: async () => { loaded = true; throw new Error("must not load"); },
-    now: () => now,
-  });
-
+  const gateway = createPrivateTesterBaselineGateway({ trust, authenticate: async () => { throw new Error("service_oidc_invalid"); }, load: async () => { loaded = true; throw new Error("must not load"); }, now: () => now });
   const response = await gateway(request);
   assert.equal(response.status, 401);
   assert.equal(loaded, false);
   assert.equal(await response.text(), "Unauthorized");
 });
 
-test("derives the principal and observation time after exact claim validation", async () => {
-  const calls = [];
+test("timestamps the observation after the read and carries fresh worker metadata without equating it to appgver", async () => {
+  let clock = now;
   const gateway = createPrivateTesterBaselineGateway({
     trust,
     authenticate: async () => ({ ...trust }),
-    load: async () => ({
-      release,
-      read: async (kind) => { calls.push(kind); return { version: release.sitesVersion }; },
-    }),
-    now: () => now,
+    load: async () => ({ release, workerRuntime, read: async () => { clock += 1_234; return { appliedMigrations: [] }; } }),
+    now: () => clock,
   });
-
-  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/sites-version", {
-    headers: { authorization: "Bearer signed.jwt.value" },
-  }));
+  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger"));
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await response.json(), {
-    issuer: trust.issuer,
-    audience: trust.audience,
-    subject: trust.subject,
-    principal: `service:${trust.subject}`,
-    observedAt: now,
-    release,
-    body: { version: release.sitesVersion },
+  assert.deepEqual(await response.json(), { issuer: trust.issuer, audience: trust.audience, subject: trust.subject, principal: `service:${trust.subject}`, observedAt: now + 1_234, release, workerRuntime, body: { appliedMigrations: [] } });
+});
+
+test("rechecks worker metadata freshness after a slow evidence read", async () => {
+  let clock = now;
+  const gateway = createPrivateTesterBaselineGateway({
+    trust,
+    authenticate: async () => ({ ...trust }),
+    load: async () => ({ release, workerRuntime, read: async () => { clock += 240_001; return { appliedMigrations: [] }; } }),
+    now: () => clock,
   });
-  assert.deepEqual(calls, ["sites-version"]);
+  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger"));
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), "Unavailable");
 });
 
 test("rejects issuer, audience, or subject drift before any evidence read", async () => {
   for (const key of ["issuer", "audience", "subject"]) {
     let loaded = false;
-    const gateway = createPrivateTesterBaselineGateway({
-      trust,
-      authenticate: async () => ({ ...trust, [key]: `${trust[key]}-wrong` }),
-      load: async () => { loaded = true; return { release, read: async () => ({}) }; },
-      now: () => now,
-    });
-    const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/gates"));
-    assert.equal(response.status, 401, key);
+    const gateway = createPrivateTesterBaselineGateway({ trust, authenticate: async () => ({ ...trust, [key]: `${trust[key]}-wrong` }), load: async () => { loaded = true; return { release, workerRuntime, read: async () => ({}) }; }, now: () => now });
+    assert.equal((await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/gates"))).status, 401, key);
     assert.equal(loaded, false, key);
   }
 });
 
-test("allows only fixed read operations on the exact production origin", async () => {
+test("exposes only fixed runtime reads and never self-asserts Sites versions or binding resources", async () => {
   let reads = 0;
-  const gateway = createPrivateTesterBaselineGateway({
-    trust,
-    authenticate: async () => trust,
-    load: async () => ({ release, read: async () => { reads += 1; return {}; } }),
-    now: () => now,
-  });
+  const gateway = createPrivateTesterBaselineGateway({ trust, authenticate: async () => trust, load: async () => ({ release, workerRuntime, read: async () => { reads += 1; return {}; } }), now: () => now });
   for (const request of [
     new Request("https://wrong.example/api/internal/private-tester-baseline/gates"),
-    new Request("https://nearyoustill.com/api/internal/private-tester-baseline/unknown"),
+    new Request("https://nearyoustill.com/api/internal/private-tester-baseline/sites-version"),
+    new Request("https://nearyoustill.com/api/internal/private-tester-baseline/rollback-sites-version"),
+    new Request("https://nearyoustill.com/api/internal/private-tester-baseline/bindings"),
     new Request("https://nearyoustill.com/api/internal/private-tester-baseline/gates?release=caller"),
     new Request("https://nearyoustill.com/api/internal/private-tester-baseline/gates", { method: "POST" }),
   ]) assert.equal((await gateway(request)).status, 404);
   assert.equal(reads, 0);
 });
 
-test("reads D1, runtime bindings, dark gates, and provider-accepted OAuth configuration", async () => {
-  const migrationNames = [
-    "0001_google_apple_auth.sql", "0002_sharp_shinobi_shaw.sql", "0003_white_groot.sql", "0004_salty_sugar_man.sql",
-    "0005_pronunciation_frequency_layers.sql", "0006_nearyou_shared_foundation.sql", "0007_nearsleep_production_upgrade.sql",
-    "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql", "0010_child_profile_pronunciation.sql",
-    "0011_household_billing_accounts.sql", "0012_nearsleep_library_privacy.sql", "0013_nearstory_parent_beta.sql",
-    "0014_nearlegacy_archive.sql", "0015_platform_release_foundation.sql", "0016_marketing_waitlist.sql",
-  ];
-  const statements = [];
-  const DB = {
-    prepare(sql) {
-      statements.push(sql);
-      return {
-        async all() {
-          if (sql.includes("d1_migrations")) return { results: migrationNames.map((name) => ({ name })) };
-          if (sql.includes("sqlite_schema")) return { results: [
-            { name: "accounts", sql: "CREATE TABLE accounts(id TEXT PRIMARY KEY)" },
-            { name: "families", sql: "CREATE TABLE families(id TEXT PRIMARY KEY)" },
-          ] };
-          throw new Error("unexpected query");
-        },
-      };
-    },
-  };
-  const oauthCalls = [];
-  const runtime = createPrivateTesterBaselineRuntime({
-    DB,
-    AUDIO: { head: async () => null },
-    VERSION_METADATA: { id: "11111111-1111-4111-8111-111111111111", tag: "a".repeat(40), timestamp: "2026-08-14T17:59:00.000Z" },
+function runtimeEnvironment(overrides = {}) {
+  return {
+    DB: { prepare: () => ({ all: async () => ({ results: [] }) }) },
+    VERSION_METADATA: { id: workerRuntime.id, tag: workerRuntime.commitSha, timestamp: workerRuntime.deployedAt },
     PRIVATE_TESTER_BASELINE_RELEASE_JSON: JSON.stringify(release),
-    PRIVATE_TESTER_ROLLBACK_SITES_VERSION: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_rollback",
     GOOGLE_CLIENT_ID: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com",
     BETTER_AUTH_URL: "https://nearyoustill.com",
     PUBLIC_APP_URL: "https://nearyoustill.com",
     NEARYOU_ENABLE_STORY: "false",
     NEARYOU_ENABLE_LEGACY_ARCHIVE: "false",
     PRIVATE_TESTER_SCHEDULER_ENABLED: "false",
-  }, {
+    ...overrides,
+  };
+}
+
+test("reads and verifies exact live D1 ledger fields and every sqlite_schema object type", async () => {
+  const statements = [];
+  const DB = { prepare(sql) { statements.push(sql); return { async all() { if (sql === ledgerQuery) return { results: migrationRows }; if (sql === schemaQuery) return { results: schemaRows }; throw new Error("unexpected query"); } }; } };
+  const oauthCalls = [];
+  const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), {
     now: () => now,
+    expectedD1SchemaDefinitionHash: schemaDefinitionHash,
+    expectedD1SchemaObjectCount: schemaRows.length,
     fetch: async (url, init) => {
       oauthCalls.push([String(url), init]);
       const state = new URL(String(url)).searchParams.get("state");
@@ -169,43 +144,63 @@ test("reads D1, runtime bindings, dark gates, and provider-accepted OAuth config
     },
   });
 
-  const sites = await runtime.read("sites-version");
-  assert.deepEqual(sites, { version: release.sitesVersion, runtimeVersion: { id: "11111111-1111-4111-8111-111111111111", tag: "a".repeat(40), timestamp: "2026-08-14T17:59:00.000Z" } });
-  assert.deepEqual(await runtime.read("rollback-sites-version"), { version: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_rollback" });
-  const d1 = await runtime.read("d1-ledger");
-  assert.equal(d1.ledger.length, 16);
-  assert.deepEqual(d1.ledger.at(-1), { id: "0016_marketing_waitlist", checksum: "d559c5b5f760d974f071d1f64d481519fb25a78b209213bf90a77090c4b987d1" });
-  assert.deepEqual((await runtime.read("d1-schema")).tables.map((row) => row.name), ["accounts", "families"]);
+  assert.deepEqual(await runtime.read("d1-ledger"), { appliedMigrations: migrationRows.map((row) => ({ sequence: row.id, name: row.name, appliedAt: row.applied_at })) });
+  assert.deepEqual(await runtime.read("d1-schema"), { schema: "sqlite_schema", objects: schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, rootPage: row.rootpage, sql: row.sql })) });
   assert.deepEqual(await runtime.read("gates"), { nearfamily: false, nearstory: false, scheduler: false });
-  assert.deepEqual(await runtime.read("bindings"), { bindings: [
-    { name: "AUDIO", resource: "sites:r2:AUDIO" },
-    { name: "DB", resource: "sites:d1:DB" },
-    { name: "VERSION_METADATA", resource: "cloudflare:version:11111111-1111-4111-8111-111111111111" },
-  ] });
-  assert.deepEqual(await runtime.read("oauth"), {
-    issuer: "https://accounts.google.com",
-    audience: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com",
-    clientId: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com",
-    authorizedOrigins: ["https://nearyoustill.com"],
-    redirectUris: ["https://nearyoustill.com/api/auth/callback/google"],
-  });
-  assert.equal(oauthCalls.length, 1);
-  assert.equal(oauthCalls[0][1].redirect, "manual");
-  assert.equal(statements.length, 2);
+  assert.deepEqual(await runtime.read("oauth"), { issuer: "https://accounts.google.com", audience: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", clientId: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", providerAcceptedRedirectUri: "https://nearyoustill.com/api/auth/callback/google", proof: "interaction_required" });
+  assert.equal(Object.hasOwn(await runtime.read("oauth"), "authorizedOrigins"), false);
+  assert.equal(statements[0], ledgerQuery);
+  assert.equal(statements[1], schemaQuery);
+  assert.equal(statements[1].includes("name NOT LIKE 'sqlite_%'"), false);
+  assert.equal(/\bLIMIT\b/i.test(statements[1]), false);
+  assert.equal((await runtime.read("d1-schema")).objects.some((object) => object.name === "sqlite_autoindex_accounts_1" && object.sql === null), true);
+  assert.equal(oauthCalls.every(([, init]) => init.redirect === "manual"), true);
+  await assert.rejects(() => runtime.read("sites-version"), /evidence unavailable/);
 });
 
-test("runtime fails closed without exact release, version metadata, OAuth, or dark gates", async () => {
-  const base = {
-    DB: { prepare: () => ({ all: async () => ({ results: [] }) }) }, AUDIO: {},
-    VERSION_METADATA: { id: "11111111-1111-4111-8111-111111111111", tag: "a".repeat(40), timestamp: "2026-08-14T17:59:00.000Z" },
-    PRIVATE_TESTER_BASELINE_RELEASE_JSON: JSON.stringify(release), PRIVATE_TESTER_ROLLBACK_SITES_VERSION: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_rollback",
-    GOOGLE_CLIENT_ID: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", BETTER_AUTH_URL: "https://nearyoustill.com", PUBLIC_APP_URL: "https://nearyoustill.com",
-    NEARYOU_ENABLE_STORY: "false", NEARYOU_ENABLE_LEGACY_ARCHIVE: "false", PRIVATE_TESTER_SCHEDULER_ENABLED: "false",
-  };
-  for (const patch of [
-    { PRIVATE_TESTER_BASELINE_RELEASE_JSON: "{}" },
-    { VERSION_METADATA: undefined },
-    { GOOGLE_CLIENT_ID: "invented.apps.googleusercontent.com" },
-    { NEARYOU_ENABLE_STORY: "true" },
-  ]) assert.throws(() => createPrivateTesterBaselineRuntime({ ...base, ...patch }, { now: () => now, fetch }), /gateway configuration invalid/);
+test("OAuth redirect proof rejects wrong origin, state, error, or an authorization code", async () => {
+  const locations = [
+    (state) => `https://attacker.example/api/auth/callback/google?state=${state}&error=interaction_required`,
+    () => "https://nearyoustill.com/api/auth/callback/google?state=wrong&error=interaction_required",
+    (state) => `https://nearyoustill.com/api/auth/callback/google?state=${state}&error=access_denied`,
+    (state) => `https://nearyoustill.com/api/auth/callback/google?state=${state}&error=interaction_required&code=forbidden`,
+  ];
+  for (const location of locations) {
+    const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment(), {
+      now: () => now,
+      expectedD1SchemaDefinitionHash: schemaDefinitionHash,
+      expectedD1SchemaObjectCount: schemaRows.length,
+      fetch: async (url) => {
+        const state = new URL(String(url)).searchParams.get("state");
+        return new Response(null, { status: 302, headers: { location: location(state) } });
+      },
+    });
+    await assert.rejects(() => runtime.read("oauth"), /evidence unavailable/);
+  }
+});
+
+test("fails closed on altered migration fields or missing index, trigger, or view definitions", async () => {
+  const cases = [
+    { ledger: migrationRows.map((row, index) => index === 0 ? { ...row, id: 9 } : row), schema: schemaRows },
+    { ledger: migrationRows.map((row, index) => index === 0 ? { ...row, applied_at: "" } : row), schema: schemaRows },
+    { ledger: migrationRows, schema: schemaRows.filter((row) => row.type !== "trigger") },
+    { ledger: migrationRows, schema: schemaRows.map((row) => row.type === "view" ? { ...row, sql: `${row.sql} WHERE 1=1` } : row) },
+  ];
+  for (const item of cases) {
+    const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("d1_migrations") ? item.ledger : item.schema }) }) };
+    const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: schemaRows.length, fetch });
+    await assert.rejects(() => runtime.read(item.ledger === migrationRows ? "d1-schema" : "d1-ledger"), /evidence unavailable/);
+  }
+});
+
+test("rejects stale or future VERSION_METADATA before it can attest any runtime read", () => {
+  for (const timestamp of [new Date(now - 300_001).toISOString(), new Date(now + 30_001).toISOString()]) {
+    assert.throws(() => createPrivateTesterBaselineRuntime(runtimeEnvironment({ VERSION_METADATA: { id: workerRuntime.id, tag: workerRuntime.commitSha, timestamp } }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, fetch }), /gateway configuration invalid/);
+  }
+});
+
+test("runtime fails closed without exact release, worker metadata, OAuth configuration, or dark gates", () => {
+  for (const patch of [{ PRIVATE_TESTER_BASELINE_RELEASE_JSON: "{}" }, { VERSION_METADATA: undefined }, { GOOGLE_CLIENT_ID: "invented.apps.googleusercontent.com" }, { NEARYOU_ENABLE_STORY: "true" }]) {
+    assert.throws(() => createPrivateTesterBaselineRuntime(runtimeEnvironment(patch), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, fetch }), /gateway configuration invalid/);
+  }
 });
