@@ -95,6 +95,12 @@ test("deployment manifest migration binds exact schema, identities, time, replay
   assert.match(sql, /REVOKE ALL ON nearyou\.schema_migrations FROM nearyou_rollout_controller/);
   assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*FROM nearyou_rollout_controller/);
   assert.doesNotMatch(sql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE).*nearyou\.(?:product_rollout|release_evidence|private_tester_deployment_manifest_nonces).* TO nearyou_private_tester_baseline_verifier/);
+  assert.match(sql, /CREATE FUNCTION nearyou\.assert_private_tester_baseline_verifier\(\) RETURNS TABLE/);
+  assert.match(sql, /SECURITY DEFINER SET search_path=pg_catalog,nearyou/);
+  assert.match(sql, /session_user::text/);
+  assert.match(sql, /current_database\(\)<>'nearyou'/);
+  assert.match(sql, /pg_has_role\(session_user,'nearyou_private_tester_baseline_verifier','USAGE'\)/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.assert_private_tester_baseline_verifier\(\) TO nearyou_private_tester_baseline_verifier/);
 });
 
 test("deployment manifest SQL time contract accepts allowed skew and rejects invalid lifetimes", () => {
@@ -128,6 +134,11 @@ test("executable PostgreSQL ACL gate proves controller denial and verifier allow
   assert.match(sql, /NOT has_schema_privilege\('nearyou_private_tester_baseline_verifier'/);
   assert.match(sql, /NOT has_table_privilege\('nearyou_private_tester_baseline_verifier','nearyou\.schema_migrations','SELECT'\)/);
   assert.match(sql, /mutation ACL widened/);
+  assert.match(sql, /SET LOCAL ROLE nearyou_private_tester_baseline_verifier/);
+  assert.match(sql, /SELECT id,checksum FROM nearyou\.schema_migrations/);
+  assert.match(sql, /SELECT \* FROM nearyou\.assert_private_tester_baseline_verifier\(\)/);
+  assert.match(sql, /SELECT \* FROM nearyou\.private_tester_baseline_verifier_identities/);
+  assert.match(sql, /\\if :ERROR/);
 });
 
 async function kmsFixture(overrides = {}) {

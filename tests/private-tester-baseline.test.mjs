@@ -179,8 +179,8 @@ test("production PostgreSQL reads and nonce consumption use only the mapped base
   const source = readFileSync(new URL("../scripts/capture-private-tester-baseline.ts", import.meta.url), "utf8");
   assert.match(source, /PRIVATE_TESTER_BASELINE_DATABASE_URL/);
   assert.match(source, /NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER/);
-  assert.match(source, /nearyou_private_tester_baseline_verifier/);
-  assert.match(source, /private_tester_baseline_verifier_identities/);
+  assert.match(source, /assert_private_tester_baseline_verifier\(\)/);
+  assert.doesNotMatch(source, /EXISTS\(SELECT 1 FROM nearyou\.private_tester_baseline_verifier_identities/);
   assert.doesNotMatch(source, /READINESS_CONTROL_DATABASE_URL|NEARYOU_READINESS_DATABASE_USER/);
 });
 
