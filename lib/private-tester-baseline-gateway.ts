@@ -37,14 +37,17 @@ const MAX_RUNTIME_AGE_MS = 300_000;
 const MAX_FUTURE_MS = 30_000;
 const REVIEWED_D1_SCHEMA_DEFINITION_HASH = d1SourceBaseline.sqlite_schema_source_definitions_sha256;
 const REVIEWED_D1_SCHEMA_OBJECT_COUNT = d1SourceBaseline.sqlite_schema_source_object_count;
-const D1_PROVIDER_INTERNAL_OBJECTS = Object.freeze([
-  Object.freeze({ type: "index", name: "sqlite_autoindex_d1_migrations_1", tableName: "d1_migrations" }),
-  Object.freeze({ type: "table", name: "_cf_METADATA", tableName: "_cf_METADATA" }),
-  Object.freeze({ type: "table", name: "d1_migrations", tableName: "d1_migrations" }),
-  Object.freeze({ type: "table", name: "sqlite_sequence", tableName: "sqlite_sequence" }),
-  Object.freeze({ type: "table", name: "sqlite_stat1", tableName: "sqlite_stat1" }),
+export const EXACT_D1_PROVIDER_INTERNAL_OBJECTS = Object.freeze([
+  Object.freeze({ type: "index", name: "sqlite_autoindex_d1_migrations_1", tableName: "d1_migrations", sql: null }),
+  Object.freeze({ type: "table", name: "_cf_METADATA", tableName: "_cf_METADATA", sql: "CREATE TABLE _cf_METADATA (\n        key INTEGER PRIMARY KEY,\n        value BLOB\n      )" }),
+  Object.freeze({ type: "table", name: "d1_migrations", tableName: "d1_migrations", sql: "CREATE TABLE d1_migrations(\n\t\tid         INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\tname       TEXT UNIQUE,\n\t\tapplied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL\n)" }),
+  Object.freeze({ type: "table", name: "sqlite_sequence", tableName: "sqlite_sequence", sql: "CREATE TABLE sqlite_sequence(name,seq)" }),
+  Object.freeze({ type: "table", name: "sqlite_stat1", tableName: "sqlite_stat1", sql: "CREATE TABLE sqlite_stat1(tbl,idx,stat)" }),
 ]);
-const D1_PROVIDER_INTERNAL_IDENTITIES = new Set(D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
+const D1_PROVIDER_INTERNAL_IDENTITIES = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
+const D1_PROVIDER_INTERNAL_NAMES = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ name }) => name));
+const D1_PROVIDER_INTERNAL_TABLE_NAMES = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ tableName }) => tableName));
+const D1_PROVIDER_INTERNAL_RECORDS = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName, sql }) => `${type}\u0000${name}\u0000${tableName}\u0000${sql}`));
 const REQUIRED_GATEWAY_VARS = Object.freeze([
   "PRIVATE_TESTER_BASELINE_OIDC_SUBJECT",
   "PRIVATE_TESTER_BASELINE_RELEASE_JSON",
@@ -77,6 +80,14 @@ function configurationError(): never { throw new Error("private tester gateway c
 function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
 async function sha256(value: string): Promise<string> { return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))), (byte) => byte.toString(16).padStart(2, "0")).join(""); }
 function exactStrings(value: unknown, expected: readonly string[]): boolean { return Array.isArray(value) && JSON.stringify(value) === JSON.stringify(expected); }
+
+export function validateExactD1ProviderObjects(objects: readonly { type: string; name: string; tableName: string; sql: string | null }[]): void {
+  const providerRecords = objects
+    .filter(({ name, tableName }) => D1_PROVIDER_INTERNAL_NAMES.has(name) || D1_PROVIDER_INTERNAL_TABLE_NAMES.has(tableName))
+    .map(({ type, name, tableName, sql }) => `${type}\u0000${name}\u0000${tableName}\u0000${sql}`);
+  const actual = new Set(providerRecords);
+  if (providerRecords.length !== D1_PROVIDER_INTERNAL_RECORDS.size || actual.size !== providerRecords.length || [...D1_PROVIDER_INTERNAL_RECORDS].some((record) => !actual.has(record))) throw new Error("private tester D1 provider schema invalid");
+}
 
 export function assertPrivateTesterDeploymentContract(bindings: unknown, hosting: unknown): void {
   try {
@@ -161,7 +172,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   const metadata = environment.VERSION_METADATA;
   const db = environment.DB;
   const runtimeNow = now();
-  const manifestProviderObjects = D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
+  const manifestProviderObjects = EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
   if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX) || !object(metadata) || Reflect.ownKeys(metadata).length !== 3 || typeof metadata.id !== "string" || typeof metadata.tag !== "string" || typeof metadata.timestamp !== "string" || !HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects) || !db || typeof db.prepare !== "function") configurationError();
   const workerRuntime = { id: metadata.id, commitSha: metadata.tag, deployedAt: metadata.timestamp };
   assertWorkerRuntime(workerRuntime, release, runtimeNow);
@@ -188,6 +199,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       previous = key;
       return { type: row.type as string, name: row.name, tableName: row.tbl_name, rootPage: Number(row.rootpage), sql: row.sql };
     });
+    try { validateExactD1ProviderObjects(objects); } catch { throw new Error("private tester gateway evidence unavailable"); }
     const sourceObjects = objects.filter(({ type, name, tableName }) => !D1_PROVIDER_INTERNAL_IDENTITIES.has(`${type}\u0000${name}\u0000${tableName}`));
     if (sourceObjects.length !== expectedD1SchemaObjectCount) throw new Error("private tester gateway evidence unavailable");
     const definitions = sourceObjects.map(({ type, name, tableName, sql }) => ({ type, name, tableName, sql }));

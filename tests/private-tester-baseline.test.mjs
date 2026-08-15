@@ -24,9 +24,9 @@ const schemaObjects = Object.freeze([
   { type: "index", name: "accounts_email_idx", tableName: "accounts", rootPage: 3, sql: "CREATE INDEX accounts_email_idx ON accounts(email)" },
   { type: "index", name: "sqlite_autoindex_accounts_1", tableName: "accounts", rootPage: 4, sql: null },
   { type: "index", name: "sqlite_autoindex_d1_migrations_1", tableName: "d1_migrations", rootPage: 7, sql: null },
-  { type: "table", name: "_cf_METADATA", tableName: "_cf_METADATA", rootPage: 5, sql: "CREATE TABLE _cf_METADATA(key INTEGER PRIMARY KEY,value BLOB)" },
+  { type: "table", name: "_cf_METADATA", tableName: "_cf_METADATA", rootPage: 5, sql: "CREATE TABLE _cf_METADATA (\n        key INTEGER PRIMARY KEY,\n        value BLOB\n      )" },
   { type: "table", name: "accounts", tableName: "accounts", rootPage: 2, sql: "CREATE TABLE accounts(id TEXT PRIMARY KEY,email TEXT)" },
-  { type: "table", name: "d1_migrations", tableName: "d1_migrations", rootPage: 6, sql: "CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY,name TEXT UNIQUE,applied_at TIMESTAMP)" },
+  { type: "table", name: "d1_migrations", tableName: "d1_migrations", rootPage: 6, sql: "CREATE TABLE d1_migrations(\n\t\tid         INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\tname       TEXT UNIQUE,\n\t\tapplied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL\n)" },
   { type: "table", name: "sqlite_sequence", tableName: "sqlite_sequence", rootPage: 8, sql: "CREATE TABLE sqlite_sequence(name,seq)" },
   { type: "table", name: "sqlite_stat1", tableName: "sqlite_stat1", rootPage: 9, sql: "CREATE TABLE sqlite_stat1(tbl,idx,stat)" },
   { type: "trigger", name: "accounts_touch", tableName: "accounts", rootPage: 0, sql: "CREATE TRIGGER accounts_touch AFTER UPDATE ON accounts BEGIN SELECT 1; END" },
@@ -179,6 +179,26 @@ test("rejects altered live migration fields or any schema object drift from revi
   for (const patch of cases) {
     const options = await input({ readers: readers(patch) });
     await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+  }
+});
+
+test("rejects every D1 provider-internal object set mismatch before capturing evidence", async () => {
+  const remove = (name) => schemaObjects.filter((object) => object.name !== name);
+  const replace = (name, patch) => schemaObjects.map((object) => object.name === name ? { ...object, ...patch } : object);
+  const providerNames = ["sqlite_autoindex_d1_migrations_1", "_cf_METADATA", "d1_migrations", "sqlite_sequence", "sqlite_stat1"];
+  const cases = [
+    ...providerNames.map(remove),
+    ...providerNames.map((name) => [...schemaObjects, ...schemaObjects.filter((object) => object.name === name)]),
+    replace("sqlite_stat1", { name: "sqlite_stat2" }),
+    replace("d1_migrations", { type: "view" }),
+    replace("sqlite_sequence", { tableName: "d1_migrations" }),
+    replace("sqlite_autoindex_d1_migrations_1", { sql: "CREATE INDEX sqlite_autoindex_d1_migrations_1 ON d1_migrations(name)" }),
+    [...schemaObjects, { type: "index", name: "d1_migrations_rogue_idx", tableName: "d1_migrations", rootPage: 10, sql: "CREATE INDEX d1_migrations_rogue_idx ON d1_migrations(name)" }],
+  ];
+  for (const objects of cases) {
+    const options = await input({ readers: readers({ d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects }) } }) });
+    await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+    assert.equal(await readFile(options.outputPath).catch(() => ""), "");
   }
 });
 

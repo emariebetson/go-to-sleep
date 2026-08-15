@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { EXACT_D1_PROVIDER_INTERNAL_OBJECTS, validateExactD1ProviderObjects } from "../lib/private-tester-baseline-gateway";
 import { parsePrivateTesterRelease, type PrivateTesterRelease } from "../lib/private-tester-release";
 import { LIVE_CATALOG_QUERY } from "./postgres-catalog";
-import { PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS, verifyPrivateTesterD1SourceBaseline } from "./private-tester-d1-source";
+import { verifyPrivateTesterD1SourceBaseline } from "./private-tester-d1-source";
 
 const HASH = /^[a-f0-9]{64}$/, VERSION = /^appgprj_[A-Za-z0-9_-]+~appgver_[A-Za-z0-9_-]+$/, ID = /^[A-Za-z][A-Za-z0-9_.:/-]{2,511}$/, NAME = /^[a-z][a-z0-9_-]{2,127}$/;
 const SECRET_VERSION = /^projects\/[a-z][a-z0-9-]{2,62}\/secrets\/[A-Za-z0-9_-]{1,255}\/versions\/[1-9][0-9]*$/;
@@ -103,7 +104,8 @@ function d1Schema(value: unknown, expectedDefinitionHash: string, expectedObject
     previous = key;
     return { type: item.type, name: item.name, tableName: item.tableName, rootPage: Number(item.rootPage), sql: item.sql };
   });
-  const providerIdentities = new Set(PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
+  try { validateExactD1ProviderObjects(objects); } catch { throw new Error("private tester baseline invalid"); }
+  const providerIdentities = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
   const sourceObjects = objects.filter(({ type, name, tableName }) => !providerIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
   const providerInternalObjects = objects.filter(({ type, name, tableName }) => providerIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
   if (sourceObjects.length !== expectedObjectCount) throw new Error("private tester baseline invalid");

@@ -16,14 +16,22 @@ const migrationNames = [
   "0014_nearlegacy_archive.sql", "0015_platform_release_foundation.sql", "0016_marketing_waitlist.sql",
 ];
 const migrationRows = migrationNames.map((name, index) => ({ id: index + 1, name, applied_at: `2026-08-14 17:${String(index).padStart(2, "0")}:00` }));
-const schemaRows = Object.freeze([
+const sourceSchemaRows = Object.freeze([
   { type: "index", name: "accounts_email_idx", tbl_name: "accounts", rootpage: 3, sql: "CREATE INDEX accounts_email_idx ON accounts(email)" },
   { type: "index", name: "sqlite_autoindex_accounts_1", tbl_name: "accounts", rootpage: 4, sql: null },
   { type: "table", name: "accounts", tbl_name: "accounts", rootpage: 2, sql: "CREATE TABLE accounts(id TEXT PRIMARY KEY,email TEXT)" },
   { type: "trigger", name: "accounts_touch", tbl_name: "accounts", rootpage: 0, sql: "CREATE TRIGGER accounts_touch AFTER UPDATE ON accounts BEGIN SELECT 1; END" },
   { type: "view", name: "account_ids", tbl_name: "account_ids", rootpage: 0, sql: "CREATE VIEW account_ids AS SELECT id FROM accounts" },
 ]);
-const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, sql: row.sql })))).digest("hex");
+const providerSchemaRows = Object.freeze([
+  { type: "index", name: "sqlite_autoindex_d1_migrations_1", tbl_name: "d1_migrations", rootpage: 7, sql: null },
+  { type: "table", name: "_cf_METADATA", tbl_name: "_cf_METADATA", rootpage: 5, sql: "CREATE TABLE _cf_METADATA (\n        key INTEGER PRIMARY KEY,\n        value BLOB\n      )" },
+  { type: "table", name: "d1_migrations", tbl_name: "d1_migrations", rootpage: 6, sql: "CREATE TABLE d1_migrations(\n\t\tid         INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\tname       TEXT UNIQUE,\n\t\tapplied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL\n)" },
+  { type: "table", name: "sqlite_sequence", tbl_name: "sqlite_sequence", rootpage: 8, sql: "CREATE TABLE sqlite_sequence(name,seq)" },
+  { type: "table", name: "sqlite_stat1", tbl_name: "sqlite_stat1", rootpage: 9, sql: "CREATE TABLE sqlite_stat1(tbl,idx,stat)" },
+]);
+const schemaRows = Object.freeze([...sourceSchemaRows, ...providerSchemaRows].sort((left, right) => `${left.type}\u0000${left.name}\u0000${left.tbl_name}`.localeCompare(`${right.type}\u0000${right.name}\u0000${right.tbl_name}`)));
+const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(sourceSchemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, sql: row.sql })))).digest("hex");
 const ledgerQuery = "SELECT id,name,applied_at FROM d1_migrations ORDER BY id";
 const schemaQuery = "SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name";
 
@@ -136,7 +144,7 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), {
     now: () => now,
     expectedD1SchemaDefinitionHash: schemaDefinitionHash,
-    expectedD1SchemaObjectCount: schemaRows.length,
+    expectedD1SchemaObjectCount: sourceSchemaRows.length,
     fetch: async (url, init) => {
       oauthCalls.push([String(url), init]);
       const state = new URL(String(url)).searchParams.get("state");
@@ -192,6 +200,25 @@ test("fails closed on altered migration fields or missing index, trigger, or vie
     const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("d1_migrations") ? item.ledger : item.schema }) }) };
     const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: schemaRows.length, fetch });
     await assert.rejects(() => runtime.read(item.ledger === migrationRows ? "d1-schema" : "d1-ledger"), /evidence unavailable/);
+  }
+});
+
+test("fails closed unless the exact five D1 provider-internal schema objects are present", async () => {
+  const remove = (name) => schemaRows.filter((row) => row.name !== name);
+  const replace = (name, patch) => schemaRows.map((row) => row.name === name ? { ...row, ...patch } : row);
+  const cases = [
+    ...providerSchemaRows.map(({ name }) => remove(name)),
+    ...providerSchemaRows.map(({ name }) => [...schemaRows, ...schemaRows.filter((row) => row.name === name)]),
+    replace("sqlite_stat1", { name: "sqlite_stat2" }),
+    replace("d1_migrations", { type: "view" }),
+    replace("sqlite_sequence", { tbl_name: "d1_migrations" }),
+    replace("sqlite_autoindex_d1_migrations_1", { sql: "CREATE INDEX sqlite_autoindex_d1_migrations_1 ON d1_migrations(name)" }),
+    [...schemaRows, { type: "index", name: "d1_migrations_rogue_idx", tbl_name: "d1_migrations", rootpage: 10, sql: "CREATE INDEX d1_migrations_rogue_idx ON d1_migrations(name)" }],
+  ];
+  for (const schema of cases) {
+    const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("d1_migrations") ? migrationRows : schema }) }) };
+    const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
+    await assert.rejects(() => runtime.read("d1-schema"), /evidence unavailable/);
   }
 });
 
