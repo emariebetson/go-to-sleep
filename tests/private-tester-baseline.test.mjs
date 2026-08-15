@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { capturePrivateTesterBaseline } from "../scripts/capture-private-tester-baseline.ts";
+import { capturePrivateTesterBaseline, createAuthenticatedProductionReaders } from "../scripts/capture-private-tester-baseline.ts";
 
 const now = Date.parse("2026-08-14T18:00:00.000Z");
 const identity = "principal://near-prod/private-tester-reader";
@@ -49,7 +51,15 @@ test("rejects empty, arbitrary, accessor, sparse, and exotic array evidence", as
   const sparse = []; sparse[1] = { id: "0016_existing_head", checksum: "c".repeat(64) };
   const accessor = [{ id: "0015_platform_release_foundation", checksum: "b".repeat(64) }]; Object.defineProperty(accessor, "0", { enumerable: true, get: () => ledger[0] });
   const exotic = [...ledger]; Object.setPrototypeOf(exotic, null);
-  for (const value of [[], { ledger }, sparse, accessor, exotic]) { const options = await input({ readers: readers({ d1: { readLedger: async () => observed({ ledger: value }), readSchema: async () => observed({ schema: "site_creator", tables: [{ name: "accounts", sqlHash: "d".repeat(64) }] }) } }) }); await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/); }
+  const symbol = [...ledger]; symbol[Symbol("hidden")] = true;
+  for (const value of [[], { ledger }, sparse, accessor, exotic, symbol]) { const options = await input({ readers: readers({ d1: { readLedger: async () => observed({ ledger: value }), readSchema: async () => observed({ schema: "site_creator", tables: [{ name: "accounts", sqlHash: "d".repeat(64) }] }) } }) }); await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/); }
+});
+test("pins the gateway audience and rejects a response with the wrong identity", async () => {
+  const artifact = readFileSync(new URL("../infra/production/cloud-sql-auth-proxy.args", import.meta.url), "utf8"), checksum = createHash("sha256").update(artifact).digest("hex");
+  const environment = { PRIVATE_TESTER_GCP_PROJECT: "near-prod", PRIVATE_TESTER_DNS_ZONE: "near-zone", PRIVATE_TESTER_OAUTH_PROVIDER: "google", PRIVATE_TESTER_READER_IDENTITY: identity, READINESS_CONTROL_DATABASE_URL: "postgresql://reader@127.0.0.1:5432/nearyou?sslmode=disable", CLOUD_SQL_IAM_CONNECTOR: "cloud-sql-auth-proxy", CLOUD_SQL_INSTANCE_CONNECTION_NAME: "near-prod:us-central1:nearyou", CLOUD_SQL_PROXY_ARGS_CHECKSUM: checksum, NEARYOU_READINESS_DATABASE_USER: "reader" };
+  const seen = []; const fetch = async (url, init = {}) => { seen.push([String(url), init]); if (String(url).includes("metadata.google.internal")) return new Response("a.b.c", { status: 200 }); return new Response(JSON.stringify({ identity: "principal://wrong/reader", audience: "https://private-tester-read.nearyoustill.com", observedAt: now, body: { version: "appgprj_example~appgver_example" } }), { status: 200 }); };
+  const read = createAuthenticatedProductionReaders(environment, { fetch, now: () => now }); await assert.rejects(() => read.sites.readVersion(), /reader unavailable/);
+  assert.equal(seen[1][0], "https://private-tester-read.nearyoustill.com/private-tester-baseline/sites-version"); assert.match(String(seen[1][1].headers.authorization), /^Bearer a\.b\.c$/);
 });
 test("rejects missing observations and nonempty schema records that are malformed or incomplete", async () => {
   const cases = [
