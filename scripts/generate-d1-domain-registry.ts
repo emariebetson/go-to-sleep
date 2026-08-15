@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import * as schema from "../db/schema";
+const schema = await import(new URL("../db/schema.ts", import.meta.url).href) as typeof import("../db/schema");
 import { getTableConfig } from "drizzle-orm/sqlite-core";
 
 const explicitKeys: Record<string, string[]> = {

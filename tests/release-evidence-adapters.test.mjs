@@ -88,6 +88,13 @@ test("deployment manifest migration binds exact schema, identities, time, replay
   assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*TO nearyou_release_verifier/);
   assert.doesNotMatch(sql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE).*private_tester_deployment_manifest_nonces TO nearyou_release_verifier/);
   assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION nearyou\.consume_release_evidence|ALTER FUNCTION nearyou\.consume_release_evidence/);
+  assert.match(sql, /CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(sql, /GRANT USAGE ON SCHEMA nearyou TO nearyou_private_tester_baseline_verifier/);
+  assert.match(sql, /GRANT SELECT ON nearyou\.schema_migrations TO nearyou_private_tester_baseline_verifier/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*TO nearyou_private_tester_baseline_verifier/);
+  assert.match(sql, /REVOKE ALL ON nearyou\.schema_migrations FROM nearyou_rollout_controller/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*FROM nearyou_rollout_controller/);
+  assert.doesNotMatch(sql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE).*nearyou\.(?:product_rollout|release_evidence|private_tester_deployment_manifest_nonces).* TO nearyou_private_tester_baseline_verifier/);
 });
 
 test("deployment manifest SQL time contract accepts allowed skew and rejects invalid lifetimes", () => {
@@ -111,6 +118,16 @@ test("deployment manifest SQL time contract accepts allowed skew and rejects inv
   assert.equal(evaluate({ issuedAt: serverNow + 30_001, expiresAt: serverNow + 30_001 + 900_000 }), true, ">30s future issuance is invalid");
   assert.equal(evaluate({ issuedAt: serverNow, expiresAt: serverNow + 900_001 }), true, ">15m signed lifetime is invalid");
   assert.equal(evaluate({ issuedAt: serverNow - 1, expiresAt: serverNow }), true, "expired claims are invalid");
+});
+
+test("executable PostgreSQL ACL gate proves controller denial and verifier allowance", () => {
+  const sql = readFileSync(new URL("../scripts/private-tester-baseline-acl-gate.sql", import.meta.url), "utf8");
+  assert.match(sql, /\\set ON_ERROR_STOP on/);
+  assert.match(sql, /has_table_privilege\('nearyou_rollout_controller','nearyou\.schema_migrations','SELECT'\)/);
+  assert.match(sql, /has_function_privilege\('nearyou_rollout_controller'.*'EXECUTE'\)/);
+  assert.match(sql, /NOT has_schema_privilege\('nearyou_private_tester_baseline_verifier'/);
+  assert.match(sql, /NOT has_table_privilege\('nearyou_private_tester_baseline_verifier','nearyou\.schema_migrations','SELECT'\)/);
+  assert.match(sql, /mutation ACL widened/);
 });
 
 async function kmsFixture(overrides = {}) {

@@ -16,7 +16,7 @@ test("domain registry exactly covers every domain sqliteTable export with ordere
 });
 
 test("generated registry and 104-table maintenance fence artifact are current",()=>{
- execFileSync(process.execPath,["--import","tsx","scripts/generate-d1-domain-registry.ts","--check"],{cwd:new URL("..",import.meta.url)});
+ execFileSync(process.execPath,["scripts/generate-d1-domain-registry.ts","--check"],{cwd:new URL("..",import.meta.url)});
  const sql=readFileSync(new URL("../drizzle/0018_cutover_inventory_fence.generated.sql",import.meta.url),"utf8");assert.equal((sql.match(/CREATE TRIGGER/g)??[]).length,104*3);for(const entry of D1_DOMAIN_REGISTRY)for(const kind of ["insert","update","delete"])assert.match(sql,new RegExp(`cutover_inventory_fence_${entry.table}_${kind}`));
 });
 

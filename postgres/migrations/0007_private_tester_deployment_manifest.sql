@@ -1,4 +1,17 @@
 BEGIN;
+CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT NOBYPASSRLS;
+REVOKE ALL ON SCHEMA nearyou FROM nearyou_private_tester_baseline_verifier;
+GRANT USAGE ON SCHEMA nearyou TO nearyou_private_tester_baseline_verifier;
+REVOKE ALL ON nearyou.schema_migrations FROM nearyou_rollout_controller,nearyou_private_tester_baseline_verifier;
+GRANT SELECT ON nearyou.schema_migrations TO nearyou_private_tester_baseline_verifier;
+CREATE TABLE nearyou.private_tester_baseline_verifier_identities(database_user name PRIMARY KEY,principal text NOT NULL UNIQUE CHECK(principal~'^service:[A-Za-z0-9_-]{3,100}$'));
+ALTER TABLE nearyou.private_tester_baseline_verifier_identities OWNER TO nearyou_release_policy_owner;
+REVOKE ALL ON nearyou.private_tester_baseline_verifier_identities FROM PUBLIC,nearyou_app,nearyou_release_verifier,nearyou_rollout_controller,nearyou_private_tester_baseline_verifier;
+GRANT SELECT,INSERT ON nearyou.private_tester_baseline_verifier_identities TO nearyou_release_policy_owner;
+CREATE FUNCTION nearyou.register_private_tester_baseline_verifier_identity(p_database_user name,p_principal text) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,nearyou AS $$ BEGIN IF current_user<>'nearyou_release_policy_owner' OR p_database_user::text!~'^[A-Za-z0-9_.@-]{3,200}$' OR p_principal!~'^service:[A-Za-z0-9_-]{3,100}$' OR NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=p_database_user::text) OR NOT pg_has_role(p_database_user,'nearyou_private_tester_baseline_verifier','MEMBER') THEN RAISE EXCEPTION 'private tester baseline verifier identity invalid'; END IF; INSERT INTO nearyou.private_tester_baseline_verifier_identities VALUES(p_database_user,p_principal) ON CONFLICT DO NOTHING; END $$;
+ALTER FUNCTION nearyou.register_private_tester_baseline_verifier_identity(name,text) OWNER TO nearyou_release_policy_owner;
+REVOKE ALL ON FUNCTION nearyou.register_private_tester_baseline_verifier_identity(name,text) FROM PUBLIC,nearyou_app,nearyou_release_verifier,nearyou_rollout_controller,nearyou_private_tester_baseline_verifier;
+GRANT EXECUTE ON FUNCTION nearyou.register_private_tester_baseline_verifier_identity(name,text) TO nearyou_migration;
 CREATE TABLE nearyou.private_tester_deployment_manifest_nonces (
   nonce text PRIMARY KEY CHECK (nonce ~ '^[A-Za-z0-9_-]{22,128}$'),
   claims_digest text NOT NULL UNIQUE CHECK (claims_digest ~ '^[a-f0-9]{64}$'),
@@ -53,7 +66,9 @@ BEGIN
 END $$;
 ALTER FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) OWNER TO nearyou_release_policy_owner;
 REVOKE ALL ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) FROM PUBLIC,nearyou_app,nearyou_release_maintenance,nearyou_release_key_manager,nearyou_cutover_runner;
+REVOKE ALL ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) FROM nearyou_rollout_controller;
 GRANT EXECUTE ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) TO nearyou_release_verifier;
+GRANT EXECUTE ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) TO nearyou_private_tester_baseline_verifier;
 
 CREATE FUNCTION nearyou.reject_private_tester_deployment_manifest_mutation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,nearyou AS $$ BEGIN RAISE EXCEPTION 'private_tester_deployment_manifest_immutable'; END $$;
 ALTER FUNCTION nearyou.reject_private_tester_deployment_manifest_mutation() OWNER TO nearyou_release_policy_owner;

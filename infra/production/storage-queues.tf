@@ -479,6 +479,14 @@ resource "google_cloud_run_v2_job" "migrations" {
           name  = "NEARYOU_READINESS_OIDC_PRINCIPAL"
           value = local.readiness_controller_oidc_principal
         }
+        env {
+          name  = "NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER"
+          value = local.private_tester_baseline_database_user
+        }
+        env {
+          name  = "NEARYOU_PRIVATE_TESTER_BASELINE_OIDC_PRINCIPAL"
+          value = local.private_tester_baseline_oidc_principal
+        }
 
 
         env {

@@ -80,7 +80,28 @@ resource "google_sql_user" "readiness_controller" {
   instance = google_sql_database_instance.primary.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
 }
+resource "google_service_account" "private_tester_baseline_verifier" {
+  account_id   = "nearyou-private-tester-baseline"
+  display_name = "NearYou private tester baseline verifier"
+}
+resource "google_project_iam_member" "private_tester_baseline_verifier_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.private_tester_baseline_verifier.email}"
+}
+resource "google_project_iam_member" "private_tester_baseline_verifier_cloudsql_user" {
+  project = var.project_id
+  role    = "roles/cloudsql.instanceUser"
+  member  = "serviceAccount:${google_service_account.private_tester_baseline_verifier.email}"
+}
+resource "google_sql_user" "private_tester_baseline_verifier" {
+  name     = google_service_account.private_tester_baseline_verifier.email
+  instance = google_sql_database_instance.primary.name
+  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+}
 locals {
   readiness_controller_database_user  = google_service_account.readiness_controller.email
   readiness_controller_oidc_principal = "service:nearyou-readiness-controller"
+  private_tester_baseline_database_user  = google_service_account.private_tester_baseline_verifier.email
+  private_tester_baseline_oidc_principal = "service:nearyou-private-tester-baseline-verifier"
 }
