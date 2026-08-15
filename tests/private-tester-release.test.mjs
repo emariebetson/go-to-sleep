@@ -33,6 +33,24 @@ test("rejects unknown release properties", () => {
   assert.throws(() => parsePrivateTesterRelease({ ...release(), unexpected: true }, now), /release invalid/);
 });
 
+test("rejects a non-enumerable unknown release property", () => {
+  const input = release();
+  Object.defineProperty(input, "unexpected", { value: true });
+  assert.throws(() => parsePrivateTesterRelease(input, now), /release invalid/);
+});
+
+test("rejects symbol release properties", () => {
+  const input = release();
+  input[Symbol("unexpected")] = true;
+  assert.throws(() => parsePrivateTesterRelease(input, now), /release invalid/);
+});
+
+test("rejects accessor release properties", () => {
+  const input = release();
+  Object.defineProperty(input, "releaseId", { enumerable: true, get: () => "rel_20260814_private_01" });
+  assert.throws(() => parsePrivateTesterRelease(input, now), /release invalid/);
+});
+
 test("rejects a start more than five minutes before the current time", () => {
   assert.throws(() => parsePrivateTesterRelease({ ...release(), startsAt: "2026-08-14T17:54:59.999Z", expiresAt: "2026-08-21T17:54:59.999Z" }, now), /release invalid/);
 });

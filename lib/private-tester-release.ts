@@ -16,10 +16,11 @@ export type PrivateTesterRelease = {
 
 function isExactRelease(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return false;
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  if (Object.values(descriptors).some((descriptor) => !Object.hasOwn(descriptor, "value") || descriptor.get || descriptor.set)) return false;
-  const keys = Object.keys(value).sort();
-  return keys.length === RELEASE_KEYS.length && keys.every((key, index) => key === [...RELEASE_KEYS].sort()[index]);
+  const keys = Reflect.ownKeys(value);
+  return keys.length === RELEASE_KEYS.length && keys.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return typeof key === "string" && RELEASE_KEYS.includes(key) && !!descriptor && descriptor.enumerable && Object.hasOwn(descriptor, "value") && !descriptor.get && !descriptor.set;
+  });
 }
 
 export function parsePrivateTesterRelease(input: unknown, nowMs: number): PrivateTesterRelease {
