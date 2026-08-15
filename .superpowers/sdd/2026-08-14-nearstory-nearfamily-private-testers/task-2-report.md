@@ -208,3 +208,57 @@ Result: the build stopped before application compilation with `ERR_DLOPEN_FAILED
 
 This change intentionally does not deploy or mutate the production Sites project. Until an authorized release deploy supplies the exact subject, release JSON, rollback version, explicit false gate values, and version-metadata binding, the new route is absent from the current live version or returns 503; it cannot produce self-asserted evidence. The source, deployment contract, and executable tests are complete, but a production baseline still requires that separately authorized exact deployment. The repository build also remains blocked by the pre-existing unsigned Rolldown native binary described above.
 
+## Fix Round 5 — BLOCKED
+
+**Final status: BLOCKED. No production baseline artifact was created.** The production reader now deliberately throws `private tester Sites control-plane unavailable` before collection because the authenticated provider interfaces available in this round cannot establish all of the required control-plane facts. They can identify the Sites project, enumerate saved versions, and show binding labels, but a saved version is not proof of the currently deployed live version, and the available reads do not return exact D1 database and R2 bucket resource identities. Consequently, environment values, saved-version ordering, `VERSION_METADATA`, and binding labels are not relabeled as observed Sites current/rollback/resource truth.
+
+This section supersedes the contradictory Round 4 claims that the gateway projects live `DB`/`AUDIO` identities, that release and rollback come from deployment bindings, and that the manual version/binding reads under “Live authoritative read evidence” are admissible to the artifact. Those manual observations are contextual only. They do not satisfy the final evidence contract and are not consumed by it. The Round 4 claim that the OAuth probe proves an authorized origin is also superseded: the probe proves only that Google accepted the exact callback redirect for the exact client. `authorizedOrigins` was removed from both the gateway response and artifact schema because no authenticated Google management/configuration source for that property is wired here.
+
+The remaining evidence paths now fail closed as follows:
+
+- Sites current and rollback versions, commits, and exact provider-qualified D1/R2 identities must arrive together from an authenticated control-plane adapter. The collector exact-binds current version/commit to the reviewed release and binds every runtime read to fresh worker metadata, but the production adapter is intentionally unavailable until such a provider source exists.
+- D1 migration evidence reads exact live `id`, `name`, and `applied_at` fields for 0001–0016 and rejects altered sequence, name, timestamp, or cardinality. The schema read is an unfiltered, ordered projection of every table, index, trigger, and view, including SQLite/D1-owned objects. The artifact hashes the complete live object set. Separately, a credential-stripped local Wrangler replay mechanically applies reviewed migrations 0000–0016 in an isolated temporary state and reproduces the reviewed 671-object application/source definition hash. Explicit provider-owned tables are separated only for the source comparison; their exact live objects remain in the complete hash and receive their own count/hash.
+- The reader response bound was raised from 256 KiB to 1 MiB after measuring the complete schema projection above the old cap. The bound remains enforced in bytes, and executable coverage sends a 676-object response above 256 KiB.
+- Runtime metadata is rejected when older than five minutes or more than 30 seconds in the future. Gateway metadata is rechecked after each read. Provider/server completion timestamps are taken after reads, and the collector takes its final capture time only after all reads complete, then validates every observation and runtime window against that final time.
+- The gateway accepts only the exact Google redirect proof: exact origin/path, returned state, `interaction_required`, and no authorization code. The collector independently requires the exact issuer, client/audience, callback, proof, and key set and rejects any added origin, state, error, or code claim.
+
+The source replay mutates only a newly created temporary local D1 directory, passes `--local`, removes Cloudflare credential variables from the child process, and removes the temporary directory afterward. All provider and production readers remain read-only. There was no deployment, activation, gate change, secret payload read, or production mutation; output creation still uses `O_EXCL`/`flag: "wx"`.
+
+### RED evidence
+
+The initial round-5 adversarial run had 10 passing and 8 failing tests against the Round 4 implementation. After the gateway fixture was corrected, stale runtime metadata still produced `Missing expected exception`. Expansion to internal SQLite objects then produced 19 passing and 3 failing tests until null-SQL autoindexes and the complete object set were supported.
+
+The final review-driven RED run was:
+
+```sh
+NODE=/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+$NODE --import tsx --test tests/private-tester-baseline-gateway.test.mjs tests/private-tester-baseline.test.mjs
+```
+
+Result: 23/25 passed. The two failures proved that the 256 KiB JSON cap rejected the complete schema response and that the collector accepted a nonexact OAuth issuer/origin contract. After those fixes, the source-provenance test was added and failed with `ERR_MODULE_NOT_FOUND` until the executable 0000–0016 verifier and reviewed manifest existed.
+
+### GREEN evidence
+
+```sh
+NODE=/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+PATH=/Applications/ChatGPT.app/Contents/Resources/cua_node/bin:$PATH \
+  $NODE --import tsx --test tests/private-tester-baseline-gateway.test.mjs tests/private-tester-baseline.test.mjs
+PATH=/Applications/ChatGPT.app/Contents/Resources/cua_node/bin:$PATH npm run typecheck
+PATH=/Applications/ChatGPT.app/Contents/Resources/cua_node/bin:$PATH \
+  npx eslint lib/private-tester-baseline-gateway.ts scripts/capture-private-tester-baseline.ts scripts/private-tester-d1-source.ts tests/private-tester-baseline-gateway.test.mjs tests/private-tester-baseline.test.mjs
+PATH=/Applications/ChatGPT.app/Contents/Resources/cua_node/bin:$PATH \
+  $NODE --import tsx --test tests/*.test.mjs
+git diff --check
+rg -n "methods?\s*[:=]\s*['\"](?:POST|PUT|PATCH|DELETE)|\b(?:INSERT|UPDATE|DELETE)\b" \
+  lib/private-tester-baseline-gateway.ts 'app/api/internal/private-tester-baseline/[kind]/route.ts' scripts/capture-private-tester-baseline.ts
+```
+
+Results: 26/26 focused tests and 547/547 repository tests passed. TypeScript, scoped ESLint, and `git diff --check` exited 0. The live-reader mutation scan returned no matches. The focused suite includes executable adversaries for forged Sites/binding identities, exact ledger fields, missing or altered table/index/trigger/view definitions, manifest range/version/count drift, the mechanically regenerated source hash, oversized complete schema transport, synthesized OAuth origins and wrong redirect state/error/code, stale/future runtime metadata, post-read timestamps, final capture windows, secret-bearing evidence, and `O_EXCL` output.
+
+`npm run build` was also attempted during this round and stopped before application compilation with the pre-existing macOS `ERR_DLOPEN_FAILED` for the unsigned `@rolldown/binding-darwin-x64` native binary. Dependencies and the lockfile were not altered to bypass that host issue.
+
+### Commit and unblock requirement
+
+Implementation commit: `311f573 fix: fail closed on unproven baseline evidence`.
+
+To unblock Task 2, an authenticated provider/control-plane source must return the exact currently deployed Sites saved-version identity and commit, an explicitly selected rollback saved-version identity and commit, and provider-qualified D1 database and R2 bucket resource identities. Once that source is available, it can replace the intentional production adapter failure and the capture must be rerun. Until then, emitting a “live authoritative” baseline would fabricate evidence, so the breaker-round result remains **BLOCKED**.
