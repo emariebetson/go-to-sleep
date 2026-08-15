@@ -6,14 +6,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createPrivateTesterBaselineRuntime } from "../lib/private-tester-baseline-gateway.ts";
+import { privateTesterDeploymentManifestSignedBytes } from "../lib/private-tester-deployment-manifest.ts";
 import { capturePrivateTesterBaseline, createAuthenticatedProductionReaders } from "../scripts/capture-private-tester-baseline.ts";
 import { verifyPrivateTesterD1SourceBaseline } from "../scripts/private-tester-d1-source.ts";
 
 const now = Date.parse("2026-08-14T18:00:00.000Z");
 const identity = "principal://near-prod/private-tester-reader";
+const postgresIdentity = "database:nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com";
+const signerPrincipal = "ci://github/nearyou/private-tester-deployment";
+const signerKeyId = "private-tester-deployment";
+const accountId = "1".repeat(32);
+const projectId = "appgprj_example1";
 const googleClientId = "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com";
 const workerRuntime = Object.freeze({ id: "11111111-1111-4111-8111-111111111111", commitSha: "a".repeat(40), deployedAt: "2026-08-14T17:59:00.000Z" });
-const release = () => ({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: "appgprj_example~appgver_example", startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
+const release = () => ({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: `${projectId}~appgver_example`, startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
 const ledger = Object.freeze([{ id: "0015_platform_release_foundation", checksum: "b".repeat(64) }, { id: "0016_existing_head", checksum: "c".repeat(64) }]);
 const reviewedSourceHash = createHash("sha256").update(JSON.stringify([{ name: "0000_nearnight_foundation.sql", checksum: "a".repeat(64) }, ...ledger.map(({ id, checksum }) => ({ name: `${id}.sql`, checksum }))])).digest("hex");
 const appliedMigrations = Object.freeze([
@@ -35,35 +41,57 @@ const schemaObjects = Object.freeze([
 const providerInternalIdentities = new Set(["index\u0000sqlite_autoindex_d1_migrations_1\u0000d1_migrations", "table\u0000_cf_METADATA\u0000_cf_METADATA", "table\u0000d1_migrations\u0000d1_migrations", "table\u0000sqlite_sequence\u0000sqlite_sequence", "table\u0000sqlite_stat1\u0000sqlite_stat1"]);
 const sourceSchemaObjects = schemaObjects.filter(({ type, name, tableName }) => !providerInternalIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
 const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(sourceSchemaObjects.map(({ rootPage, ...object }) => { void rootPage; return object; }))).digest("hex");
-const controlPlane = () => ({
-  projectId: "appgprj_example",
-  current: { version: "appgprj_example~appgver_example", commitSha: "a".repeat(40) },
-  rollback: { version: "appgprj_example~appgver_rollback", commitSha: "f".repeat(40) },
+const deploymentOperation = () => ({
+  schemaVersion: 1,
+  principal: signerPrincipal,
+  keyId: signerKeyId,
+  keyVersion: 7,
+  releaseId: release().releaseId,
+  projectId,
+  live: { version: `${projectId}~appgver_example`, commitSha: "a".repeat(40) },
+  rollback: { version: `${projectId}~appgver_rollback`, commitSha: "f".repeat(40) },
   resources: [
-    { binding: "AUDIO", kind: "r2", resourceId: "r2/buckets/nearyou-audio-production" },
-    { binding: "DB", kind: "d1", resourceId: "d1/databases/22222222-2222-4222-8222-222222222222" },
+    { binding: "AUDIO", kind: "r2", resource: `accounts/${accountId}/r2/buckets/nearyou-audio-production` },
+    { binding: "DB", kind: "d1", resource: `accounts/${accountId}/d1/database/22222222-2222-4222-8222-222222222222` },
   ],
 });
 const observed = (body, overrides = {}) => ({ provider: "test-reader", observedAt: now, identity, body, ...overrides });
 const runtimeObserved = (body, overrides = {}) => observed(body, { provider: "sites-runtime", workerRuntime, ...overrides });
+const postgresObserved = (body, overrides = {}) => observed(body, { provider: "cloud-sql", identity: postgresIdentity, ...overrides });
+const providerObserved = (body, overrides = {}) => observed(body, { provider: "cloudflare-api", identity: `account:${accountId}`, ...overrides });
 const readers = (overrides = {}) => ({
-  controlPlane: { read: async () => observed(controlPlane(), { provider: "sites-control-plane" }) },
   d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }) },
-  postgres: { readMigrations: async () => observed({ ledger }), readCatalog: async () => observed({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) },
+  postgres: { readMigrations: async () => postgresObserved({ ledger }), readCatalog: async () => postgresObserved({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) },
+  providerInventory: { read: async () => providerObserved({ resources: deploymentOperation().resources }) },
   dns: { readIdentifiers: async () => observed({ records: [{ name: "nearyoustill.com", recordId: "dns-record-01", type: "A" }] }) },
   oauth: { readIdentifiers: async () => runtimeObserved({ issuer: "https://accounts.google.com", audience: googleClientId, clientId: googleClientId, providerAcceptedRedirectUri: "https://nearyoustill.com/api/auth/callback/google", proof: "interaction_required" }) },
   secretManager: { listVersions: async () => observed({ versions: ["projects/near-prod/secrets/nearstory-api/versions/12", "projects/near-prod/secrets/oauth-client/versions/3"] }) },
   gates: { read: async () => runtimeObserved({ nearfamily: false, nearstory: false, scheduler: false }) },
   ...overrides,
 });
+const deploymentPair = await crypto.subtle.generateKey({ name: "RSA-PSS", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+const deploymentFingerprint = Buffer.from(await crypto.subtle.digest("SHA-256", await crypto.subtle.exportKey("spki", deploymentPair.publicKey))).toString("hex");
+let deploymentNonce = 0;
+async function deployment(overrides = {}) {
+  deploymentNonce += 1;
+  const base = { ...deploymentOperation(), notBefore: now, issuedAt: now, expiresAt: now + 15 * 60_000, nonce: String(deploymentNonce).padStart(22, "a") };
+  const claims = overrides.claims ? overrides.claims(base) : base;
+  const signature = Buffer.from(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, deploymentPair.privateKey, new TextEncoder().encode(privateTesterDeploymentManifestSignedBytes(claims)))).toString("base64url");
+  const record = { principal: signerPrincipal, keyId: signerKeyId, version: 7, fingerprint: deploymentFingerprint, key: deploymentPair.publicKey };
+  const trust = [{ principal: signerPrincipal, keyId: signerKeyId, version: 7, fingerprint: deploymentFingerprint, status: "active", validFrom: now - 60_000, validUntil: now + 60 * 60_000, revokedAt: null, usage: "release-evidence" }];
+  return { envelope: overrides.envelope ? overrides.envelope({ claims, signature }) : { claims, signature }, verification: { trust, lookupKey: async () => record, nonceStore: overrides.nonceStore ?? { consumeDeploymentManifestNonce: async () => true } } };
+}
 async function input(overrides = {}) {
   const dir = await mkdtemp(join(tmpdir(), "private-tester-baseline-"));
-  return { release: release(), expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...overrides };
+  const signed = overrides.deployment ?? await deployment();
+  const { deployment: _deployment, ...rest } = overrides;
+  void _deployment;
+  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
 }
 function productionEnvironment() {
   const instance = "nearnight:us-central1:nearyou-production";
   const artifact = readFileSync(new URL("../infra/production/cloud-sql-auth-proxy.args", import.meta.url), "utf8").replace("${CLOUD_SQL_INSTANCE_CONNECTION_NAME}", instance);
-  return { PRIVATE_TESTER_GCP_PROJECT: "near-prod", PRIVATE_TESTER_DNS_ZONE: "near-zone", PRIVATE_TESTER_READER_SUBJECT: "109876543210987654321", READINESS_CONTROL_DATABASE_URL: "postgresql://nearyou-readiness-ctl%40nearnight.iam.gserviceaccount.com@127.0.0.1:5432/nearyou?sslmode=disable", CLOUD_SQL_IAM_CONNECTOR: "cloud-sql-auth-proxy", CLOUD_SQL_INSTANCE_CONNECTION_NAME: instance, CLOUD_SQL_PROXY_ARGS_CHECKSUM: createHash("sha256").update(artifact).digest("hex"), NEARYOU_READINESS_DATABASE_USER: "nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com" };
+  return { PRIVATE_TESTER_GCP_PROJECT: "near-prod", PRIVATE_TESTER_DNS_ZONE: "near-zone", PRIVATE_TESTER_READER_SUBJECT: "109876543210987654321", CLOUDFLARE_API_TOKEN: "token_abcdefghijklmnopqrstuvwxyz", READINESS_CONTROL_DATABASE_URL: "postgresql://nearyou-readiness-ctl%40nearnight.iam.gserviceaccount.com@127.0.0.1:5432/nearyou?sslmode=disable", CLOUD_SQL_IAM_CONNECTOR: "cloud-sql-auth-proxy", CLOUD_SQL_INSTANCE_CONNECTION_NAME: instance, CLOUD_SQL_PROXY_ARGS_CHECKSUM: createHash("sha256").update(artifact).digest("hex"), NEARYOU_READINESS_DATABASE_USER: "nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com" };
 }
 
 test("mechanically regenerates the reviewed 0000-0016 D1 source schema manifest", async () => {
@@ -92,14 +120,14 @@ test("mechanically regenerates the reviewed 0000-0016 D1 source schema manifest"
   ]) await assert.rejects(() => verifyPrivateTesterD1SourceBaseline({ manifest: { ...manifest, ...patch } }), /source baseline invalid/);
 });
 
-test("captures provider-bound Sites resources and exact live D1 state without claiming OAuth origins", async () => {
+test("a valid signed one-time deployment manifest unblocks exact live baseline capture", async () => {
   const options = await input();
   const baseline = await capturePrivateTesterBaseline(options);
   const written = JSON.parse(await readFile(options.outputPath, "utf8"));
   assert.deepEqual(written, baseline);
-  assert.deepEqual(baseline.sites.current, controlPlane().current);
-  assert.deepEqual(baseline.sites.rollback, controlPlane().rollback);
-  assert.deepEqual(baseline.sites.resources, controlPlane().resources);
+  assert.deepEqual(baseline.sites.current, deploymentOperation().live);
+  assert.deepEqual(baseline.sites.rollback, deploymentOperation().rollback);
+  assert.deepEqual(baseline.sites.resources, deploymentOperation().resources);
   assert.deepEqual(baseline.sites.workerRuntime, workerRuntime);
   assert.deepEqual(baseline.d1.appliedMigrations, appliedMigrations);
   assert.match(baseline.d1.appliedLedgerHash, /^[a-f0-9]{64}$/);
@@ -112,26 +140,91 @@ test("captures provider-bound Sites resources and exact live D1 state without cl
   assert.match(baseline.d1.providerInternalSchemaHash, /^[a-f0-9]{64}$/);
   assert.equal(baseline.oauth.providerAcceptedRedirectUri, "https://nearyoustill.com/api/auth/callback/google");
   assert.equal(Object.hasOwn(baseline.oauth, "authorizedOrigins"), false);
+  assert.equal(baseline.observations.postgresCatalog.identity, postgresIdentity);
+  assert.equal(baseline.observations.providerInventory.identity, `account:${accountId}`);
 });
 
-test("rejects self-asserted Sites versions and binding labels without provider resource identities", async () => {
+test("unsigned and self-asserted Sites responses cannot replace manifest verification", async () => {
+  const forged = await deployment({ envelope: ({ claims }) => ({ claims, signature: "A".repeat(512) }) });
+  const unsigned = await input({ deployment: forged });
+  await assert.rejects(() => capturePrivateTesterBaseline(unsigned), /signature/);
+  assert.equal(await readFile(unsigned.outputPath).catch(() => ""), "");
+
+  const selfAsserted = await input({ readers: readers({ controlPlane: { read: async () => observed({ projectId, current: deploymentOperation().live, rollback: deploymentOperation().rollback, resources: deploymentOperation().resources }, { provider: "sites-control-plane" }) } }) });
+  await assert.rejects(() => capturePrivateTesterBaseline(selfAsserted), /baseline invalid/);
+  assert.equal(await readFile(selfAsserted.outputPath).catch(() => ""), "");
+});
+
+test("production readers exact-compare signed resources with authenticated Cloudflare inventory", async () => {
+  const urls = [];
+  const fetch = async (inputUrl, init = {}) => {
+    const url = String(inputUrl); urls.push(url);
+    assert.equal(init.headers.authorization, "Bearer token_abcdefghijklmnopqrstuvwxyz");
+    const result = url.includes("/r2/buckets/") ? { name: "nearyou-audio-production" } : { uuid: "22222222-2222-4222-8222-222222222222" };
+    return new Response(JSON.stringify({ success: true, errors: [], messages: [], result }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const production = createAuthenticatedProductionReaders(productionEnvironment(), { now: () => now, fetch }, release());
+  const value = await production.providerInventory.read(deploymentOperation().resources);
+  assert.deepEqual(value.body.resources, deploymentOperation().resources);
+  assert.equal(value.identity, `account:${accountId}`);
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], new RegExp(`/accounts/${accountId}/r2/buckets/nearyou-audio-production$`));
+  assert.match(urls[1], new RegExp(`/accounts/${accountId}/d1/database/22222222-2222-4222-8222-222222222222\\?fields=uuid$`));
+
+  const wrong = createAuthenticatedProductionReaders(productionEnvironment(), { now: () => now, fetch: async (inputUrl) => new Response(JSON.stringify({ success: true, errors: [], messages: [], result: String(inputUrl).includes("/r2/buckets/") ? { name: "wrong-bucket" } : { uuid: "33333333-3333-4333-8333-333333333333" } }), { status: 200, headers: { "content-type": "application/json" } }) }, release());
+  await assert.rejects(() => wrong.providerInventory.read(deploymentOperation().resources), /reader unavailable/);
+});
+
+test("rejects signed deployment facts that disagree with release, runtime, provider inventory, or PostgreSQL identity", async () => {
   const cases = [
-    { ...controlPlane(), current: { ...controlPlane().current, version: "appgprj_example~appgver_other" } },
-    { ...controlPlane(), current: { ...controlPlane().current, commitSha: "e".repeat(40) } },
-    { ...controlPlane(), rollback: { ...controlPlane().current } },
-    { ...controlPlane(), resources: [{ binding: "AUDIO", kind: "r2", resourceId: "AUDIO" }, controlPlane().resources[1]] },
-    { ...controlPlane(), resources: [controlPlane().resources[0], { binding: "DB", kind: "d1", resourceId: "sites:d1:DB" }] },
+    await input({ deployment: await deployment({ claims: (value) => ({ ...value, releaseId: "rel_20260814_private_02" }) }) }),
+    await input({ deployment: await deployment({ claims: (value) => ({ ...value, live: { ...value.live, version: `${projectId}~appgver_other` } }) }) }),
+    await input({ deployment: await deployment({ claims: (value) => ({ ...value, live: { ...value.live, commitSha: "e".repeat(40) } }) }) }),
+    await input({ readers: readers({ d1: { readLedger: async () => runtimeObserved({ appliedMigrations }, { workerRuntime: { ...workerRuntime, commitSha: "e".repeat(40) } }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }, { workerRuntime: { ...workerRuntime, commitSha: "e".repeat(40) } }) } }) }),
+    await input({ readers: readers({ providerInventory: { read: async () => providerObserved({ resources: [{ ...deploymentOperation().resources[0], resource: `accounts/${accountId}/r2/buckets/wrong-bucket` }, deploymentOperation().resources[1]] }) } }) }),
+    await input({ readers: readers({ postgres: { readMigrations: async () => postgresObserved({ ledger }, { identity: "database:attacker@nearnight.iam.gserviceaccount.com" }), readCatalog: async () => postgresObserved({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) } }) }),
   ];
-  for (const body of cases) {
-    const options = await input({ readers: readers({ controlPlane: { read: async () => observed(body, { provider: "sites-control-plane" }) } }) });
+  for (const options of cases) {
     await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
     assert.equal(await readFile(options.outputPath).catch(() => ""), "");
   }
 });
 
-test("production readers fail closed when no authenticated Sites control-plane API can supply current deployment and resource IDs", async () => {
-  const production = createAuthenticatedProductionReaders(productionEnvironment(), { now: () => now, fetch: async () => { throw new Error("must not synthesize control-plane truth"); } }, release());
-  await assert.rejects(() => production.controlPlane.read(), /control-plane unavailable/);
+test("rejects mutation of verified deployment resources during provider inventory reads", async () => {
+  const options = await input({ readers: readers({ providerInventory: { read: async (resources) => {
+    resources[0].resource = `accounts/${accountId}/r2/buckets/wrong-bucket`;
+    return providerObserved({ resources });
+  } } }) });
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+  assert.equal(await readFile(options.outputPath).catch(() => ""), "");
+});
+
+test("rejects rollback tamper, stale manifests, replay, and committed-lost nonce responses without an artifact", async () => {
+  const signed = await deployment();
+  const rollbackTamper = await input({ deployment: { ...signed, envelope: { ...signed.envelope, claims: { ...signed.envelope.claims, rollback: { ...signed.envelope.claims.rollback, commitSha: "d".repeat(40) } } } } });
+  await assert.rejects(() => capturePrivateTesterBaseline(rollbackTamper), /signature/);
+  assert.equal(await readFile(rollbackTamper.outputPath).catch(() => ""), "");
+
+  const stale = await input({ deployment: await deployment({ claims: (value) => ({ ...value, notBefore: now - 300_001, issuedAt: now - 300_001, expiresAt: now + 1 }) }) });
+  await assert.rejects(() => capturePrivateTesterBaseline(stale), /deployment manifest invalid/);
+  assert.equal(await readFile(stale.outputPath).catch(() => ""), "");
+
+  const consumed = new Set();
+  const replayed = await deployment({ nonceStore: { consumeDeploymentManifestNonce: async ({ nonce }) => !consumed.has(nonce) && Boolean(consumed.add(nonce)) } });
+  const first = await input({ deployment: replayed });
+  await capturePrivateTesterBaseline(first);
+  const replay = await input({ deployment: replayed });
+  await assert.rejects(() => capturePrivateTesterBaseline(replay), /replay rejected/);
+  assert.equal(await readFile(replay.outputPath).catch(() => ""), "");
+
+  let committed = false;
+  const lost = await deployment({ nonceStore: { consumeDeploymentManifestNonce: async () => { if (!committed) { committed = true; throw new Error("lost response"); } return false; } } });
+  const ambiguous = await input({ deployment: lost });
+  await assert.rejects(() => capturePrivateTesterBaseline(ambiguous), /nonce store failed/);
+  assert.equal(await readFile(ambiguous.outputPath).catch(() => ""), "");
+  const retried = await input({ deployment: lost });
+  await assert.rejects(() => capturePrivateTesterBaseline(retried), /replay rejected/);
+  assert.equal(await readFile(retried.outputPath).catch(() => ""), "");
 });
 
 test("pins the runtime gateway audience and rejects a response with the wrong authenticated subject", async () => {
@@ -230,9 +323,9 @@ test("uses a post-read capture time and rejects observation windows stale or fut
     const atFinal = (body, overrides = {}) => observed(body, { observedAt: finalTime, ...overrides });
     const atFinalRuntime = (body) => atFinal(body, { provider: "sites-runtime", workerRuntime: freshRuntime });
     const options = await input({ now: () => clock.shift() ?? finalTime, readers: readers({
-      controlPlane: { read: async () => observed(controlPlane(), { provider: "sites-control-plane", observedAt }) },
       d1: { readLedger: async () => atFinalRuntime({ appliedMigrations }), readSchema: async () => atFinalRuntime({ schema: "sqlite_schema", objects: schemaObjects }) },
-      postgres: { readMigrations: async () => atFinal({ ledger }), readCatalog: async () => atFinal({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) },
+      postgres: { readMigrations: async () => atFinal({ ledger }, { provider: "cloud-sql", identity: postgresIdentity }), readCatalog: async () => atFinal({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }, { provider: "cloud-sql", identity: postgresIdentity }) },
+      providerInventory: { read: async () => atFinal({ resources: deploymentOperation().resources }, { provider: "cloudflare-api", identity: `account:${accountId}`, observedAt }) },
       dns: { readIdentifiers: async () => atFinal({ records: [{ name: "nearyoustill.com", recordId: "dns-record-01", type: "A" }] }) },
       oauth: { readIdentifiers: async () => atFinalRuntime({ issuer: "https://accounts.google.com", audience: googleClientId, clientId: googleClientId, providerAcceptedRedirectUri: "https://nearyoustill.com/api/auth/callback/google", proof: "interaction_required" }) },
       secretManager: { listVersions: async () => atFinal({ versions: ["projects/near-prod/secrets/nearstory-api/versions/12"] }) },

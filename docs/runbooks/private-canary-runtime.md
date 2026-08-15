@@ -31,3 +31,19 @@ Do not use `wrangler.local.jsonc` against production. Do not manually execute pa
 Run `node --import tsx scripts/verify-private-canary-runtime.ts`. Then run the repository tests, typecheck, lint, build, and `git diff --check`. A source pass proves only that the binding contract and migration are present; it does not prove that Cloudflare can reach Cloud SQL, that OIDC works, or that migration `0026` ran remotely.
 
 Before any later activation, capture runtime evidence for exact OIDC issuer/audience/subject, private `READINESS_PG` connectivity, D1 migration ledger, immutable audit triggers, and an authorized dry-run verification. No product route or internal mutation route may be enabled during Task 3.
+
+## Authenticated private-tester baseline
+
+The private-tester baseline is no longer allowed to infer a live Sites version, rollback, D1 database, or R2 bucket from environment variables, runtime binding labels, saved-version ordering, or a gateway response. Its control-plane input is the canonical deployment-operation file signed by `scripts/compose-private-tester-deployment-manifest.ts` with the pinned Cloud KMS RSA-PSS-3072 key.
+
+Baseline collection accepts the exact release file, the signed deployment-manifest file, and a new output path. It verifies the manifest signature and configured trust tuple, atomically consumes the manifest nonce through `nearyou.consume_private_tester_deployment_manifest`, and then exact-compares the signed release and resource facts with:
+
+- the release descriptor and fresh Sites runtime commit;
+- authenticated Cloudflare `GET` inventory for the signed account-qualified D1 database and R2 bucket;
+- the complete live D1 ledger and `sqlite_schema`, including the exact five reviewed provider-internal objects;
+- the live PostgreSQL session/current identity `nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com` and reviewed catalog reads;
+- fresh DNS, OAuth redirect-proof, secret-version, and literal-false gate observations.
+
+`CLOUDFLARE_API_TOKEN` is a read credential only; it is never accepted as a resource fact and must have only the D1 Read and R2 bucket-read permissions required for the two signed resources. KMS resource coordinates, signer mapping, and `EVIDENCE_TRUST_JSON` configure verification but cannot substitute live/rollback/resource claims. The output is still created exclusively and collection remains read-only apart from the single-purpose nonce consumption.
+
+PostgreSQL migration `0007_private_tester_deployment_manifest.sql` is source-only and unapplied as of this remediation. The reviewed live PostgreSQL 16 catalog remains at `0006_private_canary_observation`. Do not rename the `0006` catalog evidence, relabel its checksum as `0007`, or attempt baseline collection until an independently authorized migration applies `0007` and a fresh catalog candidate is reviewed. Applying that migration is outside this runbook and was not performed by Task 3.
