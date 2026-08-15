@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import {
   canonicalPrivateTesterReleaseOperation,
   composePrivateTesterDeploymentManifest,
   parsePrivateTesterDeploymentManifest,
+  privateTesterDeploymentManifestSignedBytes,
   verifyPrivateTesterDeploymentManifest,
   verifyPrivateTesterDeploymentManifestSignature,
 } from "../lib/private-tester-deployment-manifest.ts";
@@ -40,18 +41,18 @@ async function fixture(bits = 3072) {
   const pair = await crypto.subtle.generateKey({ name: "RSA-PSS", modulusLength: bits, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
   const fingerprint = hex(await crypto.subtle.digest("SHA-256", await crypto.subtle.exportKey("spki", pair.publicKey)));
   const value = claims();
-  const signature = Buffer.from(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, pair.privateKey, new TextEncoder().encode(canonicalPrivateTesterDeploymentClaims(value)))).toString("base64url");
+  const signature = Buffer.from(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, pair.privateKey, new TextEncoder().encode(privateTesterDeploymentManifestSignedBytes(value)))).toString("base64url");
   const record = { principal, keyId, version: 7, fingerprint, key: pair.publicKey };
   const trust = [{ principal, keyId, version: 7, fingerprint, status: "active", validFrom: now - 60_000, validUntil: now + 60_000, revokedAt: null, usage: "release-evidence" }];
   return { pair, value, envelope: { claims: value, signature }, record, trust };
 }
-const verifyOptions = (value, overrides = {}) => ({ now, trust: value.trust, lookupKey: async () => value.record, consumeNonce: async () => true, ...overrides });
+const verifyOptions = (value, overrides = {}) => ({ now, trust: value.trust, lookupKey: async () => value.record, nonceStore: { consumeDeploymentManifestNonce: async () => true }, ...overrides });
 const crc32c = (bytes) => { let crc = 0xffffffff; for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0x82f63b78 & -(crc & 1)); } return String((crc ^ 0xffffffff) >>> 0); };
 
 test("composes exact deployment facts and verifies an RSA-3072 KMS-compatible envelope", async () => {
   const fixtureValue = await fixture();
   let consumed;
-  const parsed = await verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { consumeNonce: async (metadata) => (consumed = metadata, true) }));
+  const parsed = await verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { nonceStore: { consumeDeploymentManifestNonce: async (metadata) => (consumed = metadata, true) } }));
   assert.deepEqual(parsed, fixtureValue.value);
   assert.equal(parsed.live.commitSha, observed().live.commitSha);
   assert.equal(parsed.rollback.commitSha, observed().rollback.commitSha);
@@ -59,32 +60,36 @@ test("composes exact deployment facts and verifies an RSA-3072 KMS-compatible en
   assert.equal(consumed.keyVersion, 7);
   assert.equal(consumed.canonicalClaims, canonicalPrivateTesterDeploymentClaims(parsed));
   assert.match(consumed.claimsDigest, /^[a-f0-9]{64}$/);
+  const domainDigest = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(privateTesterDeploymentManifestSignedBytes(parsed))));
+  const undomainedDigest = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalPrivateTesterDeploymentClaims(parsed))));
+  assert.equal(consumed.claimsDigest, domainDigest);
+  assert.notEqual(consumed.claimsDigest, undomainedDigest);
 });
 
 test("uses the existing exact-version KMS signer with digest and signature CRC checks", async () => {
   const fixtureValue = await fixture();
-  const canonical = canonicalPrivateTesterDeploymentClaims(fixtureValue.value);
+  const signed = privateTesterDeploymentManifestSignedBytes(fixtureValue.value);
   const versionedKeyName = "projects/near-prod/locations/us-central1/keyRings/release/cryptoKeys/evidence/cryptoKeyVersions/7";
   const signer = new CloudKmsEvidenceSigner({
     versionedKeyName,
     accessToken: async () => "token_abcdefghijklmnopqrstuvwxyz",
     fetch: async (_url, init) => {
       const request = JSON.parse(init.body);
-      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)));
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(signed)));
       assert.equal(request.digest.sha256, Buffer.from(digest).toString("base64"));
       assert.equal(request.digestCrc32c, crc32c(digest));
-      const signature = new Uint8Array(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, fixtureValue.pair.privateKey, new TextEncoder().encode(canonical)));
+      const signature = new Uint8Array(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, fixtureValue.pair.privateKey, new TextEncoder().encode(signed)));
       return new Response(JSON.stringify({ name: versionedKeyName, signature: Buffer.from(signature).toString("base64"), signatureCrc32c: crc32c(signature), verifiedDigestCrc32c: true }), { status: 200 });
     },
   });
-  const signature = await signer.sign(canonical);
+  const signature = await signer.sign(signed);
   assert.equal(Buffer.from(signature, "base64url").byteLength, 384);
   assert.deepEqual(await verifyPrivateTesterDeploymentManifestSignature({ claims: fixtureValue.value, signature }, now, fixtureValue.record), fixtureValue.value);
 });
 
 test("production composer accepts only a canonical bounded operation file and locally verifies KMS output", async () => {
   const fixtureValue = await fixture(), directory = await mkdtemp(join(tmpdir(), "private-tester-compose-")), input = join(directory, "operation.json"), output = join(directory, "manifest.json");
-  const operation = observed(), canonicalOperation = canonicalPrivateTesterReleaseOperation(operation), expectedClaims = claims(), canonicalClaims = canonicalPrivateTesterDeploymentClaims(expectedClaims);
+  const operation = observed(), canonicalOperation = canonicalPrivateTesterReleaseOperation(operation), expectedClaims = claims(), signedClaims = privateTesterDeploymentManifestSignedBytes(expectedClaims);
   const versionedKeyName = "projects/near-prod/locations/us-central1/keyRings/release/cryptoKeys/evidence/cryptoKeyVersions/7", keyName = versionedKeyName.replace(/\/cryptoKeyVersions\/7$/, "");
   const encoded = Buffer.from(await crypto.subtle.exportKey("spki", fixtureValue.pair.publicKey)).toString("base64"), pem = `-----BEGIN PUBLIC KEY-----\n${encoded.match(/.{1,64}/g).join("\n")}\n-----END PUBLIC KEY-----\n`;
   const response = (value) => { const body = JSON.stringify(value); return new Response(body, { status: 200, headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) } }); };
@@ -93,9 +98,9 @@ test("production composer accepts only a canonical bounded operation file and lo
     if (url.startsWith("http://metadata.google.internal")) { metadataCalls += 1; return response({ access_token: "token_abcdefghijklmnopqrstuvwxyz", expires_in: 300 }); }
     assert.equal(init.headers.authorization, "Bearer token_abcdefghijklmnopqrstuvwxyz");
     if (url.endsWith(":asymmetricSign")) {
-      const request = JSON.parse(init.body), digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalClaims)));
+      const request = JSON.parse(init.body), digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(signedClaims)));
       assert.equal(request.digest.sha256, Buffer.from(digest).toString("base64"));
-      const signature = new Uint8Array(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, fixtureValue.pair.privateKey, new TextEncoder().encode(canonicalClaims)));
+      const signature = new Uint8Array(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, fixtureValue.pair.privateKey, new TextEncoder().encode(signedClaims)));
       return response({ name: versionedKeyName, signature: Buffer.from(signature).toString("base64"), signatureCrc32c: crc32c(signature), verifiedDigestCrc32c: true });
     }
     if (url.endsWith("/cryptoKeys/evidence")) return response({ name: keyName, purpose: "ASYMMETRIC_SIGN" });
@@ -112,6 +117,13 @@ test("production composer accepts only a canonical bounded operation file and lo
     const duplicate = join(directory, "duplicate.json");
     await writeFile(duplicate, canonicalOperation.replace('{"keyId":', '{"schemaVersion":1,"keyId":'), { flag: "wx" });
     await assert.rejects(() => composePrivateTesterDeploymentManifestFile(duplicate, join(directory, "duplicate-output.json"), environment, { fetch, now: () => now, nonce: () => nonce }), /input invalid/);
+    const link = join(directory, "operation-link.json");
+    await symlink(input, link);
+    await assert.rejects(() => composePrivateTesterDeploymentManifestFile(link, join(directory, "link-output.json"), environment, { fetch, now: () => now, nonce: () => nonce }), /input invalid/);
+    const oversized = join(directory, "oversized.json");
+    await writeFile(oversized, "x".repeat(16 * 1024 + 1), { flag: "wx" });
+    await assert.rejects(() => composePrivateTesterDeploymentManifestFile(oversized, join(directory, "oversized-output.json"), environment, { fetch, now: () => now, nonce: () => nonce }), /input invalid/);
+    await assert.rejects(() => composePrivateTesterDeploymentManifestFile(directory, join(directory, "directory-output.json"), environment, { fetch, now: () => now, nonce: () => nonce }), /input invalid/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -127,6 +139,7 @@ test("rejects wrong release relationships and nonexact provider resources", () =
     { ...base, live: { ...base.live, version: "appgprj_wrong~appgver_live" } },
     { ...base, resources: [base.resources[0], base.resources[0]] },
     { ...base, resources: [{ ...base.resources[0], resource: "r2/buckets/nearyou-audio-production" }, base.resources[1]] },
+    { ...base, resources: [{ ...base.resources[0], resource: `accounts/${accountId}/r2/buckets/nearyou.audio.production` }, base.resources[1]] },
     { ...base, resources: [base.resources[0], { ...base.resources[1], resource: `accounts/${"2".repeat(32)}/d1/database/22222222-2222-4222-8222-222222222222` }] },
   ];
   for (const value of invalid) assert.throws(() => parsePrivateTesterDeploymentManifest(value, now), /deployment manifest invalid/);
@@ -151,11 +164,21 @@ test("rejects weak or wrong keys, tamper, and nonce replay", async () => {
   await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { lookupKey: async () => ({ ...fixtureValue.record, fingerprint: "0".repeat(64) }) })), /key invalid/);
   const weak = await fixture(2048);
   await assert.rejects(() => verifyPrivateTesterDeploymentManifest(weak.envelope, verifyOptions(weak)), /key invalid/);
-  await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { consumeNonce: async () => false })), /replay rejected/);
+  const crossDomainSignature = Buffer.from(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, fixtureValue.pair.privateKey, new TextEncoder().encode(`release-evidence/v1\n${canonicalPrivateTesterDeploymentClaims(fixtureValue.value)}`))).toString("base64url");
+  await assert.rejects(() => verifyPrivateTesterDeploymentManifest({ claims: fixtureValue.value, signature: crossDomainSignature }, verifyOptions(fixtureValue)), /signature invalid/);
+  await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { nonceStore: { consumeDeploymentManifestNonce: async () => false } })), /replay rejected/);
   let committed = false;
   const consumeNonce = async () => { if (!committed) { committed = true; throw new Error("lost response"); } return false; };
-  await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { consumeNonce })), /nonce store failed/);
-  await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { consumeNonce })), /replay rejected/);
+  await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { nonceStore: { consumeDeploymentManifestNonce: consumeNonce } })), /nonce store failed/);
+  await assert.rejects(() => verifyPrivateTesterDeploymentManifest(fixtureValue.envelope, verifyOptions(fixtureValue, { nonceStore: { consumeDeploymentManifestNonce: consumeNonce } })), /replay rejected/);
+});
+
+test("composer opens one regular bounded fact file with no-follow semantics", async () => {
+  const source = await readFile(new URL("../scripts/compose-private-tester-deployment-manifest.ts", import.meta.url), "utf8");
+  assert.match(source, /O_NOFOLLOW/);
+  assert.match(source, /\.isFile\(\)/);
+  assert.match(source, /MAX_INPUT_BYTES\s*\+\s*1/);
+  assert.match(source, /handle\.read\(/);
 });
 
 test("rejects extra, hidden, accessor, symbol, and duplicate resource properties", () => {

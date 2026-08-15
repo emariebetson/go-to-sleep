@@ -16,11 +16,12 @@ const NONCE = /^[A-Za-z0-9_-]{22,128}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const ACCOUNT = /^[a-f0-9]{32}$/;
 const D1_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const R2_BUCKET = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+const R2_BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const MAX_LIFETIME_MS = 15 * 60_000;
 const MAX_AGE_MS = 5 * 60_000;
 const MAX_FUTURE_MS = 30_000;
 const MAX_CANONICAL_BYTES = 16 * 1024;
+export const PRIVATE_TESTER_DEPLOYMENT_MANIFEST_DOMAIN = "private-tester-deployment-manifest/v1";
 
 export type PrivateTesterDeploymentVersion = { version: string; commitSha: string };
 export type PrivateTesterDeploymentResource =
@@ -132,6 +133,9 @@ export function canonicalPrivateTesterDeploymentClaims(input: unknown): string {
   if (encoder.encode(value).byteLength > MAX_CANONICAL_BYTES) invalid();
   return value;
 }
+export function privateTesterDeploymentManifestSignedBytes(input: unknown): string {
+  return `${PRIVATE_TESTER_DEPLOYMENT_MANIFEST_DOMAIN}\n${canonicalPrivateTesterDeploymentClaims(input)}`;
+}
 
 export function composePrivateTesterDeploymentManifest(observedReleaseOperation: unknown, clock: () => number, nonceSource: () => string): PrivateTesterDeploymentClaims {
   if (typeof clock !== "function" || typeof nonceSource !== "function") invalid();
@@ -160,7 +164,7 @@ function validateKeyRecord(record: unknown, claims: PrivateTesterDeploymentClaim
 }
 export async function verifyPrivateTesterDeploymentManifestSignature(envelope: unknown, nowMs: number, record: unknown): Promise<PrivateTesterDeploymentClaims> {
   if (!exactRecord(envelope, ENVELOPE_KEYS)) invalid();
-  const claims = parsePrivateTesterDeploymentManifest(envelope.claims, nowMs), canonical = canonicalPrivateTesterDeploymentClaims(claims);
+  const claims = parsePrivateTesterDeploymentManifest(envelope.claims, nowMs), signed = privateTesterDeploymentManifestSignedBytes(claims);
   validateKeyRecord(record, claims);
   let fingerprint: string;
   try { fingerprint = hex(await crypto.subtle.digest("SHA-256", await crypto.subtle.exportKey("spki", record.key))); } catch { throw new Error("private tester deployment key invalid"); }
@@ -168,7 +172,7 @@ export async function verifyPrivateTesterDeploymentManifestSignature(envelope: u
   const signature = decodeSignature(envelope.signature);
   if (signature.byteLength !== 384) throw new Error("private tester deployment signature malformed");
   let valid = false;
-  try { valid = await crypto.subtle.verify({ name: "RSA-PSS", saltLength: 32 }, record.key, exactBuffer(signature), encoder.encode(canonical)); } catch { throw new Error("private tester deployment signature check failed"); }
+  try { valid = await crypto.subtle.verify({ name: "RSA-PSS", saltLength: 32 }, record.key, exactBuffer(signature), encoder.encode(signed)); } catch { throw new Error("private tester deployment signature check failed"); }
   if (!valid) throw new Error("private tester deployment signature invalid");
   return claims;
 }
@@ -184,8 +188,8 @@ function validateTrust(trust: unknown, nowMs: number): asserts trust is Trust[] 
     seen.add(tuple);
   }
 }
-export async function verifyPrivateTesterDeploymentManifest(envelope: unknown, options: { now: number; trust: unknown; lookupKey(principal: string, keyId: string, version: number): Promise<KeyRecord>; consumeNonce(input: PrivateTesterDeploymentNonce): Promise<boolean> }): Promise<PrivateTesterDeploymentClaims> {
-  if (!options || !integer(options.now) || typeof options.lookupKey !== "function" || typeof options.consumeNonce !== "function") invalid();
+export async function verifyPrivateTesterDeploymentManifest(envelope: unknown, options: { now: number; trust: unknown; lookupKey(principal: string, keyId: string, version: number): Promise<KeyRecord>; nonceStore: { consumeDeploymentManifestNonce(input: PrivateTesterDeploymentNonce): Promise<boolean> } }): Promise<PrivateTesterDeploymentClaims> {
+  if (!options || !integer(options.now) || typeof options.lookupKey !== "function" || !options.nonceStore || typeof options.nonceStore.consumeDeploymentManifestNonce !== "function") invalid();
   validateTrust(options.trust, options.now);
   if (!exactRecord(envelope, ENVELOPE_KEYS)) invalid();
   const claims = parsePrivateTesterDeploymentManifest(envelope.claims, options.now);
@@ -195,9 +199,9 @@ export async function verifyPrivateTesterDeploymentManifest(envelope: unknown, o
   try { record = await options.lookupKey(claims.principal, claims.keyId, claims.keyVersion); } catch { throw new Error("private tester deployment key lookup failed"); }
   const verified = await verifyPrivateTesterDeploymentManifestSignature(envelope, options.now, record);
   if (record.fingerprint !== trusted.fingerprint) throw new Error("private tester deployment key invalid");
-  const canonicalClaims = canonicalPrivateTesterDeploymentClaims(verified), claimsDigest = hex(await crypto.subtle.digest("SHA-256", encoder.encode(canonicalClaims)));
+  const canonicalClaims = canonicalPrivateTesterDeploymentClaims(verified), claimsDigest = hex(await crypto.subtle.digest("SHA-256", encoder.encode(privateTesterDeploymentManifestSignedBytes(verified))));
   let consumed = false;
-  try { consumed = await options.consumeNonce(Object.freeze({ nonce: verified.nonce, claimsDigest, principal: verified.principal, keyId: verified.keyId, keyVersion: verified.keyVersion, releaseId: verified.releaseId, expiresAt: verified.expiresAt, canonicalClaims })); } catch { throw new Error("private tester deployment nonce store failed"); }
+  try { consumed = await options.nonceStore.consumeDeploymentManifestNonce(Object.freeze({ nonce: verified.nonce, claimsDigest, principal: verified.principal, keyId: verified.keyId, keyVersion: verified.keyVersion, releaseId: verified.releaseId, expiresAt: verified.expiresAt, canonicalClaims })); } catch { throw new Error("private tester deployment nonce store failed"); }
   if (!consumed) throw new Error("private tester deployment replay rejected");
   return verified;
 }

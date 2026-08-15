@@ -1,9 +1,18 @@
+import { PRIVATE_TESTER_DEPLOYMENT_MANIFEST_DOMAIN } from "./private-tester-deployment-manifest";
+
 type Db = { query<T = Record<string, unknown>>(sql: string, args?: unknown[]): Promise<{ rows: T[] }> };
 export class PostgresNonceStore {
   constructor(private db: Db) {}
   async consume(input: { nonce: string; claimsDigest: string; principal: string; keyId: string; keyVersion: number; releaseId: string; expiresAt: number; canonicalClaims?: string }) {
     if(typeof input.canonicalClaims!=="string") throw new Error("evidence claims projection required");
     const result = await this.db.query<{ consumed: boolean }>("SELECT nearyou.consume_release_evidence($1,$2,$8,$3,$4,$5,$6,to_timestamp($7/1000.0)) AS consumed", [input.nonce, input.claimsDigest, input.principal, input.keyId, input.keyVersion, input.releaseId, input.expiresAt,input.canonicalClaims]);
+    return result.rows.length === 1 && result.rows[0].consumed === true;
+  }
+}
+export class PostgresPrivateTesterDeploymentManifestNonceStore {
+  constructor(private db: Db) {}
+  async consumeDeploymentManifestNonce(input: { nonce: string; claimsDigest: string; principal: string; keyId: string; keyVersion: number; releaseId: string; expiresAt: number; canonicalClaims: string }) {
+    const result = await this.db.query<{ consumed: boolean }>("SELECT nearyou.consume_private_tester_deployment_manifest($1,$2,$3,$4,$5,$6,$7,$8,to_timestamp($9/1000.0)) AS consumed", [PRIVATE_TESTER_DEPLOYMENT_MANIFEST_DOMAIN, input.nonce, input.claimsDigest, input.canonicalClaims, input.principal, input.keyId, input.keyVersion, input.releaseId, input.expiresAt]);
     return result.rows.length === 1 && result.rows[0].consumed === true;
   }
 }

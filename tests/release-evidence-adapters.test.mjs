@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { CloudKmsPublicKeyClient, PostgresNonceMaintenance, PostgresNonceStore } from "../lib/release-evidence-adapters.ts";
+import { CloudKmsPublicKeyClient, PostgresNonceMaintenance, PostgresNonceStore, PostgresPrivateTesterDeploymentManifestNonceStore } from "../lib/release-evidence-adapters.ts";
 
 const crc32c = (text) => {
   let crc = 0xffffffff;
@@ -58,6 +58,36 @@ test("verified evidence consumption durably binds the exact signed claims projec
   const store=new PostgresNonceStore({query:async(_sql,input)=>{args=input;return{rows:[{consumed:true}]}}});
   assert.equal(await store.consume({...nonceInput,canonicalClaims:canonical}),true);
   assert.equal(args[7],canonical);
+});
+
+test("deployment manifest nonce adapter calls only its purpose-specific atomic function", async () => {
+  let sql, args;
+  const store = new PostgresPrivateTesterDeploymentManifestNonceStore({ query: async (statement, values) => { sql = statement; args = values; return { rows: [{ consumed: true }] }; } });
+  const input = { ...nonceInput, releaseId: "rel_20260815_private_01", expiresAt: 1_800_000_900_000, canonicalClaims: '{"schemaVersion":1}' };
+  assert.equal(await store.consumeDeploymentManifestNonce(input), true);
+  assert.match(sql, /consume_private_tester_deployment_manifest/);
+  assert.doesNotMatch(sql, /consume_release_evidence/);
+  assert.deepEqual(args, ["private-tester-deployment-manifest/v1", input.nonce, input.claimsDigest, input.canonicalClaims, input.principal, input.keyId, input.keyVersion, input.releaseId, input.expiresAt]);
+  let inserted = false;
+  const lost = new PostgresPrivateTesterDeploymentManifestNonceStore({ query: async () => { if (!inserted) { inserted = true; throw new Error("lost response"); } return { rows: [{ consumed: false }] }; } });
+  await assert.rejects(() => lost.consumeDeploymentManifestNonce(input), /lost response/);
+  assert.equal(await lost.consumeDeploymentManifestNonce(input), false);
+});
+
+test("deployment manifest migration binds exact schema, identities, time, replay, and least privilege", () => {
+  const sql = readFileSync(new URL("../postgres/migrations/0007_private_tester_deployment_manifest.sql", import.meta.url), "utf8");
+  for (const required of [
+    "private-tester-deployment-manifest/v1", "consume_private_tester_deployment_manifest", "schemaVersion", "projectId", "live", "rollback", "resources", "notBefore", "issuedAt", "expiresAt", "claims_digest text NOT NULL UNIQUE", "nonce text PRIMARY KEY", "interval '15 minutes'", "statement_timestamp()", "SECURITY DEFINER", "nearyou_crypto.digest", "private_tester_deployment_manifest_immutable",
+  ]) assert.match(sql, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(sql, /ARRAY\['expiresAt','issuedAt','keyId','keyVersion','live','nonce','notBefore','principal','projectId','releaseId','resources','rollback','schemaVersion'\]/);
+  assert.match(sql, /starts_with\(live->>'version',claims->>'projectId'\|\|'~appgver_'\)/);
+  assert.match(sql, /starts_with\(rollback->>'version',claims->>'projectId'\|\|'~appgver_'\)/);
+  assert.doesNotMatch(sql, /version' NOT LIKE/);
+  for (const typed of ["claims->'principal'", "claims->'keyVersion'", "claims->'issuedAt'", "live->'version'", "rollback->'commitSha'", "r2->'resource'", "d1->'resource'"]) assert.match(sql, new RegExp(`jsonb_typeof\\(${typed.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\)`));
+  assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*FROM PUBLIC,nearyou_app/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*TO nearyou_release_verifier/);
+  assert.doesNotMatch(sql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE).*private_tester_deployment_manifest_nonces TO nearyou_release_verifier/);
+  assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION nearyou\.consume_release_evidence|ALTER FUNCTION nearyou\.consume_release_evidence/);
 });
 
 async function kmsFixture(overrides = {}) {

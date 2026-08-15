@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile, writeFile } from "node:fs/promises";
 import {
   canonicalPrivateTesterDeploymentClaims,
   canonicalPrivateTesterReleaseOperation,
   composePrivateTesterDeploymentManifest,
+  privateTesterDeploymentManifestSignedBytes,
   verifyPrivateTesterDeploymentManifestSignature,
   type PrivateTesterDeploymentEnvelope,
 } from "../lib/private-tester-deployment-manifest";
@@ -48,11 +50,23 @@ async function metadataAccessToken(fetcher: typeof fetch): Promise<string> {
     return value.access_token;
   } catch { throw new Error("private tester deployment identity unavailable"); }
 }
+async function readObservedReleaseOperation(inputPath: string): Promise<string> {
+  let handle;
+  try { handle = await open(inputPath, constants.O_RDONLY | constants.O_NOFOLLOW); }
+  catch { throw new Error("private tester deployment input invalid"); }
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size < 2 || metadata.size > MAX_INPUT_BYTES) throw new Error("private tester deployment input invalid");
+    const buffer = Buffer.alloc(MAX_INPUT_BYTES + 1); let length = 0;
+    while (length < buffer.byteLength) { const result = await handle.read(buffer, length, buffer.byteLength - length, length); if (result.bytesRead === 0) break; length += result.bytesRead; }
+    if (length > MAX_INPUT_BYTES || length !== metadata.size) throw new Error("private tester deployment input invalid");
+    return buffer.subarray(0, length).toString("utf8");
+  } finally { await handle.close(); }
+}
 
 export async function composePrivateTesterDeploymentManifestFile(inputPath: string, outputPath: string, environment: NodeJS.ProcessEnv = process.env, dependencies: { fetch?: typeof fetch; now?: () => number; nonce?: () => string; io?: ExclusiveIo } = {}): Promise<PrivateTesterDeploymentEnvelope> {
   if (!inputPath || inputPath.length > 4_096) throw new Error("private tester deployment input invalid");
-  const raw = await readFile(inputPath, "utf8");
-  if (Buffer.byteLength(raw) > MAX_INPUT_BYTES) throw new Error("private tester deployment input invalid");
+  const raw = await readObservedReleaseOperation(inputPath);
   let observed: unknown;
   try { observed = JSON.parse(raw); } catch { throw new Error("private tester deployment input invalid"); }
   if (raw.trim() !== canonicalPrivateTesterReleaseOperation(observed)) throw new Error("private tester deployment input invalid");
@@ -62,7 +76,7 @@ export async function composePrivateTesterDeploymentManifestFile(inputPath: stri
   let token: string | undefined;
   const accessToken = async () => token ??= await metadataAccessToken(dependencies.fetch ?? fetch);
   const versionedKeyName = `projects/${project}/locations/${location}/keyRings/${keyRing}/cryptoKeys/${key}/cryptoKeyVersions/${version}`;
-  const signature = await new CloudKmsEvidenceSigner({ versionedKeyName, accessToken, fetch: dependencies.fetch }).sign(canonicalPrivateTesterDeploymentClaims(claims));
+  const signature = await new CloudKmsEvidenceSigner({ versionedKeyName, accessToken, fetch: dependencies.fetch }).sign(privateTesterDeploymentManifestSignedBytes(claims));
   const publicKeys = new CloudKmsPublicKeyClient({ project, location, keyRing, key, principal, keyId, accessToken, fetch: dependencies.fetch });
   const record = await publicKeys.lookup(principal, keyId, version), envelope = { claims, signature };
   await verifyPrivateTesterDeploymentManifestSignature(envelope, (dependencies.now ?? Date.now)(), record);
