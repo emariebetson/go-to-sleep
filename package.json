@@ -20,6 +20,7 @@
     ,"platform:test-private-canary": "tsx --test tests/private-canary-smoke.test.mjs"
     ,"platform:private-canary-live": "tsx scripts/private-canary-live.ts"
     ,"platform:register-rollout-controller": "tsx scripts/migrate.ts --register-rollout-controller"
+    ,"platform:capture-private-tester-baseline": "tsx scripts/capture-private-tester-baseline.ts"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.6.26",
