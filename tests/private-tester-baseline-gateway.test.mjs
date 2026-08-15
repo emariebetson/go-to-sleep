@@ -185,6 +185,8 @@ test("fails closed on altered migration fields or missing index, trigger, or vie
     { ledger: migrationRows.map((row, index) => index === 0 ? { ...row, applied_at: "" } : row), schema: schemaRows },
     { ledger: migrationRows, schema: schemaRows.filter((row) => row.type !== "trigger") },
     { ledger: migrationRows, schema: schemaRows.map((row) => row.type === "view" ? { ...row, sql: `${row.sql} WHERE 1=1` } : row) },
+    { ledger: migrationRows, schema: [schemaRows[0], { type: "index", name: "d1_migrations_rogue_idx", tbl_name: "d1_migrations", rootpage: 10, sql: "CREATE INDEX d1_migrations_rogue_idx ON d1_migrations(name)" }, ...schemaRows.slice(1)] },
+    { ledger: migrationRows, schema: [...schemaRows.slice(0, 4), { type: "trigger", name: "d1_migrations_rogue", tbl_name: "d1_migrations", rootpage: 0, sql: "CREATE TRIGGER d1_migrations_rogue AFTER INSERT ON d1_migrations BEGIN SELECT 1; END" }, ...schemaRows.slice(4)] },
   ];
   for (const item of cases) {
     const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("d1_migrations") ? item.ledger : item.schema }) }) };

@@ -37,7 +37,14 @@ const MAX_RUNTIME_AGE_MS = 300_000;
 const MAX_FUTURE_MS = 30_000;
 const REVIEWED_D1_SCHEMA_DEFINITION_HASH = d1SourceBaseline.sqlite_schema_source_definitions_sha256;
 const REVIEWED_D1_SCHEMA_OBJECT_COUNT = d1SourceBaseline.sqlite_schema_source_object_count;
-const D1_PROVIDER_INTERNAL_TABLES = Object.freeze(["_cf_METADATA", "d1_migrations", "sqlite_sequence", "sqlite_stat1"]);
+const D1_PROVIDER_INTERNAL_OBJECTS = Object.freeze([
+  Object.freeze({ type: "index", name: "sqlite_autoindex_d1_migrations_1", tableName: "d1_migrations" }),
+  Object.freeze({ type: "table", name: "_cf_METADATA", tableName: "_cf_METADATA" }),
+  Object.freeze({ type: "table", name: "d1_migrations", tableName: "d1_migrations" }),
+  Object.freeze({ type: "table", name: "sqlite_sequence", tableName: "sqlite_sequence" }),
+  Object.freeze({ type: "table", name: "sqlite_stat1", tableName: "sqlite_stat1" }),
+]);
+const D1_PROVIDER_INTERNAL_IDENTITIES = new Set(D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
 const REQUIRED_GATEWAY_VARS = Object.freeze([
   "PRIVATE_TESTER_BASELINE_OIDC_SUBJECT",
   "PRIVATE_TESTER_BASELINE_RELEASE_JSON",
@@ -154,7 +161,8 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   const metadata = environment.VERSION_METADATA;
   const db = environment.DB;
   const runtimeNow = now();
-  if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX) || !object(metadata) || Reflect.ownKeys(metadata).length !== 3 || typeof metadata.id !== "string" || typeof metadata.tag !== "string" || typeof metadata.timestamp !== "string" || !HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_table_names) !== JSON.stringify(D1_PROVIDER_INTERNAL_TABLES) || !db || typeof db.prepare !== "function") configurationError();
+  const manifestProviderObjects = D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
+  if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX) || !object(metadata) || Reflect.ownKeys(metadata).length !== 3 || typeof metadata.id !== "string" || typeof metadata.tag !== "string" || typeof metadata.timestamp !== "string" || !HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects) || !db || typeof db.prepare !== "function") configurationError();
   const workerRuntime = { id: metadata.id, commitSha: metadata.tag, deployedAt: metadata.timestamp };
   assertWorkerRuntime(workerRuntime, release, runtimeNow);
   if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) configurationError();
@@ -180,7 +188,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       previous = key;
       return { type: row.type as string, name: row.name, tableName: row.tbl_name, rootPage: Number(row.rootpage), sql: row.sql };
     });
-    const sourceObjects = objects.filter(({ tableName }) => !D1_PROVIDER_INTERNAL_TABLES.includes(tableName));
+    const sourceObjects = objects.filter(({ type, name, tableName }) => !D1_PROVIDER_INTERNAL_IDENTITIES.has(`${type}\u0000${name}\u0000${tableName}`));
     if (sourceObjects.length !== expectedD1SchemaObjectCount) throw new Error("private tester gateway evidence unavailable");
     const definitions = sourceObjects.map(({ type, name, tableName, sql }) => ({ type, name, tableName, sql }));
     if (await sha256(JSON.stringify(definitions)) !== expectedD1SchemaDefinitionHash) throw new Error("private tester gateway evidence unavailable");

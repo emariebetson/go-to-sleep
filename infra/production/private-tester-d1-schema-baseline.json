@@ -5,5 +5,11 @@
   "migration_sources_sha256": "f97910ae92fa6307967d6f7c752a6c510fa3b1909559a314ebe599463ad2c542",
   "sqlite_schema_source_object_count": 671,
   "sqlite_schema_source_definitions_sha256": "606596444bdfa147e22113267269f156f468be114e79e6b4daec7c211b4138f9",
-  "provider_internal_table_names": ["_cf_METADATA", "d1_migrations", "sqlite_sequence", "sqlite_stat1"]
+  "provider_internal_schema_objects": [
+    { "type": "index", "name": "sqlite_autoindex_d1_migrations_1", "table_name": "d1_migrations" },
+    { "type": "table", "name": "_cf_METADATA", "table_name": "_cf_METADATA" },
+    { "type": "table", "name": "d1_migrations", "table_name": "d1_migrations" },
+    { "type": "table", "name": "sqlite_sequence", "table_name": "sqlite_sequence" },
+    { "type": "table", "name": "sqlite_stat1", "table_name": "sqlite_stat1" }
+  ]
 }

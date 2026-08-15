@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createPrivateTesterBaselineRuntime } from "../lib/private-tester-baseline-gateway.ts";
 import { capturePrivateTesterBaseline, createAuthenticatedProductionReaders } from "../scripts/capture-private-tester-baseline.ts";
 import { verifyPrivateTesterD1SourceBaseline } from "../scripts/private-tester-d1-source.ts";
 
@@ -31,8 +32,8 @@ const schemaObjects = Object.freeze([
   { type: "trigger", name: "accounts_touch", tableName: "accounts", rootPage: 0, sql: "CREATE TRIGGER accounts_touch AFTER UPDATE ON accounts BEGIN SELECT 1; END" },
   { type: "view", name: "account_ids", tableName: "account_ids", rootPage: 0, sql: "CREATE VIEW account_ids AS SELECT id FROM accounts" },
 ]);
-const providerInternalTables = new Set(["_cf_METADATA", "d1_migrations", "sqlite_sequence", "sqlite_stat1"]);
-const sourceSchemaObjects = schemaObjects.filter(({ tableName }) => !providerInternalTables.has(tableName));
+const providerInternalIdentities = new Set(["index\u0000sqlite_autoindex_d1_migrations_1\u0000d1_migrations", "table\u0000_cf_METADATA\u0000_cf_METADATA", "table\u0000d1_migrations\u0000d1_migrations", "table\u0000sqlite_sequence\u0000sqlite_sequence", "table\u0000sqlite_stat1\u0000sqlite_stat1"]);
+const sourceSchemaObjects = schemaObjects.filter(({ type, name, tableName }) => !providerInternalIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
 const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(sourceSchemaObjects.map(({ rootPage, ...object }) => { void rootPage; return object; }))).digest("hex");
 const controlPlane = () => ({
   projectId: "appgprj_example",
@@ -74,7 +75,14 @@ test("mechanically regenerates the reviewed 0000-0016 D1 source schema manifest"
   assert.equal(verified.sourceHash, manifest.migration_sources_sha256);
   assert.equal(verified.schemaObjectCount, manifest.sqlite_schema_source_object_count);
   assert.equal(verified.schemaDefinitionHash, manifest.sqlite_schema_source_definitions_sha256);
-  assert.deepEqual(verified.providerInternalTableNames, manifest.provider_internal_table_names);
+  assert.deepEqual(verified.providerInternalSchemaObjects.map(({ type, name, tableName }) => ({ type, name, table_name: tableName })), manifest.provider_internal_schema_objects);
+
+  const manifestRelease = { ...release(), sitesVersion: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_example" };
+  const manifestLedgerRows = verified.sources.slice(1).map(({ id }, index) => ({ id: index + 1, name: `${id}.sql`, applied_at: `2026-08-14 17:${String(index).padStart(2, "0")}:00` }));
+  const manifestSchemaRows = verified.completeSchemaObjects.map(({ type, name, tableName, rootPage, sql }) => ({ type, name, tbl_name: tableName, rootpage: rootPage, sql }));
+  const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("d1_migrations") && !sql.includes("sqlite_schema") ? manifestLedgerRows : manifestSchemaRows }) }) };
+  const runtime = createPrivateTesterBaselineRuntime({ DB, VERSION_METADATA: { id: workerRuntime.id, tag: workerRuntime.commitSha, timestamp: workerRuntime.deployedAt }, PRIVATE_TESTER_BASELINE_RELEASE_JSON: JSON.stringify(manifestRelease), GOOGLE_CLIENT_ID: googleClientId, BETTER_AUTH_URL: "https://nearyoustill.com", PUBLIC_APP_URL: "https://nearyoustill.com", NEARYOU_ENABLE_STORY: "false", NEARYOU_ENABLE_LEGACY_ARCHIVE: "false", PRIVATE_TESTER_SCHEDULER_ENABLED: "false" }, { now: () => now, fetch });
+  assert.equal((await runtime.read("d1-schema")).objects.length, verified.completeSchemaObjects.length);
 
   for (const patch of [
     { migration_range: "0001-0016" },
@@ -165,6 +173,8 @@ test("rejects altered live migration fields or any schema object drift from revi
     { d1: { readLedger: async () => runtimeObserved({ appliedMigrations: [{ ...appliedMigrations[0], appliedAt: "" }, appliedMigrations[1]] }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }) } },
     { d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects.filter((object) => object.type !== "trigger") }) } },
     { d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects.map((object) => object.type === "index" ? { ...object, sql: `${object.sql} DESC` } : object) }) } },
+    { d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: [schemaObjects[0], { type: "index", name: "d1_migrations_rogue_idx", tableName: "d1_migrations", rootPage: 10, sql: "CREATE INDEX d1_migrations_rogue_idx ON d1_migrations(name)" }, ...schemaObjects.slice(1)] }) } },
+    { d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: [...schemaObjects.slice(0, 9), { type: "trigger", name: "d1_migrations_rogue", tableName: "d1_migrations", rootPage: 0, sql: "CREATE TRIGGER d1_migrations_rogue AFTER INSERT ON d1_migrations BEGIN SELECT 1; END" }, ...schemaObjects.slice(9)] }) } },
   ];
   for (const patch of cases) {
     const options = await input({ readers: readers(patch) });

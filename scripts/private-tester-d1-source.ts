@@ -12,7 +12,7 @@ const HASH = /^[a-f0-9]{64}$/;
 const MANIFEST_KEYS = Object.freeze([
   "migration_range",
   "migration_sources_sha256",
-  "provider_internal_table_names",
+  "provider_internal_schema_objects",
   "sqlite_schema_source_definitions_sha256",
   "sqlite_schema_source_object_count",
   "version",
@@ -37,7 +37,14 @@ export const PRIVATE_TESTER_D1_SOURCE_IDS = Object.freeze([
   "0015_platform_release_foundation",
   "0016_marketing_waitlist",
 ]);
-export const PRIVATE_TESTER_D1_PROVIDER_INTERNAL_TABLES = Object.freeze(["_cf_METADATA", "d1_migrations", "sqlite_sequence", "sqlite_stat1"]);
+export const PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS = Object.freeze([
+  Object.freeze({ type: "index", name: "sqlite_autoindex_d1_migrations_1", tableName: "d1_migrations" }),
+  Object.freeze({ type: "table", name: "_cf_METADATA", tableName: "_cf_METADATA" }),
+  Object.freeze({ type: "table", name: "d1_migrations", tableName: "d1_migrations" }),
+  Object.freeze({ type: "table", name: "sqlite_sequence", tableName: "sqlite_sequence" }),
+  Object.freeze({ type: "table", name: "sqlite_stat1", tableName: "sqlite_stat1" }),
+]);
+const PROVIDER_INTERNAL_IDENTITIES = new Set(PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
 
 type Source = { id: string; checksum: string };
 type SchemaRow = { type: string; name: string; tableName: string; rootPage: number; sql: string | null };
@@ -48,7 +55,7 @@ type Manifest = {
   migration_sources_sha256: string;
   sqlite_schema_source_object_count: number;
   sqlite_schema_source_definitions_sha256: string;
-  provider_internal_table_names: string[];
+  provider_internal_schema_objects: { type: string; name: string; table_name: string }[];
 };
 
 function invalid(): never { throw new Error("private tester D1 source baseline invalid"); }
@@ -58,7 +65,8 @@ function exactObject(value: unknown, keys: readonly string[]): value is Record<s
   return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype && canonical(Reflect.ownKeys(value).sort()) === canonical([...keys].sort());
 }
 function manifest(value: unknown): Manifest {
-  if (!exactObject(value, MANIFEST_KEYS) || value.version !== 1 || value.migration_range !== "0000-0016" || typeof value.wrangler_version !== "string" || !/^4\.[0-9]+\.[0-9]+$/.test(value.wrangler_version) || typeof value.migration_sources_sha256 !== "string" || !HASH.test(value.migration_sources_sha256) || !Number.isSafeInteger(value.sqlite_schema_source_object_count) || Number(value.sqlite_schema_source_object_count) < 1 || Number(value.sqlite_schema_source_object_count) > 1_000 || typeof value.sqlite_schema_source_definitions_sha256 !== "string" || !HASH.test(value.sqlite_schema_source_definitions_sha256) || canonical(value.provider_internal_table_names) !== canonical(PRIVATE_TESTER_D1_PROVIDER_INTERNAL_TABLES)) invalid();
+  const providerObjects = PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
+  if (!exactObject(value, MANIFEST_KEYS) || value.version !== 1 || value.migration_range !== "0000-0016" || typeof value.wrangler_version !== "string" || !/^4\.[0-9]+\.[0-9]+$/.test(value.wrangler_version) || typeof value.migration_sources_sha256 !== "string" || !HASH.test(value.migration_sources_sha256) || !Number.isSafeInteger(value.sqlite_schema_source_object_count) || Number(value.sqlite_schema_source_object_count) < 1 || Number(value.sqlite_schema_source_object_count) > 1_000 || typeof value.sqlite_schema_source_definitions_sha256 !== "string" || !HASH.test(value.sqlite_schema_source_definitions_sha256) || canonical(value.provider_internal_schema_objects) !== canonical(providerObjects)) invalid();
   return value as unknown as Manifest;
 }
 function schemaRows(value: unknown): SchemaRow[] {
@@ -84,7 +92,7 @@ async function wrangler(args: string[], cwd: string): Promise<string> {
   } catch { invalid(); }
 }
 
-export async function verifyPrivateTesterD1SourceBaseline(dependencies: { manifest?: unknown } = {}): Promise<{ sources: Source[]; sourceHash: string; schemaObjectCount: number; schemaDefinitionHash: string; providerInternalTableNames: string[] }> {
+export async function verifyPrivateTesterD1SourceBaseline(dependencies: { manifest?: unknown } = {}): Promise<{ sources: Source[]; sourceHash: string; schemaObjectCount: number; schemaDefinitionHash: string; providerInternalSchemaObjects: { type: string; name: string; tableName: string }[]; completeSchemaObjects: SchemaRow[] }> {
   const expected = manifest(dependencies.manifest ?? reviewedManifest);
   const wranglerPackage = JSON.parse(await readFile(new URL("../node_modules/wrangler/package.json", import.meta.url), "utf8")) as unknown;
   if (!exactObject(wranglerPackage, Reflect.ownKeys(wranglerPackage as object).filter((key): key is string => typeof key === "string")) || (wranglerPackage as Record<string, unknown>).version !== expected.wrangler_version) invalid();
@@ -108,12 +116,13 @@ export async function verifyPrivateTesterD1SourceBaseline(dependencies: { manife
     try { parsed = JSON.parse(output); } catch { invalid(); }
     if (!Array.isArray(parsed) || parsed.length !== 1 || !exactObject(parsed[0], ["results", "success", "meta"]) || parsed[0].success !== true) invalid();
     const allObjects = schemaRows(parsed[0].results);
-    const providerObjects = allObjects.filter((row) => PRIVATE_TESTER_D1_PROVIDER_INTERNAL_TABLES.includes(row.tableName));
-    const sourceObjects = allObjects.filter((row) => !PRIVATE_TESTER_D1_PROVIDER_INTERNAL_TABLES.includes(row.tableName));
-    if (canonical([...new Set(providerObjects.map((row) => row.tableName))].sort()) !== canonical(PRIVATE_TESTER_D1_PROVIDER_INTERNAL_TABLES) || sourceObjects.length !== expected.sqlite_schema_source_object_count) invalid();
+    const identity = (row: { type: string; name: string; tableName: string }) => `${row.type}\u0000${row.name}\u0000${row.tableName}`;
+    const providerObjects = allObjects.filter((row) => PROVIDER_INTERNAL_IDENTITIES.has(identity(row)));
+    const sourceObjects = allObjects.filter((row) => !PROVIDER_INTERNAL_IDENTITIES.has(identity(row)));
+    if (canonical(providerObjects.map(({ type, name, tableName }) => ({ type, name, tableName }))) !== canonical(PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS) || sourceObjects.length !== expected.sqlite_schema_source_object_count) invalid();
     const schemaDefinitionHash = hash(sourceObjects.map(({ type, name, tableName, sql }) => ({ type, name, tableName, sql })));
     if (schemaDefinitionHash !== expected.sqlite_schema_source_definitions_sha256) invalid();
-    return { sources: sourceFiles.map(({ name, checksum }) => ({ id: name.slice(0, -4), checksum })), sourceHash, schemaObjectCount: sourceObjects.length, schemaDefinitionHash, providerInternalTableNames: [...PRIVATE_TESTER_D1_PROVIDER_INTERNAL_TABLES] };
+    return { sources: sourceFiles.map(({ name, checksum }) => ({ id: name.slice(0, -4), checksum })), sourceHash, schemaObjectCount: sourceObjects.length, schemaDefinitionHash, providerInternalSchemaObjects: PRIVATE_TESTER_D1_PROVIDER_INTERNAL_OBJECTS.map((item) => ({ ...item })), completeSchemaObjects: allObjects.map((item) => ({ ...item })) };
   } finally {
     if (dirname(temporaryDirectory) === tmpdir() && temporaryDirectory.startsWith(join(tmpdir(), "private-tester-d1-source-"))) await rm(temporaryDirectory, { recursive: true, force: true });
   }
