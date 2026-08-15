@@ -3,7 +3,7 @@ const USER=/^[A-Za-z0-9_.@-]{3,200}$/,PRINCIPAL=/^service:[A-Za-z0-9_-]{3,100}$/
 export async function registerPrivateTesterBaselineVerifier(pg:AdminPg,databaseUser:string,principal:string){
   if(!USER.test(databaseUser)||!PRINCIPAL.test(principal))throw new Error("baseline verifier registration invalid");
   return pg.transaction(async tx=>{
-    await tx.query("GRANT nearyou_migration TO CURRENT_USER WITH ADMIN OPTION",[]);
+    await tx.query("GRANT nearyou_migration TO CURRENT_USER WITH ADMIN TRUE, INHERIT TRUE, SET TRUE",[]);
     await tx.query(`GRANT nearyou_private_tester_baseline_verifier TO "${databaseUser.replaceAll('"','""')}" WITH INHERIT TRUE, SET TRUE`,[]);
     await tx.query("SET LOCAL ROLE nearyou_migration",[]);
     const registered=(await tx.query<{database_user:string;principal:string;effective:boolean}>("SELECT database_user,principal,effective FROM nearyou.register_private_tester_baseline_verifier_identity($1::name,$2)",[databaseUser,principal])).rows[0];
