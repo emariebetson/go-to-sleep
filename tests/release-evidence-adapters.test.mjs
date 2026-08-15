@@ -85,7 +85,8 @@ test("deployment manifest migration binds exact schema, identities, time, replay
   assert.doesNotMatch(sql, /version' NOT LIKE/);
   for (const typed of ["claims->'principal'", "claims->'keyVersion'", "claims->'issuedAt'", "live->'version'", "rollback->'commitSha'", "r2->'resource'", "d1->'resource'"]) assert.match(sql, new RegExp(`jsonb_typeof\\(${typed.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\)`));
   assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*FROM PUBLIC,nearyou_app/);
-  assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*TO nearyou_release_verifier/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*FROM nearyou_release_verifier/);
+  assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[^;]*TO nearyou_release_verifier/);
   assert.doesNotMatch(sql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE).*private_tester_deployment_manifest_nonces TO nearyou_release_verifier/);
   assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION nearyou\.consume_release_evidence|ALTER FUNCTION nearyou\.consume_release_evidence/);
   assert.match(sql, /CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT NOBYPASSRLS/);

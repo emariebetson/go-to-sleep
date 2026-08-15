@@ -1,4 +1,9 @@
 BEGIN;
+DROP FUNCTION nearyou.register_rollout_controller_identity(name,text);
+CREATE FUNCTION nearyou.register_rollout_controller_identity(p_database_user name,p_principal text) RETURNS TABLE(database_user text,principal text,effective boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,nearyou AS $$ BEGIN IF current_user<>'nearyou_release_policy_owner' OR p_database_user::text!~'^[A-Za-z0-9_.@-]{3,200}$' OR p_principal!~'^service:[A-Za-z0-9_-]{3,100}$' OR NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=p_database_user::text) OR NOT pg_has_role(p_database_user,'nearyou_rollout_controller','USAGE') THEN RAISE EXCEPTION 'rollout controller identity invalid'; END IF; INSERT INTO nearyou.rollout_controller_identities VALUES(p_database_user,p_principal) ON CONFLICT DO NOTHING; RETURN QUERY SELECT i.database_user::text,i.principal,pg_has_role(i.database_user,'nearyou_rollout_controller','USAGE') FROM nearyou.rollout_controller_identities i WHERE i.database_user=p_database_user AND i.principal=p_principal; END $$;
+ALTER FUNCTION nearyou.register_rollout_controller_identity(name,text) OWNER TO nearyou_release_policy_owner;
+REVOKE ALL ON FUNCTION nearyou.register_rollout_controller_identity(name,text) FROM PUBLIC,nearyou_app,nearyou_release_verifier,nearyou_rollout_controller;
+GRANT EXECUTE ON FUNCTION nearyou.register_rollout_controller_identity(name,text) TO nearyou_migration;
 CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT NOBYPASSRLS;
 REVOKE ALL ON SCHEMA nearyou FROM nearyou_private_tester_baseline_verifier;
 GRANT USAGE ON SCHEMA nearyou TO nearyou_private_tester_baseline_verifier;
@@ -70,8 +75,8 @@ BEGIN
 END $$;
 ALTER FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) OWNER TO nearyou_release_policy_owner;
 REVOKE ALL ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) FROM PUBLIC,nearyou_app,nearyou_release_maintenance,nearyou_release_key_manager,nearyou_cutover_runner;
+REVOKE ALL ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) FROM nearyou_release_verifier;
 REVOKE ALL ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) FROM nearyou_rollout_controller;
-GRANT EXECUTE ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) TO nearyou_release_verifier;
 GRANT EXECUTE ON FUNCTION nearyou.consume_private_tester_deployment_manifest(text,text,text,text,text,text,integer,text,timestamptz) TO nearyou_private_tester_baseline_verifier;
 
 CREATE FUNCTION nearyou.reject_private_tester_deployment_manifest_mutation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,nearyou AS $$ BEGIN RAISE EXCEPTION 'private_tester_deployment_manifest_immutable'; END $$;
