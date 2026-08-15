@@ -193,6 +193,7 @@ test("rejects every D1 provider-internal object set mismatch before capturing ev
     replace("d1_migrations", { type: "view" }),
     replace("sqlite_sequence", { tableName: "d1_migrations" }),
     replace("sqlite_autoindex_d1_migrations_1", { sql: "CREATE INDEX sqlite_autoindex_d1_migrations_1 ON d1_migrations(name)" }),
+    replace("sqlite_autoindex_d1_migrations_1", { sql: "null" }),
     [...schemaObjects, { type: "index", name: "d1_migrations_rogue_idx", tableName: "d1_migrations", rootPage: 10, sql: "CREATE INDEX d1_migrations_rogue_idx ON d1_migrations(name)" }],
   ];
   for (const objects of cases) {

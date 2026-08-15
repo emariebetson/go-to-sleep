@@ -45,9 +45,9 @@ export const EXACT_D1_PROVIDER_INTERNAL_OBJECTS = Object.freeze([
   Object.freeze({ type: "table", name: "sqlite_stat1", tableName: "sqlite_stat1", sql: "CREATE TABLE sqlite_stat1(tbl,idx,stat)" }),
 ]);
 const D1_PROVIDER_INTERNAL_IDENTITIES = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
-const D1_PROVIDER_INTERNAL_NAMES = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ name }) => name));
-const D1_PROVIDER_INTERNAL_TABLE_NAMES = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ tableName }) => tableName));
-const D1_PROVIDER_INTERNAL_RECORDS = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName, sql }) => `${type}\u0000${name}\u0000${tableName}\u0000${sql}`));
+const D1_PROVIDER_INTERNAL_NAMES: ReadonlySet<string> = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ name }) => name));
+const D1_PROVIDER_INTERNAL_TABLE_NAMES: ReadonlySet<string> = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ tableName }) => tableName));
+const D1_PROVIDER_INTERNAL_RECORDS = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName, sql }) => JSON.stringify([type, name, tableName, sql])));
 const REQUIRED_GATEWAY_VARS = Object.freeze([
   "PRIVATE_TESTER_BASELINE_OIDC_SUBJECT",
   "PRIVATE_TESTER_BASELINE_RELEASE_JSON",
@@ -84,7 +84,7 @@ function exactStrings(value: unknown, expected: readonly string[]): boolean { re
 export function validateExactD1ProviderObjects(objects: readonly { type: string; name: string; tableName: string; sql: string | null }[]): void {
   const providerRecords = objects
     .filter(({ name, tableName }) => D1_PROVIDER_INTERNAL_NAMES.has(name) || D1_PROVIDER_INTERNAL_TABLE_NAMES.has(tableName))
-    .map(({ type, name, tableName, sql }) => `${type}\u0000${name}\u0000${tableName}\u0000${sql}`);
+    .map(({ type, name, tableName, sql }) => JSON.stringify([type, name, tableName, sql]));
   const actual = new Set(providerRecords);
   if (providerRecords.length !== D1_PROVIDER_INTERNAL_RECORDS.size || actual.size !== providerRecords.length || [...D1_PROVIDER_INTERNAL_RECORDS].some((record) => !actual.has(record))) throw new Error("private tester D1 provider schema invalid");
 }

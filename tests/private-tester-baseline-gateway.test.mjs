@@ -177,7 +177,7 @@ test("OAuth redirect proof rejects wrong origin, state, error, or an authorizati
     const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment(), {
       now: () => now,
       expectedD1SchemaDefinitionHash: schemaDefinitionHash,
-      expectedD1SchemaObjectCount: schemaRows.length,
+      expectedD1SchemaObjectCount: sourceSchemaRows.length,
       fetch: async (url) => {
         const state = new URL(String(url)).searchParams.get("state");
         return new Response(null, { status: 302, headers: { location: location(state) } });
@@ -198,7 +198,7 @@ test("fails closed on altered migration fields or missing index, trigger, or vie
   ];
   for (const item of cases) {
     const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("d1_migrations") ? item.ledger : item.schema }) }) };
-    const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: schemaRows.length, fetch });
+    const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
     await assert.rejects(() => runtime.read(item.ledger === migrationRows ? "d1-schema" : "d1-ledger"), /evidence unavailable/);
   }
 });
@@ -213,6 +213,7 @@ test("fails closed unless the exact five D1 provider-internal schema objects are
     replace("d1_migrations", { type: "view" }),
     replace("sqlite_sequence", { tbl_name: "d1_migrations" }),
     replace("sqlite_autoindex_d1_migrations_1", { sql: "CREATE INDEX sqlite_autoindex_d1_migrations_1 ON d1_migrations(name)" }),
+    replace("sqlite_autoindex_d1_migrations_1", { sql: "null" }),
     [...schemaRows, { type: "index", name: "d1_migrations_rogue_idx", tbl_name: "d1_migrations", rootpage: 10, sql: "CREATE INDEX d1_migrations_rogue_idx ON d1_migrations(name)" }],
   ];
   for (const schema of cases) {
