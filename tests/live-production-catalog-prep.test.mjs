@@ -315,3 +315,12 @@ test("production failures expose only bounded non-secret classes", () => {
   assert.equal(liveCatalogPreparationFailureCode(new Error("password authentication failed for user secret-value")), "database-connect-failed");
   assert.equal(liveCatalogPreparationFailureCode(new Error("arbitrary provider detail")), "preparation-failed");
 });
+
+test("CLI setup failures expose only bounded non-secret stages",()=>{
+  for(const stage of ["cli-config-invalid","cli-metadata-token-failed","cli-predecessor-fetch-failed","cli-predecessor-source-invalid","cli-sink-setup-failed","cli-core-prepare-failed"]){
+    const error=new Error(`live catalog preparation ${stage}`,{cause:new Error("secret token gs://private/object?generation=123 provider detail")});
+    assert.equal(liveCatalogPreparationFailureCode(error),stage);
+    assert.doesNotMatch(liveCatalogPreparationFailureCode(error),/secret|provider|gs:\/\//);
+  }
+  assert.equal(liveCatalogPreparationFailureCode(new Error("live catalog preparation target-authority-invalid")),"target-authority-invalid");
+});

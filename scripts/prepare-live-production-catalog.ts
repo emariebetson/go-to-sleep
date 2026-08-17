@@ -116,6 +116,8 @@ async function atStage<T>(code: "database-connect-failed" | "target-authority-in
   try { return await operation(); }
   catch (error) { throw new Error(`live catalog preparation ${code}`, { cause: error }); }
 }
+type CliStage="cli-config-invalid"|"cli-metadata-token-failed"|"cli-predecessor-fetch-failed"|"cli-predecessor-source-invalid"|"cli-sink-setup-failed"|"cli-core-prepare-failed";
+async function atCliStage<T>(code:CliStage,operation:()=>Promise<T>):Promise<T>{try{return await operation()}catch(error){throw new Error(`live catalog preparation ${code}`,{cause:error})}}
 
 export function databaseConnectionFailureCode(error: unknown) {
   const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
@@ -149,7 +151,7 @@ export function liveCatalogPreparationFailureCode(error: unknown) {
     return error.cause instanceof Error&&error.cause.message.startsWith("controller registration failed:")?controllerRegistrationFailureCode(error.cause):error.cause instanceof Error&&error.cause.message.startsWith("baseline verifier registration failed")?"verifier-registration-failed":finalMigrationFailureCode(error.cause);
   if (message === "live catalog preparation controller-registration-failed" && error instanceof Error && error.cause)
     return controllerRegistrationFailureCode(error.cause);
-  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required", "controller-registration-failed", "verifier-registration-failed", "final-ledger-invalid", "final-catalog-invalid", "candidate-write-failed"])
+  for (const code of ["cli-config-invalid", "cli-metadata-token-failed", "cli-predecessor-fetch-failed", "cli-predecessor-source-invalid", "cli-sink-setup-failed", "cli-core-prepare-failed", "input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required", "controller-registration-failed", "verifier-registration-failed", "final-ledger-invalid", "final-catalog-invalid", "candidate-write-failed"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
   if (/metadata token invalid/.test(message)) return "workload-token-failed";
@@ -260,17 +262,16 @@ async function defaultConnect(connectionString: string): Promise<Connection> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
-    const options = parseLiveCatalogPreparationArgs(process.argv.slice(2)), secret = (await readFile(options.databaseUrlFile, "utf8")).trim(), environment = process.env;
-    if (!/^postgres(?:ql)?:\/\//.test(secret) || Buffer.byteLength(secret) > 8192 || !environment.NEARYOU_DEPLOYED_SOURCE_COMMIT || !environment.NEARYOU_DEPLOYED_IMAGE_DIGEST || !environment.NEARYOU_CATALOG_EVIDENCE_BUCKET || !/^[A-Za-z0-9_.@-]{3,200}$/.test(environment.NEARYOU_OBSERVED_MIGRATION_DATABASE_USER??"")) throw new Error("live catalog preparation configuration invalid");
-    const accessToken = await fetchGoogleMetadataAccessToken();
+    const environment=process.env,{options,secret}=await atCliStage("cli-config-invalid",async()=>{const parsed=parseLiveCatalogPreparationArgs(process.argv.slice(2)),value=(await readFile(parsed.databaseUrlFile,"utf8")).trim();if(!/^postgres(?:ql)?:\/\//.test(value)||Buffer.byteLength(value)>8192||!environment.NEARYOU_DEPLOYED_SOURCE_COMMIT||!environment.NEARYOU_DEPLOYED_IMAGE_DIGEST||!environment.NEARYOU_CATALOG_EVIDENCE_BUCKET||!/^[A-Za-z0-9_.@-]{3,200}$/.test(environment.NEARYOU_OBSERVED_MIGRATION_DATABASE_USER??""))throw new Error("configuration invalid");return{options:parsed,secret:value}});
+    const accessToken = await atCliStage("cli-metadata-token-failed",()=>fetchGoogleMetadataAccessToken());
     const priorCoordinates=[environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_URI,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_GENERATION,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_SHA256];
-    if(priorCoordinates.some(Boolean)&&!priorCoordinates.every(Boolean))throw new Error("live catalog preparation configuration invalid");
-    const priorBaselineAttestation=priorCoordinates.every(Boolean)?await fetchPriorBaselineAttestation({uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,expectedObjectSha256:priorCoordinates[2]!,accessToken}):undefined;
+    if(priorCoordinates.some(Boolean)&&!priorCoordinates.every(Boolean))throw new Error("live catalog preparation cli-config-invalid");
+    const priorBaselineAttestation=priorCoordinates.every(Boolean)?await atCliStage("cli-predecessor-fetch-failed",()=>fetchPriorBaselineAttestation({uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,expectedObjectSha256:priorCoordinates[2]!,accessToken})):undefined;
     const authoritativePredecessorSource=priorBaselineAttestation?{commitSha:environment.NEARYOU_PREDECESSOR_SOURCE_COMMIT??"",imageDigest:environment.NEARYOU_PREDECESSOR_IMAGE_DIGEST??""}:undefined;
-    if(priorBaselineAttestation&&(!COMMIT.test(authoritativePredecessorSource!.commitSha)||!IMAGE.test(authoritativePredecessorSource!.imageDigest)))throw new Error("live catalog preparation configuration invalid");
-    const sink=createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET, accessToken });
+    await atCliStage("cli-predecessor-source-invalid",async()=>{if(priorBaselineAttestation&&(!COMMIT.test(authoritativePredecessorSource!.commitSha)||!IMAGE.test(authoritativePredecessorSource!.imageDigest)))throw new Error("source invalid")});
+    const sink=await atCliStage("cli-sink-setup-failed",async()=>createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET!, accessToken }));
     const expectedPredecessorAttestation=priorBaselineAttestation?{uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,objectSha256:priorCoordinates[2]!}:undefined;
-    const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeMigrationDatabaseUser:environment.NEARYOU_OBSERVED_MIGRATION_DATABASE_USER!, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST },authoritativePredecessorSource,expectedPredecessorAttestation, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
+    const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeMigrationDatabaseUser:environment.NEARYOU_OBSERVED_MIGRATION_DATABASE_USER!, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT!, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST! },authoritativePredecessorSource,expectedPredecessorAttestation, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink }).catch((error)=>{if(liveCatalogPreparationFailureCode(error)!=="preparation-failed")throw error;throw new Error("live catalog preparation cli-core-prepare-failed",{cause:error})});
     process.stdout.write(`${JSON.stringify({ receipt: result.receipt, catalogChecksum: result.candidate.catalogChecksum, reviewRequired: true })}\n`);
   })().catch((error) => { process.stderr.write(`live catalog preparation failed: ${liveCatalogPreparationFailureCode(error)}\n`); process.exitCode = 1; });
 }
