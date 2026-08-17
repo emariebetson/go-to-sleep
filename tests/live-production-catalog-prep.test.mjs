@@ -145,6 +145,7 @@ test("classifies bootstrap SQL failures without exposing provider messages", () 
   assert.equal(bootstrapMigrationFailureCode(Object.assign(new Error("secret definition detail"),{code:"42P17"})),"bootstrap-migration-definition");
   assert.equal(bootstrapMigrationFailureCode(Object.assign(new Error("secret collision detail"),{code:"42P07"})),"bootstrap-migration-collision");
   assert.equal(bootstrapMigrationFailureCode(new Error("secret unknown detail")),"bootstrap-migration-unknown");
+  assert.equal(bootstrapMigrationFailureCode(new Error("migration execution failed:0001_nearyou_tenant_foundation",{cause:Object.assign(new Error("secret role detail"),{code:"42501"})})),"bootstrap-migration-privilege-0001");
 });
 
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {

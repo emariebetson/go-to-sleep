@@ -123,12 +123,12 @@ export function databaseConnectionFailureCode(error: unknown) {
 }
 
 export function bootstrapMigrationFailureCode(error: unknown) {
-  const code=typeof error==="object"&&error!==null&&"code" in error?String(error.code):"";
-  if(code==="42501")return "bootstrap-migration-privilege";
-  if(code==="0A000"||code==="58P01")return "bootstrap-migration-feature";
-  if(code==="42P17"||code==="42601")return "bootstrap-migration-definition";
-  if(["42P06","42P07","42710","23505"].includes(code))return "bootstrap-migration-collision";
-  return "bootstrap-migration-unknown";
+  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-6]_[a-z0-9_]+)/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}`:"";
+  if(code==="42501")return `bootstrap-migration-privilege${suffix}`;
+  if(code==="0A000"||code==="58P01")return `bootstrap-migration-feature${suffix}`;
+  if(code==="42P17"||code==="42601")return `bootstrap-migration-definition${suffix}`;
+  if(["42P06","42P07","42710","23505"].includes(code))return `bootstrap-migration-collision${suffix}`;
+  return `bootstrap-migration-unknown${suffix}`;
 }
 
 export function liveCatalogPreparationFailureCode(error: unknown) {
