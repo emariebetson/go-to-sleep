@@ -1,8 +1,10 @@
 import { eq } from "drizzle-orm";
+import { env } from "cloudflare:workers";
 import { getDb } from "@/db";
 import { entitlements, householdMembers, households, users } from "@/db/schema";
 import type { AppUser } from "./auth";
 import { AccountBootstrapError, accountBootstrapCauseClassName, runAccountBootstrap } from "./account-bootstrap";
+import { createLegacyFreeEntitlement } from "./legacy-entitlement-bootstrap";
 import { householdIdForUser } from "./nearyou-foundation";
 
 export async function ensureUser(user: AppUser) {
@@ -56,19 +58,7 @@ export async function ensureUser(user: AppUser) {
         }).onConflictDoNothing();
       },
       async createEntitlement() {
-        await db.insert(entitlements).values({
-          id: entitlementId,
-          householdId,
-          planId: "nearsleep_free",
-          source: "legacy",
-          status: "active",
-          allowanceMilliunits: 1_000,
-          remainingMilliunits: 1_000,
-          legacyCreditsRemaining: 1,
-          validFrom: now,
-          createdAt: now,
-          updatedAt: now,
-        }).onConflictDoNothing();
+        await createLegacyFreeEntitlement(env.DB, { id: entitlementId, householdId, now });
       },
     });
   } catch (error) {
