@@ -27,7 +27,8 @@ const ledgerChecksum = (files) => sha256(files.map((file) => `${file.id}:${file.
 
 test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 without conflict", async () => {
   const files = await loadPostgresMigrations();
-  assert.deepEqual(files.slice(0, 6).map(({ id, checksum }) => [id, checksum]), historicalMigrations);
+  assert.notDeepEqual(files.slice(0, 3).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(0, 3));
+  assert.deepEqual(files.slice(3, 6).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(3, 6));
   assert.equal(files[6]?.id, "0007_private_tester_deployment_manifest");
 
   const ledger = new Map(historicalMigrations);
@@ -54,15 +55,41 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
 
-  assert.deepEqual([...ledger], files.map(({ id, checksum }) => [id, checksum]));
+  assert.deepEqual([...ledger], [...historicalMigrations, [files[6].id, files[6].checksum]]);
   assert.deepEqual(executedBodies, [migrationBody(files[6].sql)]);
   assert.match(executedBodies[0], /DROP FUNCTION nearyou\.register_rollout_controller_identity\(name,text\)/);
   assert.match(executedBodies[0], /CREATE FUNCTION nearyou\.register_rollout_controller_identity\(p_database_user name,p_principal text\) RETURNS TABLE\(database_user text,principal text,effective boolean\)/);
   assert.match(executedBodies[0], /pg_has_role\(p_database_user,'nearyou_rollout_controller','USAGE'\)/);
+  assert.match(executedBodies[0], /ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(executedBodies[0], /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner USING \(true\)/);
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
   assert.equal(executedBodies.length, 1, "a fully ledgered replay must execute no migration body");
   assert.deepEqual(ledgerInserts, [[files[6].id, files[6].checksum]], "the upgrade must only append 0007 to the ledger");
+});
+
+test("Cloud SQL policy owners use narrow RLS policy access instead of unavailable BYPASSRLS", async () => {
+  const first = await readFile(new URL("../postgres/migrations/0001_nearyou_tenant_foundation.sql", import.meta.url), "utf8");
+  const release = await readFile(new URL("../postgres/migrations/0002_release_evidence_trust.sql", import.meta.url), "utf8");
+  const cutover = await readFile(new URL("../postgres/migrations/0003_cutover_runtime.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(`${first}\n${release}\n${cutover}`, /\bBYPASSRLS\b/);
+  assert.match(first, /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner\s+USING \(true\)/);
+  assert.match(first, /CREATE POLICY member_select ON nearyou\.household_members FOR SELECT TO nearyou_app/);
+});
+
+test("migration compatibility accepts only the three exact retired checksums", async () => {
+  const files = await loadPostgresMigrations();
+  const pg = {
+    transaction: async (run) => run({
+      query: async (sql, args = []) => {
+        if (sql.startsWith("SELECT checksum FROM nearyou.schema_migrations")) {
+          return { rows: args[0] === files[0].id ? [{ checksum: "f".repeat(64) }] : [] };
+        }
+        return { rows: [] };
+      },
+    }),
+  };
+  await assert.rejects(() => applyPostgresMigrations(pg, files, ledgerChecksum(files)), /migration ledger conflict/);
 });
 
 test("production evidence builds the catalog from the complete 0001 through 0007 migration set", async () => {

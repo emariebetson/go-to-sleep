@@ -10,7 +10,7 @@ DO $$ BEGIN
   CREATE ROLE nearyou_migration NOLOGIN NOINHERIT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
-  CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT BYPASSRLS;
+  CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   CREATE ROLE nearyou_app NOLOGIN NOINHERIT NOBYPASSRLS;
@@ -22,7 +22,7 @@ DO $$ BEGIN
   CREATE ROLE nearyou_job_worker NOLOGIN NOINHERIT NOBYPASSRLS;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER ROLE nearyou_migration NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
-ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE nearyou_app NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE nearyou_billing_worker NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE nearyou_job_worker NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
@@ -153,8 +153,10 @@ ALTER TABLE nearyou.durable_jobs FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY household_select ON nearyou.households FOR SELECT
   USING (id = nearyou.current_household_id() AND nearyou.is_active_household_member(id));
-CREATE POLICY member_select ON nearyou.household_members FOR SELECT
+CREATE POLICY member_select ON nearyou.household_members FOR SELECT TO nearyou_app
   USING (household_id = nearyou.current_household_id() AND nearyou.is_active_household_member(household_id));
+CREATE POLICY policy_owner_member_select ON nearyou.household_members FOR SELECT TO nearyou_policy_owner
+  USING (true);
 CREATE POLICY tenant_record_select ON nearyou.tenant_records FOR SELECT
   USING (household_id = nearyou.current_household_id() AND nearyou.is_active_household_member(household_id));
 CREATE POLICY tenant_record_app_mutation ON nearyou.tenant_records FOR ALL TO nearyou_app

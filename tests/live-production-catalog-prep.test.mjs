@@ -17,6 +17,11 @@ const verifierPrincipal = "service:nearyou-private-tester-baseline-verifier";
 const catalogRows = REQUIRED_CATALOG_KINDS.map((kind, index) => ({ kind, identity: `nearyou.${kind}.${index}`, definition: `definition-${index}` }));
 const catalogChecksum = sha256(JSON.stringify(catalogRows));
 const baseline = { version: 1, schema: "nearyou", catalogChecksum, generatedFrom: "reviewed-live-production-postgresql-16", reviewRequired: false, requiredKinds: REQUIRED_CATALOG_KINDS, requireForcedRls: ["household_members", "tenant_records"], forbidPublicExecute: true, migrationHead: "0006_private_canary_observation" };
+const retiredChecksums = [
+  "ae9a5e8f26190063382d76eae25565a6a991523edf6ceefa1abd74b1fd88a194",
+  "7ec295cb252f9d8cf54d951e899a59ddb834a1204de951a7d967eeeaf67c11f8",
+  "ed449236853519c58fabbd13eca2587c515447bdff81b3a6153d9afe0436aede",
+];
 
 async function fixture(overrides = {}) {
   const migrations = await loadPostgresMigrations();
@@ -159,6 +164,15 @@ test("resumes exact 0007 state without replaying migration and converges registr
   const { events, result } = await fixture({ ledger: migrations.map(({ id, checksum }) => ({ id, checksum })) });
   assert.deepEqual(events.filter((event) => event.startsWith("insert:")), []);
   assert.equal(result.candidate.migrationHead, migrations.at(-1).id);
+});
+
+test("legacy 0001-0003 ledger is remediated by 0007 and preserved exactly in provenance", async () => {
+  const migrations = await loadPostgresMigrations();
+  const legacyLedger = migrations.slice(0, 6).map(({ id, checksum }, index) => ({ id, checksum: retiredChecksums[index] ?? checksum }));
+  const { result, events } = await fixture({ ledger: legacyLedger });
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest"]);
+  assert.deepEqual(result.candidate.provenance.migrationLedger, [...legacyLedger, { id: migrations[6].id, checksum: migrations[6].checksum }]);
+  assert.equal(result.candidate.provenance.migrationLedgerChecksum, sha256(result.candidate.provenance.migrationLedger.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")));
 });
 
 test("exact 0006 first run does not require a prior baseline attestation", async () => {

@@ -1,4 +1,11 @@
 BEGIN;
+ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_release_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE nearyou_cutover_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+DROP POLICY member_select ON nearyou.household_members;
+CREATE POLICY member_select ON nearyou.household_members FOR SELECT TO nearyou_app USING (household_id=nearyou.current_household_id() AND nearyou.is_active_household_member(household_id));
+DROP POLICY IF EXISTS policy_owner_member_select ON nearyou.household_members;
+CREATE POLICY policy_owner_member_select ON nearyou.household_members FOR SELECT TO nearyou_policy_owner USING (true);
 DROP FUNCTION nearyou.register_rollout_controller_identity(name,text);
 CREATE FUNCTION nearyou.register_rollout_controller_identity(p_database_user name,p_principal text) RETURNS TABLE(database_user text,principal text,effective boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,nearyou AS $$ BEGIN IF current_user<>'nearyou_release_policy_owner' OR p_database_user::text!~'^[A-Za-z0-9_.@-]{3,200}$' OR p_principal!~'^service:[A-Za-z0-9_-]{3,100}$' OR NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=p_database_user::text) OR NOT pg_has_role(p_database_user,'nearyou_rollout_controller','USAGE') THEN RAISE EXCEPTION 'rollout controller identity invalid'; END IF; INSERT INTO nearyou.rollout_controller_identities VALUES(p_database_user,p_principal) ON CONFLICT DO NOTHING; RETURN QUERY SELECT i.database_user::text,i.principal,pg_has_role(i.database_user,'nearyou_rollout_controller','USAGE') FROM nearyou.rollout_controller_identities i WHERE i.database_user=p_database_user AND i.principal=p_principal; END $$;
 ALTER FUNCTION nearyou.register_rollout_controller_identity(name,text) OWNER TO nearyou_release_policy_owner;

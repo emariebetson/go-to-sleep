@@ -56,10 +56,12 @@ test("cutover checksum helper is policy-owned and not publicly executable", () =
 test("tenant RLS avoids recursive membership policies and grants app-scoped writes", () => {
   const memberPolicy = sql.match(/CREATE POLICY member_select[\s\S]*?;/)?.[0] || "";
   assert.match(memberPolicy, /is_active_household_member\(household_id\)/);
-  assert.match(sql, /CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT BYPASSRLS/);
+  assert.match(sql, /CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS/);
   assert.match(sql, /ALTER FUNCTION nearyou\.is_active_household_member\(text\) OWNER TO nearyou_policy_owner/);
   assert.match(sql, /GRANT USAGE ON SCHEMA nearyou TO nearyou_policy_owner/);
   assert.match(sql, /GRANT SELECT ON nearyou\.household_members TO nearyou_policy_owner/);
+  assert.match(sql, /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner\s+USING \(true\)/);
+  assert.match(memberPolicy, /FOR SELECT TO nearyou_app/);
   assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.current_household_id\(\), nearyou\.current_user_id\(\) FROM PUBLIC/);
   assert.match(sql, /CREATE POLICY member_select[\s\S]*household_id = nearyou\.current_household_id\(\)/);
   assert.match(sql, /CREATE POLICY tenant_record_app_mutation[\s\S]*TO nearyou_app[\s\S]*is_household_manager\(household_id\)/);
@@ -73,7 +75,7 @@ test("application identities cannot inherit migration or bypass RLS privileges",
   assert.match(sql, /CREATE ROLE nearyou_job_worker NOLOGIN NOINHERIT NOBYPASSRLS/);
   assert.doesNotMatch(sql, /GRANT nearyou_migration TO nearyou_(?:app|billing_worker|job_worker)/);
   for (const role of ["nearyou_app", "nearyou_billing_worker", "nearyou_job_worker"]) assert.match(sql, new RegExp(`ALTER ROLE ${role} NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`));
-  assert.match(sql, /ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION/);
+  assert.match(sql, /ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION/);
 });
 
 test("tenant transaction requires a checked-out connection and resets context before returning it", async () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { applyPostgresMigrations, loadPostgresMigrations, type MigrationFile } from "./migrate";
+import { acceptsMigrationLedger, applyPostgresMigrations, loadPostgresMigrations, type MigrationFile } from "./migrate";
 import { registerRolloutController, type AdminPg } from "./register-rollout-controller";
 import { registerPrivateTesterBaselineVerifier } from "./register-private-tester-baseline-verifier";
 import { collectLiveCatalog, verifyLiveCatalogSecurity } from "./postgres-catalog";
@@ -158,7 +158,6 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   precondition(JSON.stringify({ controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal }) === JSON.stringify(PRODUCTION_IDENTITIES), "identity-invalid");
   const files = dependencies.migrations ?? await loadPostgresMigrations();
   precondition(files.length === 7 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest", "migration-set-invalid");
-  const historical = files.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }));
   const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
     const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean; can_set_cloudsqlsuperuser:boolean }>(
@@ -168,8 +167,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && target.can_set_cloudsqlsuperuser === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
     if (target.pristine === true) await atStage("bootstrap-migration-failed",()=>applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6)),{setLocalRole:"cloudsqlsuperuser"}));
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
-    const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
-    const from0006 = JSON.stringify(liveLedger) === JSON.stringify(historical), from0007 = JSON.stringify(liveLedger) === JSON.stringify(expectedLedger);
+    const from0006 = acceptsMigrationLedger(files.slice(0,6),liveLedger), from0007 = acceptsMigrationLedger(files,liveLedger);
     precondition(from0006 || from0007, "ledger-state-invalid");
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
     if (from0006) {
@@ -194,12 +192,12 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       precondition(attestation.migrationHead === reviewedBaseline.migrationHead && attestation.catalogChecksum === reviewedBaseline.catalogChecksum && attestation.release === input.release && attestation.operationId===input.operationId && attestation.attestedAt===input.operationStartedAt && JSON.stringify(attestation.source) === JSON.stringify(dependencies.authoritativeSource) && /^gs:\/\//.test(uri) && /^[1-9][0-9]{0,30}$/.test(generation) && digest === sha256(JSON.stringify(attestation)));
     }
 
-    const migration = await applyPostgresMigrations(connection.pg, files, migrationChecksum(files));
+    await applyPostgresMigrations(connection.pg, files, migrationChecksum(files));
     const controller = await registerRolloutController(connection.pg, input.controllerDatabaseUser, input.controllerPrincipal);
     const verifier = await registerPrivateTesterBaselineVerifier(connection.pg, input.verifierDatabaseUser, input.verifierPrincipal);
     precondition(controller.controllerMappingVerified === true && verifier.baselineVerifierMappingVerified === true);
     const finalLedger = (await connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", [])).rows;
-    precondition(JSON.stringify(finalLedger) === JSON.stringify(expectedLedger));
+    precondition(acceptsMigrationLedger(files,finalLedger));
     const rows = await collectLiveCatalog(connection);
     const security = await verifyLiveCatalogSecurity(connection);
     precondition(REQUIRED_CATALOG_KINDS.every((kind) => rows.some((row) => row.kind === kind)));
@@ -207,8 +205,8 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       database: { name: "nearyou", serverVersion: target.server_version, migrationAdmin: target.database_user },
       source: dependencies.authoritativeSource,
       baseline: { migrationHead: reviewedBaseline.migrationHead, catalogChecksum: reviewedBaseline.catalogChecksum },
-      migrationLedger: expectedLedger,
-      migrationLedgerChecksum: migration.migrationLedgerChecksum,
+      migrationLedger: finalLedger,
+      migrationLedgerChecksum: sha256(finalLedger.map(({id,checksum})=>`${id}:${checksum}`).join("\n")),
       identities: { controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal },
       release: input.release,
       operationId:input.operationId,

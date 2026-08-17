@@ -14,7 +14,7 @@ const crc32c = (text) => {
 
 const migration = readFileSync(new URL("../postgres/migrations/0002_release_evidence_trust.sql", import.meta.url), "utf8");
 test("Postgres evidence roles expose only narrow security-definer functions", () => {
-  assert.match(migration, /CREATE ROLE nearyou_release_policy_owner NOLOGIN NOINHERIT BYPASSRLS/);
+  assert.match(migration, /CREATE ROLE nearyou_release_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS/);
   assert.match(migration, /ALTER FUNCTION nearyou\.consume_evidence_nonce[\s\S]*OWNER TO nearyou_release_policy_owner/);
   assert.match(migration, /REVOKE ALL ON FUNCTION nearyou\.consume_evidence_nonce[\s\S]*FROM PUBLIC/);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION nearyou\.consume_evidence_nonce[\s\S]*TO nearyou_release_verifier/);
