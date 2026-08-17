@@ -132,6 +132,7 @@ async function fetchWithin(fetcher: typeof fetch, resource: RequestInfo | URL, i
 export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?: typeof fetch; now?: () => number }) {
   if (input.issuer !== GOOGLE_ISSUER || input.audience !== GOOGLE_ORIGIN || !/^[1-9][0-9]{10,30}$/.test(input.subject)) configurationError();
   const fetcher = input.fetch ?? fetch;
+  const requireProviderUrl = input.fetch === undefined;
   const now = input.now ?? Date.now;
   return async (request: Request): Promise<Trust> => {
     let failureStage = "authorization";
@@ -146,11 +147,11 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
       const timestamp = now(), issuedAt = claims.iat, expiresAt = claims.exp;
       if (header.alg !== "RS256" || typeof header.kid !== "string" || (header.typ !== undefined && header.typ !== "JWT") || claims.iss !== input.issuer || claims.aud !== input.audience || claims.sub !== input.subject || (claims.azp !== undefined && claims.azp !== input.subject) || !Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(timestamp) || Number(issuedAt) > timestamp / 1000 + 30 || Number(expiresAt) <= timestamp / 1000 || Number(expiresAt) - Number(issuedAt) > 3_600) throw new Error();
       failureStage = "jwks-fetch";
-      const response = await fetchWithin(fetcher, GOOGLE_JWKS, { redirect: "error" }, 5_000);
+      const response = await fetchWithin(fetcher, GOOGLE_JWKS, {}, 5_000);
       failureStage = "jwks-body";
       const raw = await response.text();
       failureStage = "jwks-contract";
-      if (!response.ok || response.redirected || response.headers.get("content-type")?.split(";")[0] !== "application/json" || new TextEncoder().encode(raw).byteLength > MAX_JWKS_BYTES) throw new Error();
+      if (!response.ok || response.redirected || (requireProviderUrl && response.url !== GOOGLE_JWKS) || response.headers.get("content-type")?.split(";")[0] !== "application/json" || new TextEncoder().encode(raw).byteLength > MAX_JWKS_BYTES) throw new Error();
       failureStage = "jwks-json";
       const root = JSON.parse(raw) as unknown;
       failureStage = "jwks-shape";
