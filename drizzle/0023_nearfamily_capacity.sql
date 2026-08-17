@@ -40,44 +40,83 @@ END;
 --> statement-breakpoint
 CREATE TRIGGER `household_capacity_state_delete_guard` BEFORE DELETE ON `household_capacity_state`
 WHEN EXISTS(SELECT 1 FROM `households` WHERE `id`=OLD.`household_id`)
-BEGIN SELECT RAISE(ABORT,'capacity_state_authoritative'); END;
+BEGIN SELECT RAISE(ABORT,'capacity_state_authoritative');
+END;
 --> statement-breakpoint
 INSERT INTO `household_capacity_state`(`household_id`,`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`) SELECT `household_id`,`plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,1 FROM `household_capacity_projection`;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_household_insert` AFTER INSERT ON `households` BEGIN INSERT INTO `household_capacity_state`(`household_id`,`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`) SELECT `household_id`,`plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`id`; END;
+CREATE TRIGGER `household_capacity_after_household_insert` AFTER INSERT ON `households` BEGIN INSERT INTO `household_capacity_state`(`household_id`,`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`) SELECT `household_id`,`plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_entitlement_insert` AFTER INSERT ON `entitlements` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_entitlement_insert` AFTER INSERT ON `entitlements` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_entitlement_update` AFTER UPDATE ON `entitlements` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_entitlement_update` AFTER UPDATE ON `entitlements` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_entitlement_delete` AFTER DELETE ON `entitlements` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_entitlement_delete` AFTER DELETE ON `entitlements` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_member_insert` AFTER INSERT ON `household_members` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_member_insert` AFTER INSERT ON `household_members` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_member_update` AFTER UPDATE ON `household_members` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_member_update` AFTER UPDATE ON `household_members` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_member_delete` AFTER DELETE ON `household_members` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_member_delete` AFTER DELETE ON `household_members` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_invitation_insert` AFTER INSERT ON `household_invitations` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_invitation_insert` AFTER INSERT ON `household_invitations` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_invitation_update` AFTER UPDATE ON `household_invitations` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_invitation_update` AFTER UPDATE ON `household_invitations` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_invitation_delete` AFTER DELETE ON `household_invitations` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_invitation_delete` AFTER DELETE ON `household_invitations` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_child_insert` AFTER INSERT ON `child_profiles` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_child_insert` AFTER INSERT ON `child_profiles` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_child_update` AFTER UPDATE ON `child_profiles` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_child_update` AFTER UPDATE ON `child_profiles` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_child_delete` AFTER DELETE ON `child_profiles` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_child_delete` AFTER DELETE ON `child_profiles` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_voice_insert` AFTER INSERT ON `voices` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_voice_insert` AFTER INSERT ON `voices` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_voice_update` AFTER UPDATE ON `voices` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_voice_update` AFTER UPDATE ON `voices` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_voice_delete` AFTER DELETE ON `voices` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_voice_delete` AFTER DELETE ON `voices` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_media_insert` AFTER INSERT ON `media_assets` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_media_insert` AFTER INSERT ON `media_assets` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_media_update` AFTER UPDATE ON `media_assets` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_media_update` AFTER UPDATE ON `media_assets` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=NEW.`household_id`) WHERE `household_id`=NEW.`household_id`;
+
+END;
 --> statement-breakpoint
-CREATE TRIGGER `household_capacity_after_media_delete` AFTER DELETE ON `media_assets` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`; END;
+CREATE TRIGGER `household_capacity_after_media_delete` AFTER DELETE ON `media_assets` BEGIN UPDATE `household_capacity_state` SET (`plan_id`,`state`,`exceeded_json`,`evaluated_at`,`version`)=(SELECT `plan_id`,`state`,`exceeded_json`,unixepoch('subsec')*1000,`household_capacity_state`.`version`+1 FROM `household_capacity_projection` WHERE `household_id`=OLD.`household_id`) WHERE `household_id`=OLD.`household_id`;
+
+END;

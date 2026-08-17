@@ -1,312 +1,623 @@
 CREATE TRIGGER cutover_inventory_fence_account_deletion_billing_tombstones_insert BEFORE INSERT ON "account_deletion_billing_tombstones" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_billing_tombstones_update BEFORE UPDATE ON "account_deletion_billing_tombstones" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_billing_tombstones_delete BEFORE DELETE ON "account_deletion_billing_tombstones" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_items_insert BEFORE INSERT ON "account_deletion_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_items_update BEFORE UPDATE ON "account_deletion_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_items_delete BEFORE DELETE ON "account_deletion_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_operations_insert BEFORE INSERT ON "account_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_operations_update BEFORE UPDATE ON "account_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_deletion_operations_delete BEFORE DELETE ON "account_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_reauth_challenges_insert BEFORE INSERT ON "account_reauth_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_reauth_challenges_update BEFORE UPDATE ON "account_reauth_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_account_reauth_challenges_delete BEFORE DELETE ON "account_reauth_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_adult_onboarding_acceptances_insert BEFORE INSERT ON "adult_onboarding_acceptances" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_adult_onboarding_acceptances_update BEFORE UPDATE ON "adult_onboarding_acceptances" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_adult_onboarding_acceptances_delete BEFORE DELETE ON "adult_onboarding_acceptances" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_annual_allowance_refills_insert BEFORE INSERT ON "annual_allowance_refills" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_annual_allowance_refills_update BEFORE UPDATE ON "annual_allowance_refills" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_annual_allowance_refills_delete BEFORE DELETE ON "annual_allowance_refills" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_auth_sessions_insert BEFORE INSERT ON "auth_sessions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_auth_sessions_update BEFORE UPDATE ON "auth_sessions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_auth_sessions_delete BEFORE DELETE ON "auth_sessions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_auth_verifications_insert BEFORE INSERT ON "auth_verifications" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_auth_verifications_update BEFORE UPDATE ON "auth_verifications" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_auth_verifications_delete BEFORE DELETE ON "auth_verifications" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_bedtime_queue_items_insert BEFORE INSERT ON "bedtime_queue_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_bedtime_queue_items_update BEFORE UPDATE ON "bedtime_queue_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_bedtime_queue_items_delete BEFORE DELETE ON "bedtime_queue_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_child_profiles_insert BEFORE INSERT ON "child_profiles" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_child_profiles_update BEFORE UPDATE ON "child_profiles" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_child_profiles_delete BEFORE DELETE ON "child_profiles" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_children_insert BEFORE INSERT ON "children" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_children_update BEFORE UPDATE ON "children" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_children_delete BEFORE DELETE ON "children" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_contributors_insert BEFORE INSERT ON "contributors" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_contributors_update BEFORE UPDATE ON "contributors" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_contributors_delete BEFORE DELETE ON "contributors" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_deletion_reconciliations_insert BEFORE INSERT ON "deletion_reconciliations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_deletion_reconciliations_update BEFORE UPDATE ON "deletion_reconciliations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_deletion_reconciliations_delete BEFORE DELETE ON "deletion_reconciliations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_encrypted_integration_tokens_insert BEFORE INSERT ON "encrypted_integration_tokens" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_encrypted_integration_tokens_update BEFORE UPDATE ON "encrypted_integration_tokens" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_encrypted_integration_tokens_delete BEFORE DELETE ON "encrypted_integration_tokens" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_entitlements_insert BEFORE INSERT ON "entitlements" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_entitlements_update BEFORE UPDATE ON "entitlements" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_entitlements_delete BEFORE DELETE ON "entitlements" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_generation_operations_insert BEFORE INSERT ON "generation_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_generation_operations_update BEFORE UPDATE ON "generation_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_generation_operations_delete BEFORE DELETE ON "generation_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_billing_accounts_insert BEFORE INSERT ON "household_billing_accounts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_billing_accounts_update BEFORE UPDATE ON "household_billing_accounts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_billing_accounts_delete BEFORE DELETE ON "household_billing_accounts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_billing_subscriptions_insert BEFORE INSERT ON "household_billing_subscriptions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_billing_subscriptions_update BEFORE UPDATE ON "household_billing_subscriptions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_billing_subscriptions_delete BEFORE DELETE ON "household_billing_subscriptions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_download_confirmations_insert BEFORE INSERT ON "household_export_download_confirmations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_download_confirmations_update BEFORE UPDATE ON "household_export_download_confirmations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_download_confirmations_delete BEFORE DELETE ON "household_export_download_confirmations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_metadata_pages_insert BEFORE INSERT ON "household_export_metadata_pages" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_metadata_pages_update BEFORE UPDATE ON "household_export_metadata_pages" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_metadata_pages_delete BEFORE DELETE ON "household_export_metadata_pages" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_parts_insert BEFORE INSERT ON "household_export_parts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_parts_update BEFORE UPDATE ON "household_export_parts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_export_parts_delete BEFORE DELETE ON "household_export_parts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_exports_insert BEFORE INSERT ON "household_exports" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_exports_update BEFORE UPDATE ON "household_exports" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_exports_delete BEFORE DELETE ON "household_exports" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_invitations_insert BEFORE INSERT ON "household_invitations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_invitations_update BEFORE UPDATE ON "household_invitations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_invitations_delete BEFORE DELETE ON "household_invitations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_members_insert BEFORE INSERT ON "household_members" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_members_update BEFORE UPDATE ON "household_members" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_members_delete BEFORE DELETE ON "household_members" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_owner_transfer_guards_insert BEFORE INSERT ON "household_owner_transfer_guards" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_owner_transfer_guards_update BEFORE UPDATE ON "household_owner_transfer_guards" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_owner_transfer_guards_delete BEFORE DELETE ON "household_owner_transfer_guards" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_storage_reservations_insert BEFORE INSERT ON "household_storage_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_storage_reservations_update BEFORE UPDATE ON "household_storage_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_household_storage_reservations_delete BEFORE DELETE ON "household_storage_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_households_insert BEFORE INSERT ON "households" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_households_update BEFORE UPDATE ON "households" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_households_delete BEFORE DELETE ON "households" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_integration_rights_receipts_insert BEFORE INSERT ON "integration_rights_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_integration_rights_receipts_update BEFORE UPDATE ON "integration_rights_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_integration_rights_receipts_delete BEFORE DELETE ON "integration_rights_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_jobs_insert BEFORE INSERT ON "jobs" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_jobs_update BEFORE UPDATE ON "jobs" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_jobs_delete BEFORE DELETE ON "jobs" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_activation_state_insert BEFORE INSERT ON "legacy_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_activation_state_update BEFORE UPDATE ON "legacy_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_activation_state_delete BEFORE DELETE ON "legacy_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_audit_events_insert BEFORE INSERT ON "legacy_audit_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_audit_events_update BEFORE UPDATE ON "legacy_audit_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_audit_events_delete BEFORE DELETE ON "legacy_audit_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_collection_items_insert BEFORE INSERT ON "legacy_collection_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_collection_items_update BEFORE UPDATE ON "legacy_collection_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_collection_items_delete BEFORE DELETE ON "legacy_collection_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_collections_insert BEFORE INSERT ON "legacy_collections" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_collections_update BEFORE UPDATE ON "legacy_collections" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_collections_delete BEFORE DELETE ON "legacy_collections" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_consents_insert BEFORE INSERT ON "legacy_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_consents_update BEFORE UPDATE ON "legacy_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_consents_delete BEFORE DELETE ON "legacy_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodian_acceptances_insert BEFORE INSERT ON "legacy_custodian_acceptances" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodian_acceptances_update BEFORE UPDATE ON "legacy_custodian_acceptances" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodian_acceptances_delete BEFORE DELETE ON "legacy_custodian_acceptances" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodian_transfers_insert BEFORE INSERT ON "legacy_custodian_transfers" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodian_transfers_update BEFORE UPDATE ON "legacy_custodian_transfers" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodian_transfers_delete BEFORE DELETE ON "legacy_custodian_transfers" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodians_insert BEFORE INSERT ON "legacy_custodians" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodians_update BEFORE UPDATE ON "legacy_custodians" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_custodians_delete BEFORE DELETE ON "legacy_custodians" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_deletion_items_insert BEFORE INSERT ON "legacy_deletion_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_deletion_items_update BEFORE UPDATE ON "legacy_deletion_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_deletion_items_delete BEFORE DELETE ON "legacy_deletion_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_deletion_operations_insert BEFORE INSERT ON "legacy_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_deletion_operations_update BEFORE UPDATE ON "legacy_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_deletion_operations_delete BEFORE DELETE ON "legacy_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_erasure_authorizations_insert BEFORE INSERT ON "legacy_erasure_authorizations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_erasure_authorizations_update BEFORE UPDATE ON "legacy_erasure_authorizations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_erasure_authorizations_delete BEFORE DELETE ON "legacy_erasure_authorizations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_erasure_tombstones_insert BEFORE INSERT ON "legacy_erasure_tombstones" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_erasure_tombstones_update BEFORE UPDATE ON "legacy_erasure_tombstones" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_erasure_tombstones_delete BEFORE DELETE ON "legacy_erasure_tombstones" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_evidence_retention_insert BEFORE INSERT ON "legacy_evidence_retention" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_evidence_retention_update BEFORE UPDATE ON "legacy_evidence_retention" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_evidence_retention_delete BEFORE DELETE ON "legacy_evidence_retention" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_consents_insert BEFORE INSERT ON "legacy_export_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_consents_update BEFORE UPDATE ON "legacy_export_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_consents_delete BEFORE DELETE ON "legacy_export_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_operations_insert BEFORE INSERT ON "legacy_export_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_operations_update BEFORE UPDATE ON "legacy_export_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_operations_delete BEFORE DELETE ON "legacy_export_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_parts_insert BEFORE INSERT ON "legacy_export_parts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_parts_update BEFORE UPDATE ON "legacy_export_parts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_export_parts_delete BEFORE DELETE ON "legacy_export_parts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_interviews_insert BEFORE INSERT ON "legacy_interviews" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_interviews_update BEFORE UPDATE ON "legacy_interviews" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_interviews_delete BEFORE DELETE ON "legacy_interviews" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_job_bindings_insert BEFORE INSERT ON "legacy_job_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_job_bindings_update BEFORE UPDATE ON "legacy_job_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_job_bindings_delete BEFORE DELETE ON "legacy_job_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_liveness_challenges_insert BEFORE INSERT ON "legacy_liveness_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_liveness_challenges_update BEFORE UPDATE ON "legacy_liveness_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_liveness_challenges_delete BEFORE DELETE ON "legacy_liveness_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_media_probe_receipts_insert BEFORE INSERT ON "legacy_media_probe_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_media_probe_receipts_update BEFORE UPDATE ON "legacy_media_probe_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_media_probe_receipts_delete BEFORE DELETE ON "legacy_media_probe_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_memories_insert BEFORE INSERT ON "legacy_memories" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_memories_update BEFORE UPDATE ON "legacy_memories" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_memories_delete BEFORE DELETE ON "legacy_memories" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_memory_tags_insert BEFORE INSERT ON "legacy_memory_tags" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_memory_tags_update BEFORE UPDATE ON "legacy_memory_tags" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_memory_tags_delete BEFORE DELETE ON "legacy_memory_tags" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_enrollments_insert BEFORE INSERT ON "legacy_mfa_enrollments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_enrollments_update BEFORE UPDATE ON "legacy_mfa_enrollments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_enrollments_delete BEFORE DELETE ON "legacy_mfa_enrollments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_rate_limits_insert BEFORE INSERT ON "legacy_mfa_rate_limits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_rate_limits_update BEFORE UPDATE ON "legacy_mfa_rate_limits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_rate_limits_delete BEFORE DELETE ON "legacy_mfa_rate_limits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_recovery_codes_insert BEFORE INSERT ON "legacy_mfa_recovery_codes" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_recovery_codes_update BEFORE UPDATE ON "legacy_mfa_recovery_codes" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_mfa_recovery_codes_delete BEFORE DELETE ON "legacy_mfa_recovery_codes" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_people_insert BEFORE INSERT ON "legacy_people" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_people_update BEFORE UPDATE ON "legacy_people" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_people_delete BEFORE DELETE ON "legacy_people" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_photos_insert BEFORE INSERT ON "legacy_photos" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_photos_update BEFORE UPDATE ON "legacy_photos" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_photos_delete BEFORE DELETE ON "legacy_photos" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_places_insert BEFORE INSERT ON "legacy_places" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_places_update BEFORE UPDATE ON "legacy_places" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_places_delete BEFORE DELETE ON "legacy_places" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_query_receipts_insert BEFORE INSERT ON "legacy_query_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_query_receipts_update BEFORE UPDATE ON "legacy_query_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_query_receipts_delete BEFORE DELETE ON "legacy_query_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_query_sources_insert BEFORE INSERT ON "legacy_query_sources" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_query_sources_update BEFORE UPDATE ON "legacy_query_sources" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_query_sources_delete BEFORE DELETE ON "legacy_query_sources" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_rate_limits_insert BEFORE INSERT ON "legacy_rate_limits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_rate_limits_update BEFORE UPDATE ON "legacy_rate_limits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_rate_limits_delete BEFORE DELETE ON "legacy_rate_limits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_recordings_insert BEFORE INSERT ON "legacy_recordings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_recordings_update BEFORE UPDATE ON "legacy_recordings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_recordings_delete BEFORE DELETE ON "legacy_recordings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_security_actions_insert BEFORE INSERT ON "legacy_security_actions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_security_actions_update BEFORE UPDATE ON "legacy_security_actions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_security_actions_delete BEFORE DELETE ON "legacy_security_actions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_tags_insert BEFORE INSERT ON "legacy_tags" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_tags_update BEFORE UPDATE ON "legacy_tags" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_tags_delete BEFORE DELETE ON "legacy_tags" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_timeline_events_insert BEFORE INSERT ON "legacy_timeline_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_timeline_events_update BEFORE UPDATE ON "legacy_timeline_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_timeline_events_delete BEFORE DELETE ON "legacy_timeline_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcript_corrections_insert BEFORE INSERT ON "legacy_transcript_corrections" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcript_corrections_update BEFORE UPDATE ON "legacy_transcript_corrections" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcript_corrections_delete BEFORE DELETE ON "legacy_transcript_corrections" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcript_segments_insert BEFORE INSERT ON "legacy_transcript_segments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcript_segments_update BEFORE UPDATE ON "legacy_transcript_segments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcript_segments_delete BEFORE DELETE ON "legacy_transcript_segments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcripts_insert BEFORE INSERT ON "legacy_transcripts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcripts_update BEFORE UPDATE ON "legacy_transcripts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_transcripts_delete BEFORE DELETE ON "legacy_transcripts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_upload_operations_insert BEFORE INSERT ON "legacy_upload_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_upload_operations_update BEFORE UPDATE ON "legacy_upload_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_legacy_upload_operations_delete BEFORE DELETE ON "legacy_upload_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_contacts_insert BEFORE INSERT ON "marketing_waitlist_contacts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_contacts_update BEFORE UPDATE ON "marketing_waitlist_contacts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_contacts_delete BEFORE DELETE ON "marketing_waitlist_contacts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_interests_insert BEFORE INSERT ON "marketing_waitlist_interests" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_interests_update BEFORE UPDATE ON "marketing_waitlist_interests" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_interests_delete BEFORE DELETE ON "marketing_waitlist_interests" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_sync_insert BEFORE INSERT ON "marketing_waitlist_sync" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_sync_update BEFORE UPDATE ON "marketing_waitlist_sync" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_marketing_waitlist_sync_delete BEFORE DELETE ON "marketing_waitlist_sync" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_media_assets_insert BEFORE INSERT ON "media_assets" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_media_assets_update BEFORE UPDATE ON "media_assets" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_media_assets_delete BEFORE DELETE ON "media_assets" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_mobile_account_bindings_insert BEFORE INSERT ON "mobile_account_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_mobile_account_bindings_update BEFORE UPDATE ON "mobile_account_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_mobile_account_bindings_delete BEFORE DELETE ON "mobile_account_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_mobile_entitlement_events_insert BEFORE INSERT ON "mobile_entitlement_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_mobile_entitlement_events_update BEFORE UPDATE ON "mobile_entitlement_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_mobile_entitlement_events_delete BEFORE DELETE ON "mobile_entitlement_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_nearstory_activation_state_insert BEFORE INSERT ON "nearstory_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_nearstory_activation_state_update BEFORE UPDATE ON "nearstory_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_nearstory_activation_state_delete BEFORE DELETE ON "nearstory_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_oauth_accounts_insert BEFORE INSERT ON "oauth_accounts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_oauth_accounts_update BEFORE UPDATE ON "oauth_accounts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_oauth_accounts_delete BEFORE DELETE ON "oauth_accounts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_playlist_items_insert BEFORE INSERT ON "playlist_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_playlist_items_update BEFORE UPDATE ON "playlist_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_playlist_items_delete BEFORE DELETE ON "playlist_items" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_playlists_insert BEFORE INSERT ON "playlists" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_playlists_update BEFORE UPDATE ON "playlists" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_playlists_delete BEFORE DELETE ON "playlists" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_budget_policies_insert BEFORE INSERT ON "provider_budget_policies" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_budget_policies_update BEFORE UPDATE ON "provider_budget_policies" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_budget_policies_delete BEFORE DELETE ON "provider_budget_policies" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_circuits_insert BEFORE INSERT ON "provider_circuits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_circuits_update BEFORE UPDATE ON "provider_circuits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_circuits_delete BEFORE DELETE ON "provider_circuits" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_spend_reservations_insert BEFORE INSERT ON "provider_spend_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_spend_reservations_update BEFORE UPDATE ON "provider_spend_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_provider_spend_reservations_delete BEFORE DELETE ON "provider_spend_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_sleep_sessions_insert BEFORE INSERT ON "sleep_sessions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_sleep_sessions_update BEFORE UPDATE ON "sleep_sessions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_sleep_sessions_delete BEFORE DELETE ON "sleep_sessions" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_branch_requests_insert BEFORE INSERT ON "story_branch_requests" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_branch_requests_update BEFORE UPDATE ON "story_branch_requests" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_branch_requests_delete BEFORE DELETE ON "story_branch_requests" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_deletion_operations_insert BEFORE INSERT ON "story_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_deletion_operations_update BEFORE UPDATE ON "story_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_deletion_operations_delete BEFORE DELETE ON "story_deletion_operations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_experiences_insert BEFORE INSERT ON "story_experiences" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_experiences_update BEFORE UPDATE ON "story_experiences" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_experiences_delete BEFORE DELETE ON "story_experiences" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_media_bindings_insert BEFORE INSERT ON "story_media_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_media_bindings_update BEFORE UPDATE ON "story_media_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_media_bindings_delete BEFORE DELETE ON "story_media_bindings" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_moderation_receipts_insert BEFORE INSERT ON "story_moderation_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_moderation_receipts_update BEFORE UPDATE ON "story_moderation_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_moderation_receipts_delete BEFORE DELETE ON "story_moderation_receipts" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_persist_staging_objects_insert BEFORE INSERT ON "story_persist_staging_objects" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_persist_staging_objects_update BEFORE UPDATE ON "story_persist_staging_objects" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_persist_staging_objects_delete BEFORE DELETE ON "story_persist_staging_objects" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_provider_budget_holds_insert BEFORE INSERT ON "story_provider_budget_holds" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_provider_budget_holds_update BEFORE UPDATE ON "story_provider_budget_holds" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_provider_budget_holds_delete BEFORE DELETE ON "story_provider_budget_holds" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_segments_insert BEFORE INSERT ON "story_segments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_segments_update BEFORE UPDATE ON "story_segments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_segments_delete BEFORE DELETE ON "story_segments" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_sound_assets_insert BEFORE INSERT ON "story_sound_assets" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_sound_assets_update BEFORE UPDATE ON "story_sound_assets" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_sound_assets_delete BEFORE DELETE ON "story_sound_assets" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_worker_checkpoints_insert BEFORE INSERT ON "story_worker_checkpoints" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_worker_checkpoints_update BEFORE UPDATE ON "story_worker_checkpoints" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_story_worker_checkpoints_delete BEFORE DELETE ON "story_worker_checkpoints" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_stripe_events_insert BEFORE INSERT ON "stripe_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_stripe_events_update BEFORE UPDATE ON "stripe_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_stripe_events_delete BEFORE DELETE ON "stripe_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_task2c_activation_state_insert BEFORE INSERT ON "task2c_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_task2c_activation_state_update BEFORE UPDATE ON "task2c_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_task2c_activation_state_delete BEFORE DELETE ON "task2c_activation_state" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_task2c_media_integrity_insert BEFORE INSERT ON "task2c_media_integrity" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_task2c_media_integrity_update BEFORE UPDATE ON "task2c_media_integrity" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_task2c_media_integrity_delete BEFORE DELETE ON "task2c_media_integrity" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_events_insert BEFORE INSERT ON "usage_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_events_update BEFORE UPDATE ON "usage_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_events_delete BEFORE DELETE ON "usage_events" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_ledger_insert BEFORE INSERT ON "usage_ledger" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_ledger_update BEFORE UPDATE ON "usage_ledger" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_ledger_delete BEFORE DELETE ON "usage_ledger" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_reservations_insert BEFORE INSERT ON "usage_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_reservations_update BEFORE UPDATE ON "usage_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_usage_reservations_delete BEFORE DELETE ON "usage_reservations" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_users_insert BEFORE INSERT ON "users" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_users_update BEFORE UPDATE ON "users" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_users_delete BEFORE DELETE ON "users" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_consent_leases_insert BEFORE INSERT ON "voice_consent_leases" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_consent_leases_update BEFORE UPDATE ON "voice_consent_leases" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_consent_leases_delete BEFORE DELETE ON "voice_consent_leases" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_consents_insert BEFORE INSERT ON "voice_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_consents_update BEFORE UPDATE ON "voice_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_consents_delete BEFORE DELETE ON "voice_consents" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_replacements_insert BEFORE INSERT ON "voice_replacements" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_replacements_update BEFORE UPDATE ON "voice_replacements" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_replacements_delete BEFORE DELETE ON "voice_replacements" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_verification_challenges_insert BEFORE INSERT ON "voice_verification_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_verification_challenges_update BEFORE UPDATE ON "voice_verification_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voice_verification_challenges_delete BEFORE DELETE ON "voice_verification_challenges" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voices_insert BEFORE INSERT ON "voices" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voices_update BEFORE UPDATE ON "voices" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
+--> statement-breakpoint
 CREATE TRIGGER cutover_inventory_fence_voices_delete BEFORE DELETE ON "voices" WHEN EXISTS(SELECT 1 FROM cutover_maintenance_fence WHERE singleton=1 AND active=1) BEGIN SELECT RAISE(ABORT,'cutover maintenance fence active'); END;
