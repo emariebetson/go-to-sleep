@@ -41,7 +41,7 @@ Baseline collection accepts the exact release file, the signed deployment-manife
 - the release descriptor and fresh Sites runtime commit;
 - authenticated Cloudflare `GET` inventory for the signed account-qualified D1 database and R2 bucket;
 - the complete live D1 ledger and `sqlite_schema`, including the exact five reviewed provider-internal objects;
-- the live PostgreSQL session/current identity `nearyou-private-tester-baseline@nearnight.iam` and reviewed catalog reads;
+- the live PostgreSQL session/current identity `nearyou-pt-baseline@nearnight.iam` and reviewed catalog reads;
 - fresh DNS, OAuth redirect-proof, secret-version, and literal-false gate observations.
 
 `CLOUDFLARE_API_TOKEN` is a read credential only; it is never accepted as a resource fact and must have only the D1 Read and R2 bucket-read permissions required for the two signed resources. KMS resource coordinates, signer mapping, and `EVIDENCE_TRUST_JSON` configure verification but cannot substitute live/rollback/resource claims. The output is still created exclusively and collection remains read-only apart from the single-purpose nonce consumption.

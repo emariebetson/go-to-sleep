@@ -13,7 +13,7 @@ import { promoteLiveBaselineCatalog } from "../scripts/promote-live-baseline-cat
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const controllerUser = "nearyou-readiness-ctl@nearnight.iam";
-const verifierUser = "nearyou-private-tester-baseline@nearnight.iam";
+const verifierUser = "nearyou-pt-baseline@nearnight.iam";
 const controllerPrincipal = "service:nearyou-readiness-controller";
 const verifierPrincipal = "service:nearyou-private-tester-baseline-verifier";
 const catalogRows = REQUIRED_CATALOG_KINDS.map((kind, index) => ({ kind, identity: `nearyou.${kind}.${index}`, definition: kind==="policy"?"nearyou_policy_owner|SELECT|true|":`definition-${index}` }));
@@ -104,14 +104,14 @@ test("prepares a review-required catalog from exact live PostgreSQL 16 state and
   const { result, writes, events, migrations } = await fixture();
   assert.equal(result.candidate.generatedFrom, "live-production-postgresql-16");
   assert.equal(result.candidate.reviewRequired, true);
-  assert.equal(result.candidate.migrationHead, "0008_cloud_sql_iam_database_usernames");
+  assert.equal(result.candidate.migrationHead, "0009_cloud_sql_verifier_identity_limit");
   assert.deepEqual(result.candidate.provenance.migrationLedger, migrations.map(({ id, checksum }) => ({ id, checksum })));
   assert.deepEqual(result.candidate.provenance.source, { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` });
   assert.equal(result.candidate.provenance.baseline.migrationHead,"0006_private_canary_observation");assert.equal(result.candidate.provenance.baseline.catalogChecksum,catalogChecksum);
   assert.deepEqual(result.candidate.provenance.identities, { controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal });
   assert.equal(Object.hasOwn(result.candidate, "ready"), false);
   assert.equal(Object.hasOwn(result.candidate, "gate"), false);
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit"]);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].contentSha256, sha256(writes[0].body));
   assert.equal(result.receipt.contentSha256, writes[0].contentSha256);
@@ -169,6 +169,7 @@ test("classifies bootstrap SQL failures without exposing provider messages", () 
 
 test("classifies every post-baseline stage without provider detail",()=>{const sql=Object.assign(new Error("secret SQL and provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0007_private_tester_deployment_manifest:position-42:routine-aclcheck_error",{cause:sql});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0007-p42-raclcheck_error");assert.equal(liveCatalogPreparationFailureCode(new Error("live catalog preparation controller-registration-failed",{cause:new Error("secret provider detail")})),"controller-registration-unknown");for(const code of ["verifier-registration-failed","final-ledger-invalid","final-catalog-invalid","candidate-write-failed"])assert.equal(liveCatalogPreparationFailureCode(new Error(`live catalog preparation ${code}`,{cause:new Error("secret provider detail")})),code);const staged=new Error("live catalog preparation final-migration-failed",{cause:migration});assert.equal(liveCatalogPreparationFailureCode(staged),"final-migration-privilege-0007-p42-raclcheck_error")});
 test("classifies forward migration 0008 without provider detail",()=>{const cause=Object.assign(new Error("secret provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0008_cloud_sql_iam_database_usernames:position-17:routine-aclcheck_error",{cause});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0008-p17-raclcheck_error")});
+test("classifies forward migration 0009 without provider detail",()=>{const cause=Object.assign(new Error("secret provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0009_cloud_sql_verifier_identity_limit:position-17:routine-aclcheck_error",{cause});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0009-p17-raclcheck_error")});
 
 test("controller registration exposes only bounded transaction substages",()=>{for(const stage of ["verify-migration-membership","verify-controller-membership","set-migration-role","register-identity","reset-role","verify-membership"])assert.equal(controllerRegistrationFailureCode(new Error(`controller registration failed:${stage}`,{cause:new Error("secret SQL provider detail")})),`controller-registration-${stage}`);assert.equal(controllerRegistrationFailureCode(new Error("secret provider detail")),"controller-registration-unknown");const staged=new Error("live catalog preparation controller-registration-failed",{cause:new Error("controller registration failed:register-identity",{cause:new Error("secret")})});assert.equal(liveCatalogPreparationFailureCode(staged),"controller-registration-register-identity")});
 
@@ -202,11 +203,11 @@ test("resumes exact 0007 state without replaying migration and converges registr
   assert.equal(result.candidate.migrationHead, migrations.at(-1).id);
 });
 
-test("legacy 0001-0004 ledger is remediated through 0008 and preserved exactly in provenance", async () => {
+test("legacy 0001-0004 ledger is remediated through 0009 and preserved exactly in provenance", async () => {
   const migrations = await loadPostgresMigrations();
   const legacyLedger = migrations.slice(0, 6).map(({ id, checksum }, index) => ({ id, checksum: retiredChecksums[index] ?? checksum }));
   const { result, events } = await fixture({ ledger: legacyLedger });
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit"]);
   assert.deepEqual(result.candidate.provenance.migrationLedger, [...legacyLedger, ...migrations.slice(6).map(({id,checksum})=>({id,checksum}))]);
   assert.equal(result.candidate.provenance.migrationLedgerChecksum, sha256(result.candidate.provenance.migrationLedger.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")));
 });

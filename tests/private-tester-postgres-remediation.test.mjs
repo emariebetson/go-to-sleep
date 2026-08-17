@@ -12,7 +12,7 @@ import { cloudSqlRoleAssignmentPlan,validateCloudSqlRoleAssignmentReadback } fro
 const execFile = promisify(execFileCallback);
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const aclGatePath = fileURLToPath(new URL("../scripts/private-tester-baseline-acl-gate.sql", import.meta.url));
-const verifierDatabaseUser = "nearyou-private-tester-baseline@nearnight.iam";
+const verifierDatabaseUser = "nearyou-pt-baseline@nearnight.iam";
 const historicalMigrations = Object.freeze([
   ["0001_nearyou_tenant_foundation", "ae9a5e8f26190063382d76eae25565a6a991523edf6ceefa1abd74b1fd88a194"],
   ["0002_release_evidence_trust", "7ec295cb252f9d8cf54d951e899a59ddb834a1204de951a7d967eeeaf67c11f8"],
@@ -26,13 +26,13 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const migrationBody = (sql) => sql.replace(/^\s*BEGIN;\s*/i, "").replace(/\s*COMMIT;\s*$/i, "");
 const ledgerChecksum = (files) => sha256(files.map((file) => `${file.id}:${file.checksum}`).join("\n"));
 
-test("0008 repairs exact Cloud SQL IAM database usernames and role assignment is ordered after that head",async()=>{
+test("0009 repairs the Cloud SQL service-account length limit without rewriting 0008",async()=>{
   const files=await loadPostgresMigrations(),migration=files.at(-1),plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",observedSessionUser:"nearyou_migration_admin",operationId:`op_${"a".repeat(64)}`});
-  assert.equal(migration.id,"0008_cloud_sql_iam_database_usernames");
-  assert.match(migration.sql,/session_user::text<>'nearyou-private-tester-baseline@nearnight\.iam'/);
+  assert.equal(migration.id,"0009_cloud_sql_verifier_identity_limit");
+  assert.match(migration.sql,/session_user::text<>'nearyou-pt-baseline@nearnight\.iam'/);
   assert.doesNotMatch(migration.sql,/gserviceaccount\.com/);
   assert.equal(plan.requiresMigrationHead,migration.id);
-  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-private-tester-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
+  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
   assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&!item.command.some(value=>value.includes("revoke"))));
   assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
@@ -94,8 +94,8 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0008 wi
   assert.match(executedBodies[0], /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner USING \(true\)/);
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
-  assert.equal(executedBodies.length, 2, "a fully ledgered replay must execute no additional migration body");
-  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 and 0008 to the ledger");
+  assert.equal(executedBodies.length, 3, "a fully ledgered replay must execute no additional migration body");
+  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 through 0009 to the ledger");
 });
 
 test("Cloud SQL policy owners use narrow RLS policy access instead of unavailable BYPASSRLS", async () => {

@@ -81,7 +81,7 @@ resource "google_sql_user" "readiness_controller" {
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
 }
 resource "google_service_account" "private_tester_baseline_verifier" {
-  account_id   = "nearyou-private-tester-baseline"
+  account_id   = "nearyou-pt-baseline"
   display_name = "NearYou private tester baseline verifier"
 }
 resource "google_project_iam_member" "private_tester_baseline_verifier_cloudsql_client" {
