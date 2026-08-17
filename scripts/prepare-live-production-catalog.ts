@@ -109,7 +109,7 @@ function precondition(value: unknown, code = "precondition"): asserts value {
   if (!value) throw new Error(`live catalog preparation ${code}`);
 }
 
-async function atStage<T>(code: "database-connect-failed" | "target-authority-invalid" | "ledger-state-invalid" | "baseline-state-invalid", operation: () => Promise<T>): Promise<T> {
+async function atStage<T>(code: "database-connect-failed" | "target-authority-invalid" | "ledger-state-invalid" | "baseline-state-invalid" | "bootstrap-migration-failed", operation: () => Promise<T>): Promise<T> {
   try { return await operation(); }
   catch (error) { throw new Error(`live catalog preparation ${code}`, { cause: error }); }
 }
@@ -122,10 +122,21 @@ export function databaseConnectionFailureCode(error: unknown) {
   return "database-connect-unknown";
 }
 
+export function bootstrapMigrationFailureCode(error: unknown) {
+  const code=typeof error==="object"&&error!==null&&"code" in error?String(error.code):"";
+  if(code==="42501")return "bootstrap-migration-privilege";
+  if(code==="0A000"||code==="58P01")return "bootstrap-migration-feature";
+  if(code==="42P17"||code==="42601")return "bootstrap-migration-definition";
+  if(["42P06","42P07","42710","23505"].includes(code))return "bootstrap-migration-collision";
+  return "bootstrap-migration-unknown";
+}
+
 export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (message === "live catalog preparation database-connect-failed" && error instanceof Error && error.cause)
     return databaseConnectionFailureCode(error.cause);
+  if (message === "live catalog preparation bootstrap-migration-failed" && error instanceof Error && error.cause)
+    return bootstrapMigrationFailureCode(error.cause);
   for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
@@ -155,7 +166,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       [],
     ))).rows[0];
     precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
-    if (target.pristine === true) await applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6)));
+    if (target.pristine === true) await atStage("bootstrap-migration-failed",()=>applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6))));
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
     const from0006 = JSON.stringify(liveLedger) === JSON.stringify(historical), from0007 = JSON.stringify(liveLedger) === JSON.stringify(expectedLedger);

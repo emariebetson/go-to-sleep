@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
-import { createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { bootstrapMigrationFailureCode, createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -137,6 +137,14 @@ test("classifies database connection failures without exposing provider messages
   assert.equal(databaseConnectionFailureCode(Object.assign(new Error("password authentication failed for user secret"), { code: "28P01" })), "database-connect-auth");
   assert.equal(databaseConnectionFailureCode(Object.assign(new Error("database secret does not exist"), { code: "3D000" })), "database-connect-database");
   assert.equal(databaseConnectionFailureCode(new Error("opaque provider failure")), "database-connect-unknown");
+});
+
+test("classifies bootstrap SQL failures without exposing provider messages", () => {
+  assert.equal(bootstrapMigrationFailureCode(Object.assign(new Error("secret role detail"),{code:"42501"})),"bootstrap-migration-privilege");
+  assert.equal(bootstrapMigrationFailureCode(Object.assign(new Error("secret extension detail"),{code:"0A000"})),"bootstrap-migration-feature");
+  assert.equal(bootstrapMigrationFailureCode(Object.assign(new Error("secret definition detail"),{code:"42P17"})),"bootstrap-migration-definition");
+  assert.equal(bootstrapMigrationFailureCode(Object.assign(new Error("secret collision detail"),{code:"42P07"})),"bootstrap-migration-collision");
+  assert.equal(bootstrapMigrationFailureCode(new Error("secret unknown detail")),"bootstrap-migration-unknown");
 });
 
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {
