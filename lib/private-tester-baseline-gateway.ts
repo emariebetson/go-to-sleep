@@ -58,6 +58,7 @@ const REQUIRED_GATEWAY_VARS = Object.freeze([
 const RUNTIME_BINDINGS = Object.freeze(["DB", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"]);
 const DARK_BINDINGS = Object.freeze(["NEARYOU_ENABLE_STORY", "NEARYOU_ENABLE_LEGACY_ARCHIVE", "PRIVATE_TESTER_SCHEDULER_ENABLED"]);
 const D1_MIGRATIONS = Object.freeze([
+  "0000_nearnight_foundation",
   "0001_google_apple_auth",
   "0002_sharp_shinobi_shaw",
   "0003_white_groot",

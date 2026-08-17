@@ -9,6 +9,7 @@ const trust = Object.freeze({ issuer: "https://accounts.google.com", audience: "
 const release = Object.freeze({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_example", startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
 const workerRuntime = Object.freeze({ id: "11111111-1111-4111-8111-111111111111", commitSha: "a".repeat(40), deployedAt: "2026-08-14T17:59:00.000Z" });
 const migrationNames = [
+  "0000_nearnight_foundation.sql",
   "0001_google_apple_auth.sql", "0002_sharp_shinobi_shaw.sql", "0003_white_groot.sql", "0004_salty_sugar_man.sql",
   "0005_pronunciation_frequency_layers.sql", "0006_nearyou_shared_foundation.sql", "0007_nearsleep_production_upgrade.sql",
   "0008_nearsleep_live_integration.sql", "0009_nearsleep_audio_atomic.sql", "0010_child_profile_pronunciation.sql",
