@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - name: Apply PostgreSQL migrations 0001-0007 in reviewed order
+      - name: Apply PostgreSQL migrations 0001-0010 in reviewed order
         env:
           READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres"
           NEARYOU_CATALOG_DATABASE_DISPOSABLE: "true"

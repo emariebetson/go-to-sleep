@@ -27,17 +27,24 @@ const migrationBody = (sql) => sql.replace(/^\s*BEGIN;\s*/i, "").replace(/\s*COM
 const ledgerChecksum = (files) => sha256(files.map((file) => `${file.id}:${file.checksum}`).join("\n"));
 
 test("0009 repairs the Cloud SQL service-account length limit without rewriting 0008",async()=>{
-  const files=await loadPostgresMigrations(),migration=files.at(-1),plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",observedSessionUser:"nearyou_migration_admin",operationId:`op_${"a".repeat(64)}`});
+  const files=await loadPostgresMigrations(),migration=files[8],plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",observedSessionUser:"nearyou_migration_admin",operationId:`op_${"a".repeat(64)}`});
   assert.equal(migration.id,"0009_cloud_sql_verifier_identity_limit");
   assert.match(migration.sql,/session_user::text<>'nearyou-pt-baseline@nearnight\.iam'/);
   assert.doesNotMatch(migration.sql,/gserviceaccount\.com/);
-  assert.equal(plan.requiresMigrationHead,migration.id);
+  assert.equal(plan.requiresMigrationHead,"0010_migration_schema_usage");
   assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
   assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&!item.command.some(value=>value.includes("revoke"))));
   assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
   assert.equal(validateCloudSqlRoleAssignmentReadback(plan,rows).reviewRequired,true);
   await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"CLOUD_IAM_SERVICE_ACCOUNT"})),/readback invalid/);
+});
+
+test("0010 grants only schema usage required to call migration-owned registration functions",async()=>{
+  const files=await loadPostgresMigrations(),migration=files.at(-1);
+  assert.equal(migration.id,"0010_migration_schema_usage");
+  assert.match(migration.sql,/^BEGIN;\s*GRANT USAGE ON SCHEMA nearyou TO nearyou_migration;\s*COMMIT;\s*$/);
+  assert.doesNotMatch(migration.sql,/TABLE|FUNCTION|ALL PRIVILEGES|CREATE|ALTER|ROLE/i);
 });
 
 test("historical PostgreSQL ledger through 0006 upgrades forward through 0008 without conflict", async () => {
@@ -94,8 +101,8 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0008 wi
   assert.match(executedBodies[0], /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner USING \(true\)/);
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
-  assert.equal(executedBodies.length, 3, "a fully ledgered replay must execute no additional migration body");
-  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 through 0009 to the ledger");
+  assert.equal(executedBodies.length, 4, "a fully ledgered replay must execute no additional migration body");
+  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 through 0010 to the ledger");
 });
 
 test("Cloud SQL policy owners use narrow RLS policy access instead of unavailable BYPASSRLS", async () => {
@@ -131,9 +138,9 @@ test("migration compatibility accepts only exact retired checksums", async () =>
   assert.equal(acceptsMigrationLedger(files, [...files.slice(0, 6), retiredSeventh]), false);
 });
 
-test("production evidence builds the catalog from the complete 0001 through 0007 migration set", async () => {
+test("production evidence builds the catalog from the complete 0001 through 0010 migration set", async () => {
   const workflow = await readFile(new URL("../.github/workflows/production-evidence.yml", import.meta.url), "utf8");
-  assert.match(workflow, /Apply PostgreSQL migrations 0001-0007 in reviewed order/);
+  assert.match(workflow, /Apply PostgreSQL migrations 0001-0010 in reviewed order/);
   assert.match(workflow, /node --import tsx scripts\/apply-catalog-migrations\.ts/);
   assert.doesNotMatch(workflow, /for migration in postgres\/migrations/);
   assert.doesNotMatch(workflow, /Apply PostgreSQL migrations 0001-0006 in reviewed order/);

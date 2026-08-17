@@ -128,7 +128,7 @@ export function databaseConnectionFailureCode(error: unknown) {
 }
 
 export function bootstrapMigrationFailureCode(error: unknown) {
-  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-9]_[a-z0-9_]+)(?::step-([a-z0-9_]{1,80}))?(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-s${match[2]}`:""}${match[3]?`-p${match[3]}`:""}${match[4]?`-r${match[4]}`:""}`:"";
+  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:((?:000[1-9]|0010)_[a-z0-9_]+)(?::step-([a-z0-9_]{1,80}))?(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-s${match[2]}`:""}${match[3]?`-p${match[3]}`:""}${match[4]?`-r${match[4]}`:""}`:"";
   if(code==="42501")return `bootstrap-migration-privilege${suffix}`;
   if(code==="0A000"||code==="58P01")return `bootstrap-migration-feature${suffix}`;
   if(code==="42P17"||code==="42601")return `bootstrap-migration-definition${suffix}`;
@@ -171,7 +171,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   precondition(COMMIT.test(dependencies.authoritativeSource.commitSha) && IMAGE.test(dependencies.authoritativeSource.imageDigest), "source-invalid");
   precondition(JSON.stringify({ controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal }) === JSON.stringify(PRODUCTION_IDENTITIES), "identity-invalid");
   const files = dependencies.migrations ?? await loadPostgresMigrations();
-  precondition(files.length === 9 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest" && files[7]?.id === "0008_cloud_sql_iam_database_usernames" && files[8]?.id === "0009_cloud_sql_verifier_identity_limit", "migration-set-invalid");
+  precondition(files.length === 10 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest" && files[7]?.id === "0008_cloud_sql_iam_database_usernames" && files[8]?.id === "0009_cloud_sql_verifier_identity_limit" && files[9]?.id === "0010_migration_schema_usage", "migration-set-invalid");
   const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
     const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean }>(
@@ -181,8 +181,8 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     precondition(/^[A-Za-z0-9_.@-]{3,200}$/.test(dependencies.authoritativeMigrationDatabaseUser)&&target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && target.database_user === dependencies.authoritativeMigrationDatabaseUser, "target-authority-invalid");
     if (target.pristine === true) await atStage("bootstrap-migration-failed",()=>applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6))));
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
-    const from0006 = acceptsMigrationLedger(files.slice(0,6),liveLedger), from0007 = acceptsMigrationLedger(files.slice(0,7),liveLedger),from0008=acceptsMigrationLedger(files.slice(0,8),liveLedger),from0009=acceptsMigrationLedger(files,liveLedger);
-    precondition(from0006 || from0007 || from0008 || from0009, "ledger-state-invalid");
+    const from0006 = acceptsMigrationLedger(files.slice(0,6),liveLedger), from0007 = acceptsMigrationLedger(files.slice(0,7),liveLedger),from0008=acceptsMigrationLedger(files.slice(0,8),liveLedger),from0009=acceptsMigrationLedger(files.slice(0,9),liveLedger),from0010=acceptsMigrationLedger(files,liveLedger);
+    precondition(from0006 || from0007 || from0008 || from0009 || from0010, "ledger-state-invalid");
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
     let baselineBinding:Record<string,unknown>;
     if (from0006) {
@@ -234,7 +234,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       version: 1,
       reviewRequired: true,
       generatedFrom: "live-production-postgresql-16",
-      migrationHead: files[8].id,
+      migrationHead: files[9].id,
       schema: "nearyou",
       catalogChecksum: sha256(JSON.stringify(rows)),
       requiredKinds: REQUIRED_CATALOG_KINDS,
