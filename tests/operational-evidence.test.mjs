@@ -15,7 +15,7 @@ import { composeReleaseClaims } from "../scripts/compose-release-claims.ts";
 import { operationalArtifact } from "../scripts/evidence-artifact.ts";
 import { canonicalEvidence } from "../lib/asymmetric-release-evidence.ts";
 import { buildRlsEvidence } from "../scripts/rls-evidence.ts";
-import { LIVE_CATALOG_QUERY, LIVE_CATALOG_SECURITY_QUERY, validateCatalogRows } from "../scripts/postgres-catalog.ts";
+import { canonicalPolicyDefinition, LIVE_CATALOG_QUERY, LIVE_CATALOG_SECURITY_QUERY, validateCatalogRows } from "../scripts/postgres-catalog.ts";
 test("dark merge has no automatically scheduled canary sampler",()=>{const workflow=readFileSync(new URL("../.github/workflows/canary-evidence-sampler.yml",import.meta.url),"utf8");assert.doesNotMatch(workflow,/\bschedule\s*:/);assert.match(workflow,/workflow_dispatch\s*:/)});
 
 test("catalog identities remain text beyond PostgreSQL name length and duplicates fail closed",()=>{assert.match(LIVE_CATALOG_QUERY,/SELECT kind::text,identity::text,definition::text/);assert.match(LIVE_CATALOG_QUERY,/n\.nspname::text identity/);const prefix="nearyou."+"f".repeat(60),rows=[{kind:"function",identity:`${prefix}a(integer)`,definition:"a"},{kind:"function",identity:`${prefix}b(integer)`,definition:"b"}];assert.doesNotThrow(()=>validateCatalogRows(rows));assert.throws(()=>validateCatalogRows([rows[0],{...rows[0]}]),/duplicate/)});
@@ -46,6 +46,8 @@ test("catalog records the reviewed absence of NearYou role memberships",()=>{
   assert.match(LIVE_CATALOG_QUERY,/NOT EXISTS[\s\S]*pg_auth_members/);
   assert.match(LIVE_CATALOG_SECURITY_QUERY,/jsonb_agg\(c\.relname ORDER BY c\.relname\)/);
 });
+
+test("catalog policy identity binds exact C-ordered role sets",()=>{const restricted=canonicalPolicyDefinition({roles:["nearyou_policy_owner"],cmd:"SELECT",qual:"true",withCheck:null}),publicPolicy=canonicalPolicyDefinition({roles:["PUBLIC"],cmd:"SELECT",qual:"true",withCheck:null});assert.notEqual(restricted,publicPolicy);assert.equal(canonicalPolicyDefinition({roles:["nearyou_tenant","nearyou_policy_owner"],cmd:"ALL",qual:"tenant",withCheck:"tenant"}),"nearyou_policy_owner,nearyou_tenant|ALL|tenant|tenant");assert.match(LIVE_CATALOG_QUERY,/unnest\(roles\)[\s\S]*COLLATE "C"/)});
 
 test("catalog CLI reports only bounded failure classes",()=>{
   assert.equal(catalogCandidateFailureCode(new Error("catalog candidate incomplete")),"catalog-candidate-incomplete");
