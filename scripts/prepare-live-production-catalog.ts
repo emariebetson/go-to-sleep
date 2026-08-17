@@ -109,7 +109,7 @@ function precondition(value: unknown, code = "precondition"): asserts value {
   if (!value) throw new Error(`live catalog preparation ${code}`);
 }
 
-async function atStage<T>(code: "database-connect-failed" | "target-authority-invalid" | "ledger-state-invalid" | "baseline-state-invalid" | "bootstrap-migration-failed", operation: () => Promise<T>): Promise<T> {
+async function atStage<T>(code: "database-connect-failed" | "target-authority-invalid" | "ledger-state-invalid" | "baseline-state-invalid" | "bootstrap-migration-failed" | "final-migration-failed" | "controller-registration-failed" | "verifier-registration-failed" | "final-ledger-invalid" | "final-catalog-invalid" | "candidate-write-failed", operation: () => Promise<T>): Promise<T> {
   try { return await operation(); }
   catch (error) { throw new Error(`live catalog preparation ${code}`, { cause: error }); }
 }
@@ -123,13 +123,14 @@ export function databaseConnectionFailureCode(error: unknown) {
 }
 
 export function bootstrapMigrationFailureCode(error: unknown) {
-  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-6]_[a-z0-9_]+)(?::step-([a-z0-9_]{1,80}))?(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-s${match[2]}`:""}${match[3]?`-p${match[3]}`:""}${match[4]?`-r${match[4]}`:""}`:"";
+  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-7]_[a-z0-9_]+)(?::step-([a-z0-9_]{1,80}))?(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-s${match[2]}`:""}${match[3]?`-p${match[3]}`:""}${match[4]?`-r${match[4]}`:""}`:"";
   if(code==="42501")return `bootstrap-migration-privilege${suffix}`;
   if(code==="0A000"||code==="58P01")return `bootstrap-migration-feature${suffix}`;
   if(code==="42P17"||code==="42601")return `bootstrap-migration-definition${suffix}`;
   if(["42P06","42P07","42710","23505"].includes(code))return `bootstrap-migration-collision${suffix}`;
   return `bootstrap-migration-unknown${suffix}`;
 }
+export function finalMigrationFailureCode(error:unknown){return bootstrapMigrationFailureCode(error).replace(/^bootstrap-migration-/,"final-migration-")}
 
 export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
@@ -137,7 +138,9 @@ export function liveCatalogPreparationFailureCode(error: unknown) {
     return databaseConnectionFailureCode(error.cause);
   if (message === "live catalog preparation bootstrap-migration-failed" && error instanceof Error && error.cause)
     return bootstrapMigrationFailureCode(error.cause);
-  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required"])
+  if (message === "live catalog preparation final-migration-failed" && error instanceof Error && error.cause)
+    return finalMigrationFailureCode(error.cause);
+  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required", "controller-registration-failed", "verifier-registration-failed", "final-ledger-invalid", "final-catalog-invalid", "candidate-write-failed"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
   if (/metadata token invalid/.test(message)) return "workload-token-failed";
@@ -193,15 +196,14 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       precondition(attestation.migrationHead === reviewedBaseline.migrationHead && attestation.catalogChecksum === reviewedBaseline.catalogChecksum && attestation.release === input.release && attestation.operationId===input.operationId && attestation.attestedAt===input.operationStartedAt && JSON.stringify(attestation.source) === JSON.stringify(dependencies.authoritativeSource) && /^gs:\/\//.test(uri) && /^[1-9][0-9]{0,30}$/.test(generation) && digest === sha256(JSON.stringify(attestation)));
     }
 
-    await applyPostgresMigrations(connection.pg, files, migrationChecksum(files));
-    const controller = await registerRolloutController(connection.pg, input.controllerDatabaseUser, input.controllerPrincipal);
-    const verifier = await registerPrivateTesterBaselineVerifier(connection.pg, input.verifierDatabaseUser, input.verifierPrincipal);
-    precondition(controller.controllerMappingVerified === true && verifier.baselineVerifierMappingVerified === true);
-    const finalLedger = (await connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", [])).rows;
-    precondition(acceptsMigrationLedger(files,finalLedger));
-    const rows = await collectLiveCatalog(connection);
-    const security = await verifyLiveCatalogSecurity(connection);
-    precondition(REQUIRED_CATALOG_KINDS.every((kind) => rows.some((row) => row.kind === kind)));
+    await atStage("final-migration-failed",()=>applyPostgresMigrations(connection.pg, files, migrationChecksum(files)));
+    const controller = await atStage("controller-registration-failed",()=>registerRolloutController(connection.pg, input.controllerDatabaseUser, input.controllerPrincipal));
+    precondition(controller.controllerMappingVerified === true,"controller-registration-failed");
+    const verifier = await atStage("verifier-registration-failed",()=>registerPrivateTesterBaselineVerifier(connection.pg, input.verifierDatabaseUser, input.verifierPrincipal));
+    precondition(verifier.baselineVerifierMappingVerified === true,"verifier-registration-failed");
+    const finalLedger = (await atStage("final-ledger-invalid",()=>connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
+    precondition(acceptsMigrationLedger(files,finalLedger),"final-ledger-invalid");
+    const {rows,security}=await atStage("final-catalog-invalid",async()=>{const observedRows=await collectLiveCatalog(connection),observedSecurity=await verifyLiveCatalogSecurity(connection);precondition(REQUIRED_CATALOG_KINDS.every((kind) => observedRows.some((row) => row.kind === kind)),"final-catalog-invalid");return{rows:observedRows,security:observedSecurity}});
     const provenance = {
       database: { name: "nearyou", serverVersion: target.server_version, migrationAdmin: target.database_user },
       source: dependencies.authoritativeSource,
@@ -229,8 +231,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       rows,
     } as const;
     const body = `${JSON.stringify(candidate, null, 2)}\n`, contentSha256 = sha256(body);
-    const receipt = await dependencies.immutableSink.writeOnce({ key: input.candidateKey, body, contentSha256 });
-    if (!receipt || receipt.contentSha256 !== contentSha256 || !/^gs:\/\/[A-Za-z0-9._-]{3,222}\/[A-Za-z0-9_./-]{1,1024}$/.test(receipt.uri) || !/^[1-9][0-9]{0,30}$/.test(receipt.generation)) throw new Error("immutable catalog sink failed");
+    const receipt = await atStage("candidate-write-failed",async()=>{const observed=await dependencies.immutableSink.writeOnce({ key: input.candidateKey, body, contentSha256 });if (!observed || observed.contentSha256 !== contentSha256 || !/^gs:\/\/[A-Za-z0-9._-]{3,222}\/[A-Za-z0-9_./-]{1,1024}$/.test(observed.uri) || !/^[1-9][0-9]{0,30}$/.test(observed.generation)) throw new Error("immutable catalog sink failed");return observed});
     return { candidate, receipt };
   } finally {
     await connection.close();

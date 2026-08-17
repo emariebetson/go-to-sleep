@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
-import { bootstrapMigrationFailureCode, createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { bootstrapMigrationFailureCode, createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, finalMigrationFailureCode, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 import { promoteLiveBaselineCatalog } from "../scripts/promote-live-baseline-catalog.ts";
 
@@ -28,11 +28,11 @@ const retiredChecksums = [
 async function fixture(overrides = {}) {
   const migrations = await loadPostgresMigrations();
   const ledger = (overrides.ledger ?? migrations.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }))).map((row) => ({ ...row }));
-  const events = [];
+  const events = [];let ledgerReads=0;
   const query = async (sql, args = []) => {
     if (overrides.queryFailure?.test(sql)) throw new Error(overrides.queryFailureMessage ?? "provider detail must not escape");
     if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true, pristine: false, vector_available: true }] };
-    if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")) return { rows: ledger };
+    if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")){ledgerReads+=1;if(overrides.failFinalLedger&&ledgerReads>1)throw new Error("secret final ledger provider detail");return { rows: ledger };}
     if (sql.startsWith("SELECT kind::text,identity::text,definition::text")) return { rows: catalogRows };
     if (sql.includes("public_execute_count")) return { rows: [{ forced_rls: ["household_members", "tenant_records"], public_execute_count: "0" }] };
     if (sql.startsWith("SELECT checksum FROM nearyou.schema_migrations")) return { rows: ledger.find((row) => row.id === args[0]) ? [{ checksum: ledger.find((row) => row.id === args[0]).checksum }] : [] };
@@ -160,8 +160,12 @@ test("classifies bootstrap SQL failures without exposing provider messages", () 
   assert.equal(bootstrapMigrationFailureCode(new Error("migration execution failed:0001_nearyou_tenant_foundation:step-extension_vector",{cause:Object.assign(new Error("secret extension detail"),{code:"42501"})})),"bootstrap-migration-privilege-0001-sextension_vector");
 });
 
+test("classifies every post-baseline stage without provider detail",()=>{const sql=Object.assign(new Error("secret SQL and provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0007_private_tester_deployment_manifest:position-42:routine-aclcheck_error",{cause:sql});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0007-p42-raclcheck_error");for(const code of ["controller-registration-failed","verifier-registration-failed","final-ledger-invalid","final-catalog-invalid","candidate-write-failed"])assert.equal(liveCatalogPreparationFailureCode(new Error(`live catalog preparation ${code}`,{cause:new Error("secret provider detail")})),code);const staged=new Error("live catalog preparation final-migration-failed",{cause:migration});assert.equal(liveCatalogPreparationFailureCode(staged),"final-migration-privilege-0007-p42-raclcheck_error")});
+
+test("executes every bounded post-baseline failure boundary",async()=>{const migrations=await loadPostgresMigrations(),finalLedger=migrations.map(({id,checksum})=>({id,checksum}));for(const [overrides,code] of [[{queryFailure:/consume_private_tester_deployment_manifest/},"final-migration-failed"],[{ledger:finalLedger,queryFailure:/register_rollout_controller_identity/},"controller-registration-failed"],[{ledger:finalLedger,queryFailure:/register_private_tester_baseline_verifier_identity/},"verifier-registration-failed"],[{failFinalLedger:true},"final-ledger-invalid"],[{ledger:finalLedger,queryFailure:/SELECT kind::text/},"final-catalog-invalid"]])await assert.rejects(()=>fixture(overrides),new RegExp(`live catalog preparation ${code}`))});
+
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {
-  await assert.rejects(() => fixture({ immutableSink: { writeOnce: async (entry) => ({ uri: "gs://bucket/object", generation: "1", contentSha256: `0${entry.contentSha256.slice(1)}` }) } }), /immutable catalog sink failed/);
+  await assert.rejects(() => fixture({ immutableSink: { writeOnce: async (entry) => ({ uri: "gs://bucket/object", generation: "1", contentSha256: `0${entry.contentSha256.slice(1)}` }) } }), /live catalog preparation candidate-write-failed/);
 });
 
 test("resumes exact 0007 state without replaying migration and converges registrations", async () => {
