@@ -188,18 +188,18 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   const expectedD1SchemaDefinitionHash = dependencies.expectedD1SchemaDefinitionHash ?? REVIEWED_D1_SCHEMA_DEFINITION_HASH;
   const expectedD1SchemaObjectCount = dependencies.expectedD1SchemaObjectCount ?? REVIEWED_D1_SCHEMA_OBJECT_COUNT;
   let rawRelease: unknown;
-  try { rawRelease = JSON.parse(String(environment.PRIVATE_TESTER_BASELINE_RELEASE_JSON ?? "")); } catch { configurationError(); }
+  try { rawRelease = JSON.parse(String(environment.PRIVATE_TESTER_BASELINE_RELEASE_JSON ?? "")); } catch { console.warn("private tester runtime rejected at release-json"); configurationError(); }
   const startsAt = object(rawRelease) && typeof rawRelease.startsAt === "string" ? Date.parse(rawRelease.startsAt) : Number.NaN;
   let release: PrivateTesterRelease;
-  try { release = parsePrivateTesterRelease(rawRelease, startsAt); } catch { configurationError(); }
+  try { release = parsePrivateTesterRelease(rawRelease, startsAt); } catch { console.warn("private tester runtime rejected at release-contract"); configurationError(); }
   const metadata = environment.VERSION_METADATA;
   const db = environment.DB;
   const runtimeNow = now();
   const manifestProviderObjects = EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
-  if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX) || !object(metadata) || Reflect.ownKeys(metadata).length !== 3 || typeof metadata.id !== "string" || typeof metadata.tag !== "string" || typeof metadata.timestamp !== "string" || !HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects) || !db || typeof db.prepare !== "function") configurationError();
+  if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX) || !object(metadata) || Reflect.ownKeys(metadata).length !== 3 || typeof metadata.id !== "string" || typeof metadata.tag !== "string" || typeof metadata.timestamp !== "string" || !HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects) || !db || typeof db.prepare !== "function") { console.warn("private tester runtime rejected at binding-shape"); configurationError(); }
   const workerRuntime = { id: metadata.id, commitSha: metadata.tag, deployedAt: metadata.timestamp };
-  assertWorkerRuntime(workerRuntime, release, runtimeNow);
-  if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) configurationError();
+  try { assertWorkerRuntime(workerRuntime, release, runtimeNow); } catch { console.warn("private tester runtime rejected at worker-binding"); configurationError(); }
+  if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) { console.warn("private tester runtime rejected at environment-contract"); configurationError(); }
 
   const d1Ledger = async () => {
     const result = await db.prepare("SELECT id,name,applied_at FROM d1_migrations ORDER BY id").all();
