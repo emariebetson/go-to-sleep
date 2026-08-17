@@ -48,7 +48,7 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
           return { rows: [] };
         }
         if (sql.startsWith("SELECT pg_advisory_xact_lock") || sql.startsWith("CREATE SCHEMA IF NOT EXISTS") || sql.startsWith("CREATE TABLE IF NOT EXISTS")) return { rows: [] };
-        if (/^(?:DO \$role\$|SELECT m\.admin_option|GRANT nearyou_[a-z_]+ TO CURRENT_USER|REVOKE nearyou_[a-z_]+ FROM CURRENT_USER)/.test(sql)) {
+        if (/^(?:DO \$role\$|SELECT m\.admin_option|SELECT EXISTS\(SELECT 1 FROM pg_namespace|GRANT nearyou_[a-z_]+ TO CURRENT_USER|REVOKE nearyou_[a-z_]+ FROM CURRENT_USER|GRANT CREATE ON SCHEMA nearyou|REVOKE CREATE ON SCHEMA nearyou)/.test(sql)) {
           ownershipStatements.push(sql);
           return { rows: [] };
         }
@@ -62,11 +62,13 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
 
   assert.deepEqual([...ledger], [...historicalMigrations, [files[6].id, files[6].checksum]]);
   assert.deepEqual(executedBodies, [migrationBody(files[6].sql)]);
-  assert.equal(ownershipStatements.length, 48);
+  assert.equal(ownershipStatements.length, 57);
   assert.match(ownershipStatements[0], /SELECT m\.admin_option,m\.inherit_option,m\.set_option/);
   assert.match(ownershipStatements[1], /CREATE ROLE nearyou_app NOLOGIN NOINHERIT/);
   assert.match(ownershipStatements[2], /GRANT nearyou_app TO CURRENT_USER WITH ADMIN FALSE, INHERIT FALSE, SET TRUE/);
   assert.equal(ownershipStatements.some(sql => /GRANT nearyou_policy_owner TO CURRENT_USER WITH ADMIN FALSE, INHERIT TRUE, SET TRUE/.test(sql)), true);
+  assert.equal(ownershipStatements.some(sql => /GRANT CREATE ON SCHEMA nearyou TO nearyou_policy_owner/.test(sql)), true);
+  assert.equal(ownershipStatements.some(sql => /REVOKE CREATE ON SCHEMA nearyou FROM nearyou_policy_owner/.test(sql)), true);
   assert.equal(ownershipStatements.some(sql => /CREATE ROLE nearyou_(?:rollout_controller|private_tester_baseline_verifier)/.test(sql)), false);
   assert.equal(ownershipStatements.some(sql => /REVOKE nearyou_private_tester_baseline_verifier FROM CURRENT_USER/.test(sql)), true);
   assert.match(ownershipStatements.at(-1), /REVOKE nearyou_app FROM CURRENT_USER/);
