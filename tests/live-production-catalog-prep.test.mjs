@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
-import { createGcsImmutableCatalogSink, fetchPriorBaselineAttestation, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { createGcsImmutableCatalogSink, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -180,4 +180,16 @@ test("prior baseline core is downloaded from its exact immutable generation and 
   const loaded = await fetchPriorBaselineAttestation({ uri, generation, expectedObjectSha256, accessToken:"token_abcdefghijklmnopqrstuvwxyz", fetch:async (input)=>{url=input;return new Response(body,{status:200})} });
   assert.match(url, /generation=122/);
   assert.deepEqual(loaded, { ...value, uri, generation });
+});
+
+test("production storage access uses a bounded workload metadata token", async () => {
+  let request;
+  const token = await fetchGoogleMetadataAccessToken({ fetch: async (url, init) => {
+    request = { url, init };
+    return new Response(JSON.stringify({ access_token: `ya29.${"a".repeat(80)}`, expires_in: 900, token_type: "Bearer" }), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  assert.match(request.url, /metadata\.google\.internal/);
+  assert.equal(request.init.headers["Metadata-Flavor"], "Google");
+  assert.match(token, /^ya29\./);
+  await assert.rejects(() => fetchGoogleMetadataAccessToken({ fetch: async () => new Response(JSON.stringify({ access_token: "short", expires_in: 60, token_type: "Bearer" }), { status: 200 }) }), /metadata token invalid/);
 });

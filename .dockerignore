@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+.next
+dist
+coverage
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite*
+*.db
+.superpowers

@@ -64,6 +64,14 @@ export function createGcsImmutableCatalogSink(input: { bucket: string; accessTok
   } };
 }
 
+export async function fetchGoogleMetadataAccessToken(input: { fetch?: typeof fetch } = {}) {
+  const response = await (input.fetch ?? fetch)("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", { headers: { "Metadata-Flavor": "Google" } });
+  if (!response.ok) throw new Error("metadata token invalid");
+  const value = await response.json() as { access_token?: string; expires_in?: number; token_type?: string };
+  if (value.token_type !== "Bearer" || typeof value.access_token !== "string" || !/^[A-Za-z0-9._-]{40,4096}$/.test(value.access_token) || !Number.isInteger(value.expires_in) || value.expires_in! < 300 || value.expires_in! > 3600) throw new Error("metadata token invalid");
+  return value.access_token;
+}
+
 export async function fetchPriorBaselineAttestation(input:{uri:string;generation:string;expectedObjectSha256:string;accessToken:string;fetch?:typeof fetch}) {
   const match = /^gs:\/\/([a-z0-9][a-z0-9._-]{1,220}[a-z0-9])\/(.+baseline-0006\.json)$/.exec(input.uri);
   if (!match || !/^[1-9][0-9]{0,30}$/.test(input.generation) || !HASH.test(input.expectedObjectSha256) || !/^[A-Za-z0-9._-]{20,4096}$/.test(input.accessToken)) throw new Error("baseline attestation invalid");
@@ -194,11 +202,12 @@ async function defaultConnect(connectionString: string): Promise<Connection> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
     const options = parseLiveCatalogPreparationArgs(process.argv.slice(2)), secret = (await readFile(options.databaseUrlFile, "utf8")).trim(), environment = process.env;
-    if (!/^postgres(?:ql)?:\/\//.test(secret) || Buffer.byteLength(secret) > 8192 || !environment.NEARYOU_DEPLOYED_SOURCE_COMMIT || !environment.NEARYOU_DEPLOYED_IMAGE_DIGEST || !environment.NEARYOU_CATALOG_EVIDENCE_BUCKET || !environment.NEARYOU_CATALOG_EVIDENCE_ACCESS_TOKEN) throw new Error("live catalog preparation configuration invalid");
+    if (!/^postgres(?:ql)?:\/\//.test(secret) || Buffer.byteLength(secret) > 8192 || !environment.NEARYOU_DEPLOYED_SOURCE_COMMIT || !environment.NEARYOU_DEPLOYED_IMAGE_DIGEST || !environment.NEARYOU_CATALOG_EVIDENCE_BUCKET) throw new Error("live catalog preparation configuration invalid");
+    const accessToken = await fetchGoogleMetadataAccessToken();
     const priorCoordinates=[environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_URI,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_GENERATION,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_SHA256];
     if(priorCoordinates.some(Boolean)&&!priorCoordinates.every(Boolean))throw new Error("live catalog preparation configuration invalid");
-    const priorBaselineAttestation=priorCoordinates.every(Boolean)?await fetchPriorBaselineAttestation({uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,expectedObjectSha256:priorCoordinates[2]!,accessToken:environment.NEARYOU_CATALOG_EVIDENCE_ACCESS_TOKEN}):undefined;
-    const sink=createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET, accessToken: environment.NEARYOU_CATALOG_EVIDENCE_ACCESS_TOKEN });
+    const priorBaselineAttestation=priorCoordinates.every(Boolean)?await fetchPriorBaselineAttestation({uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,expectedObjectSha256:priorCoordinates[2]!,accessToken}):undefined;
+    const sink=createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET, accessToken });
     const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST }, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
     process.stdout.write(`${JSON.stringify({ receipt: result.receipt, catalogChecksum: result.candidate.catalogChecksum, reviewRequired: true })}\n`);
   })().catch(() => { process.stderr.write("live catalog preparation failed\n"); process.exitCode = 1; });
