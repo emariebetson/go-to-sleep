@@ -100,8 +100,8 @@ resource "google_sql_user" "private_tester_baseline_verifier" {
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
 }
 locals {
-  readiness_controller_database_user  = google_service_account.readiness_controller.email
+  readiness_controller_database_user  = trimsuffix(google_service_account.readiness_controller.email, ".gserviceaccount.com")
   readiness_controller_oidc_principal = "service:nearyou-readiness-controller"
-  private_tester_baseline_database_user  = google_service_account.private_tester_baseline_verifier.email
+  private_tester_baseline_database_user  = trimsuffix(google_service_account.private_tester_baseline_verifier.email, ".gserviceaccount.com")
   private_tester_baseline_oidc_principal = "service:nearyou-private-tester-baseline-verifier"
 }

@@ -6,13 +6,14 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
-import { bootstrapMigrationFailureCode, createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, finalMigrationFailureCode, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { bootstrapMigrationFailureCode, controllerRegistrationFailureCode, createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, finalMigrationFailureCode, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { registerRolloutController } from "../scripts/register-rollout-controller.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 import { promoteLiveBaselineCatalog } from "../scripts/promote-live-baseline-catalog.ts";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const controllerUser = "nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com";
-const verifierUser = "nearyou-private-tester-baseline@nearnight.iam.gserviceaccount.com";
+const controllerUser = "nearyou-readiness-ctl@nearnight.iam";
+const verifierUser = "nearyou-private-tester-baseline@nearnight.iam";
 const controllerPrincipal = "service:nearyou-readiness-controller";
 const verifierPrincipal = "service:nearyou-private-tester-baseline-verifier";
 const catalogRows = REQUIRED_CATALOG_KINDS.map((kind, index) => ({ kind, identity: `nearyou.${kind}.${index}`, definition: kind==="policy"?"nearyou_policy_owner|SELECT|true|":`definition-${index}` }));
@@ -37,6 +38,8 @@ async function fixture(overrides = {}) {
     if (sql.includes("public_execute_count")) return { rows: [{ forced_rls: ["household_members", "tenant_records"], public_execute_count: "0" }] };
     if (sql.startsWith("SELECT checksum FROM nearyou.schema_migrations")) return { rows: ledger.find((row) => row.id === args[0]) ? [{ checksum: ledger.find((row) => row.id === args[0]).checksum }] : [] };
     if (sql.startsWith("INSERT INTO nearyou.schema_migrations")) { events.push(`insert:${args[0]}`); ledger.push({ id: args[0], checksum: args[1] }); return { rows: [] }; }
+    if (sql.includes("r.rolname='nearyou_migration'")) return { rows: [{ admin_option:false,inherit_option:true,set_option: true }] };
+    if (sql.includes("r.rolname='nearyou_rollout_controller'")||sql.includes("r.rolname='nearyou_private_tester_baseline_verifier'")) return { rows: [{ admin_option:false,inherit_option:true,set_option:true,sensitive_extra_count:"0" }] };
     if (sql.includes("register_rollout_controller_identity")) return { rows: [{ database_user: args[0], principal: args[1], effective: true }] };
     if (sql.includes("register_private_tester_baseline_verifier_identity")) return { rows: [{ database_user: args[0], principal: args[1], effective: true }] };
     if (sql.includes("pg_has_role")) return { rows: [{ ok: true }] };
@@ -59,6 +62,7 @@ async function fixture(overrides = {}) {
   }, {
     connect: async () => ({ pg, query, close: async () => events.push("close") }),
     migrations,
+    authoritativeMigrationDatabaseUser:"nearyou_migration_admin",
     authoritativeSource: { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` },
     authoritativePredecessorSource: overrides.authoritativePredecessorSource ?? { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` },
     expectedPredecessorAttestation:overrides.expectedPredecessorAttestation??{uri:priorAttestation.uri,generation:priorAttestation.generation,objectSha256:priorAttestation.objectSha256},
@@ -82,7 +86,7 @@ test("pristine production database applies only reviewed 0001-0006 and stops wit
     if (sql.includes("public_execute_count")) return {rows:[{forced_rls:["household_members","tenant_records"],public_execute_count:"0"}]};
     return {rows:[]};
   };
-  await assert.rejects(() => prepareLiveProductionCatalog({databaseUrl:"postgres://admin/x",release:"rel_20260817_private_01",operationId:`op_${"d".repeat(64)}`,operationStartedAt:1,candidateKey:"catalog/x/catalog-manifest.candidate.json",controllerDatabaseUser:controllerUser,controllerPrincipal,verifierDatabaseUser:verifierUser,verifierPrincipal},{connect:async()=>({pg:{transaction:async run=>run({query})},query,close:async()=>{}}),migrations,authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`},reviewedBaseline:baseline,now:()=>1,immutableSink:{writeOnce:async entry=>{writes.push(entry);return{uri:`gs://bucket/${entry.key}`,generation:"1",contentSha256:entry.contentSha256}}}}), /baseline-review-required/);
+  await assert.rejects(() => prepareLiveProductionCatalog({databaseUrl:"postgres://admin/x",release:"rel_20260817_private_01",operationId:`op_${"d".repeat(64)}`,operationStartedAt:1,candidateKey:"catalog/x/catalog-manifest.candidate.json",controllerDatabaseUser:controllerUser,controllerPrincipal,verifierDatabaseUser:verifierUser,verifierPrincipal},{connect:async()=>({pg:{transaction:async run=>run({query})},query,close:async()=>{}}),migrations,authoritativeMigrationDatabaseUser:"nearyou_migration_admin",authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`},reviewedBaseline:baseline,now:()=>1,immutableSink:{writeOnce:async entry=>{writes.push(entry);return{uri:`gs://bucket/${entry.key}`,generation:"1",contentSha256:entry.contentSha256}}}}), /baseline-review-required/);
   assert.deepEqual(events, migrations.slice(0,6).map(file=>`insert:${file.id}`));
   assert.equal(writes.length,1);
   const candidate=JSON.parse(writes[0].body);
@@ -100,14 +104,14 @@ test("prepares a review-required catalog from exact live PostgreSQL 16 state and
   const { result, writes, events, migrations } = await fixture();
   assert.equal(result.candidate.generatedFrom, "live-production-postgresql-16");
   assert.equal(result.candidate.reviewRequired, true);
-  assert.equal(result.candidate.migrationHead, "0007_private_tester_deployment_manifest");
+  assert.equal(result.candidate.migrationHead, "0008_cloud_sql_iam_database_usernames");
   assert.deepEqual(result.candidate.provenance.migrationLedger, migrations.map(({ id, checksum }) => ({ id, checksum })));
   assert.deepEqual(result.candidate.provenance.source, { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` });
   assert.equal(result.candidate.provenance.baseline.migrationHead,"0006_private_canary_observation");assert.equal(result.candidate.provenance.baseline.catalogChecksum,catalogChecksum);
   assert.deepEqual(result.candidate.provenance.identities, { controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal });
   assert.equal(Object.hasOwn(result.candidate, "ready"), false);
   assert.equal(Object.hasOwn(result.candidate, "gate"), false);
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames"]);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].contentSha256, sha256(writes[0].body));
   assert.equal(result.receipt.contentSha256, writes[0].contentSha256);
@@ -128,7 +132,7 @@ test("fails before mutation unless database, authority, historical ledger, and r
 test("maps provider failures to the exact non-sensitive preparation stage", async () => {
   const migrations = await loadPostgresMigrations();
   await assert.rejects(
-    () => prepareLiveProductionCatalog({ databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", operationId:`op_${"d".repeat(64)}`, operationStartedAt:1, candidateKey:"catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser:controllerUser, controllerPrincipal, verifierDatabaseUser:verifierUser, verifierPrincipal }, { migrations, authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`}, now:()=>1, connect:async()=>{throw new Error("opaque provider failure")}, immutableSink:{writeOnce:async()=>{throw new Error("unused")}} }),
+    () => prepareLiveProductionCatalog({ databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", operationId:`op_${"d".repeat(64)}`, operationStartedAt:1, candidateKey:"catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser:controllerUser, controllerPrincipal, verifierDatabaseUser:verifierUser, verifierPrincipal }, { migrations, authoritativeMigrationDatabaseUser:"nearyou_migration_admin",authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`}, now:()=>1, connect:async()=>{throw new Error("opaque provider failure")}, immutableSink:{writeOnce:async()=>{throw new Error("unused")}} }),
     /live catalog preparation database-connect-failed/,
   );
   await assert.rejects(
@@ -163,7 +167,27 @@ test("classifies bootstrap SQL failures without exposing provider messages", () 
   assert.equal(bootstrapMigrationFailureCode(new Error("migration execution failed:0001_nearyou_tenant_foundation:step-extension_vector",{cause:Object.assign(new Error("secret extension detail"),{code:"42501"})})),"bootstrap-migration-privilege-0001-sextension_vector");
 });
 
-test("classifies every post-baseline stage without provider detail",()=>{const sql=Object.assign(new Error("secret SQL and provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0007_private_tester_deployment_manifest:position-42:routine-aclcheck_error",{cause:sql});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0007-p42-raclcheck_error");for(const code of ["controller-registration-failed","verifier-registration-failed","final-ledger-invalid","final-catalog-invalid","candidate-write-failed"])assert.equal(liveCatalogPreparationFailureCode(new Error(`live catalog preparation ${code}`,{cause:new Error("secret provider detail")})),code);const staged=new Error("live catalog preparation final-migration-failed",{cause:migration});assert.equal(liveCatalogPreparationFailureCode(staged),"final-migration-privilege-0007-p42-raclcheck_error")});
+test("classifies every post-baseline stage without provider detail",()=>{const sql=Object.assign(new Error("secret SQL and provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0007_private_tester_deployment_manifest:position-42:routine-aclcheck_error",{cause:sql});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0007-p42-raclcheck_error");assert.equal(liveCatalogPreparationFailureCode(new Error("live catalog preparation controller-registration-failed",{cause:new Error("secret provider detail")})),"controller-registration-unknown");for(const code of ["verifier-registration-failed","final-ledger-invalid","final-catalog-invalid","candidate-write-failed"])assert.equal(liveCatalogPreparationFailureCode(new Error(`live catalog preparation ${code}`,{cause:new Error("secret provider detail")})),code);const staged=new Error("live catalog preparation final-migration-failed",{cause:migration});assert.equal(liveCatalogPreparationFailureCode(staged),"final-migration-privilege-0007-p42-raclcheck_error")});
+test("classifies forward migration 0008 without provider detail",()=>{const cause=Object.assign(new Error("secret provider detail"),{code:"42501"}),migration=new Error("migration execution failed:0008_cloud_sql_iam_database_usernames:position-17:routine-aclcheck_error",{cause});assert.equal(finalMigrationFailureCode(migration),"final-migration-privilege-0008-p17-raclcheck_error")});
+
+test("controller registration exposes only bounded transaction substages",()=>{for(const stage of ["verify-migration-membership","verify-controller-membership","set-migration-role","register-identity","reset-role","verify-membership"])assert.equal(controllerRegistrationFailureCode(new Error(`controller registration failed:${stage}`,{cause:new Error("secret SQL provider detail")})),`controller-registration-${stage}`);assert.equal(controllerRegistrationFailureCode(new Error("secret provider detail")),"controller-registration-unknown");const staged=new Error("live catalog preparation controller-registration-failed",{cause:new Error("controller registration failed:register-identity",{cause:new Error("secret")})});assert.equal(liveCatalogPreparationFailureCode(staged),"controller-registration-register-identity")});
+
+test("controller registration bounds every query failure to its non-secret substage",async()=>{
+  const expected=["verify-migration-membership","verify-controller-membership","set-migration-role","register-identity","reset-role","verify-membership"];
+  for(let failAt=1;failAt<=expected.length;failAt++){
+    let calls=0;
+    const pg={transaction:run=>run({query:async sql=>{
+      calls+=1;
+      if(calls===failAt)throw new Error("secret SQL provider detail");
+      if(sql.includes("r.rolname='nearyou_migration'"))return{rows:[{admin_option:false,inherit_option:true,set_option:true}]};
+      if(sql.includes("r.rolname='nearyou_rollout_controller'"))return{rows:[{admin_option:false,inherit_option:true,set_option:true,sensitive_extra_count:"0"}]};
+      if(sql.includes("register_rollout_controller_identity"))return{rows:[{database_user:"migration-admin",principal:"service:rollout-controller",effective:true}]};
+      if(sql.includes("pg_has_role"))return{rows:[{ok:true}]};
+      return{rows:[]};
+    }})};
+    await assert.rejects(()=>registerRolloutController(pg,"migration-admin","service:rollout-controller"),error=>error instanceof Error&&error.message===`controller registration failed:${expected[failAt-1]}`);
+  }
+});
 
 test("executes every bounded post-baseline failure boundary",async()=>{const migrations=await loadPostgresMigrations(),finalLedger=migrations.map(({id,checksum})=>({id,checksum}));for(const [overrides,code] of [[{queryFailure:/consume_private_tester_deployment_manifest/},"final-migration-failed"],[{ledger:finalLedger,queryFailure:/register_rollout_controller_identity/},"controller-registration-failed"],[{ledger:finalLedger,queryFailure:/register_private_tester_baseline_verifier_identity/},"verifier-registration-failed"],[{failFinalLedger:true},"final-ledger-invalid"],[{ledger:finalLedger,queryFailure:/SELECT kind::text/},"final-catalog-invalid"]])await assert.rejects(()=>fixture(overrides),new RegExp(`live catalog preparation ${code}`))});
 
@@ -178,12 +202,12 @@ test("resumes exact 0007 state without replaying migration and converges registr
   assert.equal(result.candidate.migrationHead, migrations.at(-1).id);
 });
 
-test("legacy 0001-0004 ledger is remediated by 0007 and preserved exactly in provenance", async () => {
+test("legacy 0001-0004 ledger is remediated through 0008 and preserved exactly in provenance", async () => {
   const migrations = await loadPostgresMigrations();
   const legacyLedger = migrations.slice(0, 6).map(({ id, checksum }, index) => ({ id, checksum: retiredChecksums[index] ?? checksum }));
   const { result, events } = await fixture({ ledger: legacyLedger });
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest"]);
-  assert.deepEqual(result.candidate.provenance.migrationLedger, [...legacyLedger, { id: migrations[6].id, checksum: migrations[6].checksum }]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames"]);
+  assert.deepEqual(result.candidate.provenance.migrationLedger, [...legacyLedger, ...migrations.slice(6).map(({id,checksum})=>({id,checksum}))]);
   assert.equal(result.candidate.provenance.migrationLedgerChecksum, sha256(result.candidate.provenance.migrationLedger.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")));
 });
 
@@ -203,7 +227,7 @@ test("cross-version resume binds exact predecessor attestation and distinct curr
 
 test("rejects non-production, swapped, or equal identity tuples before mutation", async () => {
   const migrations = await loadPostgresMigrations(), base = { databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", operationId:`op_${"d".repeat(64)}`, operationStartedAt:1, candidateKey: "catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal };
-  const dependencies = { migrations, authoritativeSource: { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` }, reviewedBaseline: baseline, now: () => 1, connect: async () => { throw new Error("must not connect"); }, immutableSink: { writeOnce: async () => { throw new Error("must not write"); } } };
+  const dependencies = { migrations, authoritativeMigrationDatabaseUser:"nearyou_migration_admin",authoritativeSource: { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` }, reviewedBaseline: baseline, now: () => 1, connect: async () => { throw new Error("must not connect"); }, immutableSink: { writeOnce: async () => { throw new Error("must not write"); } } };
   for (const input of [{ ...base, controllerDatabaseUser: verifierUser }, { ...base, verifierPrincipal: controllerPrincipal }, { ...base, verifierDatabaseUser: controllerUser }]) await assert.rejects(() => prepareLiveProductionCatalog(input, dependencies), /identity-invalid/);
 });
 

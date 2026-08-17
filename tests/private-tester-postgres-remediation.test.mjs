@@ -7,11 +7,12 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { acceptsMigrationLedger, applyPostgresMigrations, loadPostgresMigrations } from "../scripts/migrate.ts";
 import { registerRolloutController } from "../scripts/register-rollout-controller.ts";
+import { cloudSqlRoleAssignmentPlan,validateCloudSqlRoleAssignmentReadback } from "../scripts/cloud-sql-role-assignment-plan.ts";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const aclGatePath = fileURLToPath(new URL("../scripts/private-tester-baseline-acl-gate.sql", import.meta.url));
-const verifierDatabaseUser = "nearyou-private-tester-baseline@nearnight.iam.gserviceaccount.com";
+const verifierDatabaseUser = "nearyou-private-tester-baseline@nearnight.iam";
 const historicalMigrations = Object.freeze([
   ["0001_nearyou_tenant_foundation", "ae9a5e8f26190063382d76eae25565a6a991523edf6ceefa1abd74b1fd88a194"],
   ["0002_release_evidence_trust", "7ec295cb252f9d8cf54d951e899a59ddb834a1204de951a7d967eeeaf67c11f8"],
@@ -25,7 +26,21 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const migrationBody = (sql) => sql.replace(/^\s*BEGIN;\s*/i, "").replace(/\s*COMMIT;\s*$/i, "");
 const ledgerChecksum = (files) => sha256(files.map((file) => `${file.id}:${file.checksum}`).join("\n"));
 
-test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 without conflict", async () => {
+test("0008 repairs exact Cloud SQL IAM database usernames and role assignment is ordered after that head",async()=>{
+  const files=await loadPostgresMigrations(),migration=files.at(-1),plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",observedSessionUser:"nearyou_migration_admin",operationId:`op_${"a".repeat(64)}`});
+  assert.equal(migration.id,"0008_cloud_sql_iam_database_usernames");
+  assert.match(migration.sql,/session_user::text<>'nearyou-private-tester-baseline@nearnight\.iam'/);
+  assert.doesNotMatch(migration.sql,/gserviceaccount\.com/);
+  assert.equal(plan.requiresMigrationHead,migration.id);
+  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-private-tester-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
+  assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&!item.command.some(value=>value.includes("revoke"))));
+  assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
+  const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
+  assert.equal(validateCloudSqlRoleAssignmentReadback(plan,rows).reviewRequired,true);
+  await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"CLOUD_IAM_SERVICE_ACCOUNT"})),/readback invalid/);
+});
+
+test("historical PostgreSQL ledger through 0006 upgrades forward through 0008 without conflict", async () => {
   const files = await loadPostgresMigrations();
   assert.notDeepEqual(files.slice(0, 4).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(0, 4));
   assert.deepEqual(files.slice(4, 6).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(4, 6));
@@ -60,8 +75,8 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
 
-  assert.deepEqual([...ledger], [...historicalMigrations, [files[6].id, files[6].checksum]]);
-  assert.deepEqual(executedBodies, [migrationBody(files[6].sql)]);
+  assert.deepEqual([...ledger], [...historicalMigrations, ...files.slice(6).map(file=>[file.id,file.checksum])]);
+  assert.deepEqual(executedBodies, files.slice(6).map(file=>migrationBody(file.sql)));
   assert.equal(ownershipStatements.length, 57);
   assert.match(ownershipStatements[0], /SELECT m\.admin_option,m\.inherit_option,m\.set_option/);
   assert.match(ownershipStatements[1], /CREATE ROLE nearyou_app NOLOGIN NOINHERIT/);
@@ -79,8 +94,8 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
   assert.match(executedBodies[0], /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner USING \(true\)/);
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
-  assert.equal(executedBodies.length, 1, "a fully ledgered replay must execute no migration body");
-  assert.deepEqual(ledgerInserts, [[files[6].id, files[6].checksum]], "the upgrade must only append 0007 to the ledger");
+  assert.equal(executedBodies.length, 2, "a fully ledgered replay must execute no additional migration body");
+  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 and 0008 to the ledger");
 });
 
 test("Cloud SQL policy owners use narrow RLS policy access instead of unavailable BYPASSRLS", async () => {
@@ -193,7 +208,7 @@ test("disposable PostgreSQL 16 executes the historical 0006 to 0007 upgrade and 
     assert.deepEqual((await client.query("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"")).rows.map(({ id, checksum }) => [id, checksum]), historicalMigrations);
     await applyPostgresMigrations(pg, files, ledgerChecksum(files));
 
-    const controllerDatabaseUser = "nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com";
+    const controllerDatabaseUser = "nearyou-readiness-ctl@nearnight.iam";
     await client.query(`CREATE ROLE "${controllerDatabaseUser}" LOGIN`);
     const controller = await registerRolloutController(pg, controllerDatabaseUser, "service:nearyou-readiness-controller");
     assert.deepEqual(controller.artifact, { databaseUser: controllerDatabaseUser, principal: "service:nearyou-readiness-controller", effective: true });

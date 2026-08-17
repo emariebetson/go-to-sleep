@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { acceptsMigrationLedger, applyPostgresMigrations, loadPostgresMigrations, type MigrationFile } from "./migrate";
-import { registerRolloutController, type AdminPg } from "./register-rollout-controller";
+import { registerRolloutController,type AdminPg } from "./register-rollout-controller";
 import { registerPrivateTesterBaselineVerifier } from "./register-private-tester-baseline-verifier";
 import { collectLiveCatalog, verifyLiveCatalogSecurity } from "./postgres-catalog";
 import { REQUIRED_CATALOG_KINDS } from "./check-catalog-manifest";
@@ -24,7 +24,7 @@ type SinkEntry = { key: string; body: string; contentSha256: string };
 type SinkReceipt = { uri: string; generation: string; contentSha256: string };
 
 type CliOptions = { release: string; operationId:string; operationStartedAt:number; candidateKey: string; databaseUrlFile: string };
-const PRODUCTION_IDENTITIES = Object.freeze({ controllerDatabaseUser: "nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com", controllerPrincipal: "service:nearyou-readiness-controller", verifierDatabaseUser: "nearyou-private-tester-baseline@nearnight.iam.gserviceaccount.com", verifierPrincipal: "service:nearyou-private-tester-baseline-verifier" });
+const PRODUCTION_IDENTITIES = Object.freeze({ controllerDatabaseUser: "nearyou-readiness-ctl@nearnight.iam", controllerPrincipal: "service:nearyou-readiness-controller", verifierDatabaseUser: "nearyou-private-tester-baseline@nearnight.iam", verifierPrincipal: "service:nearyou-private-tester-baseline-verifier" });
 
 export function parseLiveCatalogPreparationArgs(args: string[]): CliOptions {
   const allowed = new Set(["--release", "--operation-id", "--operation-started-at", "--candidate-key", "--database-url-file"]), values = new Map<string, string>();
@@ -98,6 +98,7 @@ type Dependencies = {
   connect(url: string): Promise<Connection>;
   migrations?: MigrationFile[];
   authoritativeSource: { commitSha: string; imageDigest: string };
+  authoritativeMigrationDatabaseUser: string;
   authoritativePredecessorSource?: { commitSha:string;imageDigest:string };
   expectedPredecessorAttestation?: {uri:string;generation:string;objectSha256:string};
   reviewedBaseline?: ReviewedBaseline;
@@ -125,7 +126,7 @@ export function databaseConnectionFailureCode(error: unknown) {
 }
 
 export function bootstrapMigrationFailureCode(error: unknown) {
-  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-7]_[a-z0-9_]+)(?::step-([a-z0-9_]{1,80}))?(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-s${match[2]}`:""}${match[3]?`-p${match[3]}`:""}${match[4]?`-r${match[4]}`:""}`:"";
+  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-8]_[a-z0-9_]+)(?::step-([a-z0-9_]{1,80}))?(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-s${match[2]}`:""}${match[3]?`-p${match[3]}`:""}${match[4]?`-r${match[4]}`:""}`:"";
   if(code==="42501")return `bootstrap-migration-privilege${suffix}`;
   if(code==="0A000"||code==="58P01")return `bootstrap-migration-feature${suffix}`;
   if(code==="42P17"||code==="42601")return `bootstrap-migration-definition${suffix}`;
@@ -133,6 +134,10 @@ export function bootstrapMigrationFailureCode(error: unknown) {
   return `bootstrap-migration-unknown${suffix}`;
 }
 export function finalMigrationFailureCode(error:unknown){return bootstrapMigrationFailureCode(error).replace(/^bootstrap-migration-/,"final-migration-")}
+export function controllerRegistrationFailureCode(error:unknown){
+  const match=error instanceof Error?/^controller registration failed:(verify-migration-membership|verify-controller-membership|set-migration-role|register-identity|reset-role|verify-membership)$/.exec(error.message):null;
+  return match?`controller-registration-${match[1]}`:"controller-registration-unknown";
+}
 
 export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
@@ -141,7 +146,9 @@ export function liveCatalogPreparationFailureCode(error: unknown) {
   if (message === "live catalog preparation bootstrap-migration-failed" && error instanceof Error && error.cause)
     return bootstrapMigrationFailureCode(error.cause);
   if (message === "live catalog preparation final-migration-failed" && error instanceof Error && error.cause)
-    return finalMigrationFailureCode(error.cause);
+    return error.cause instanceof Error&&error.cause.message.startsWith("controller registration failed:")?controllerRegistrationFailureCode(error.cause):error.cause instanceof Error&&error.cause.message.startsWith("baseline verifier registration failed")?"verifier-registration-failed":finalMigrationFailureCode(error.cause);
+  if (message === "live catalog preparation controller-registration-failed" && error instanceof Error && error.cause)
+    return controllerRegistrationFailureCode(error.cause);
   for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required", "controller-registration-failed", "verifier-registration-failed", "final-ledger-invalid", "final-catalog-invalid", "candidate-write-failed"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
@@ -162,18 +169,18 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   precondition(COMMIT.test(dependencies.authoritativeSource.commitSha) && IMAGE.test(dependencies.authoritativeSource.imageDigest), "source-invalid");
   precondition(JSON.stringify({ controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal }) === JSON.stringify(PRODUCTION_IDENTITIES), "identity-invalid");
   const files = dependencies.migrations ?? await loadPostgresMigrations();
-  precondition(files.length === 7 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest", "migration-set-invalid");
+  precondition(files.length === 8 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest" && files[7]?.id === "0008_cloud_sql_iam_database_usernames", "migration-set-invalid");
   const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
     const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean }>(
       "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed,to_regnamespace('nearyou') IS NULL AS pristine,EXISTS(SELECT 1 FROM pg_available_extensions WHERE name='vector') AS vector_available FROM pg_roles WHERE rolname=current_user",
       [],
     ))).rows[0];
-    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
+    precondition(/^[A-Za-z0-9_.@-]{3,200}$/.test(dependencies.authoritativeMigrationDatabaseUser)&&target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && target.database_user === dependencies.authoritativeMigrationDatabaseUser, "target-authority-invalid");
     if (target.pristine === true) await atStage("bootstrap-migration-failed",()=>applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6))));
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
-    const from0006 = acceptsMigrationLedger(files.slice(0,6),liveLedger), from0007 = acceptsMigrationLedger(files,liveLedger);
-    precondition(from0006 || from0007, "ledger-state-invalid");
+    const from0006 = acceptsMigrationLedger(files.slice(0,6),liveLedger), from0007 = acceptsMigrationLedger(files.slice(0,7),liveLedger),from0008=acceptsMigrationLedger(files,liveLedger);
+    precondition(from0006 || from0007 || from0008, "ledger-state-invalid");
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
     let baselineBinding:Record<string,unknown>;
     if (from0006) {
@@ -203,10 +210,10 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     }
 
     await atStage("final-migration-failed",()=>applyPostgresMigrations(connection.pg, files, migrationChecksum(files)));
-    const controller = await atStage("controller-registration-failed",()=>registerRolloutController(connection.pg, input.controllerDatabaseUser, input.controllerPrincipal));
-    precondition(controller.controllerMappingVerified === true,"controller-registration-failed");
-    const verifier = await atStage("verifier-registration-failed",()=>registerPrivateTesterBaselineVerifier(connection.pg, input.verifierDatabaseUser, input.verifierPrincipal));
-    precondition(verifier.baselineVerifierMappingVerified === true,"verifier-registration-failed");
+    const controller=await atStage("controller-registration-failed",()=>registerRolloutController(connection.pg,input.controllerDatabaseUser,input.controllerPrincipal));
+    precondition(controller.controllerMappingVerified===true,"controller-registration-failed");
+    const verifier=await atStage("verifier-registration-failed",()=>registerPrivateTesterBaselineVerifier(connection.pg,input.verifierDatabaseUser,input.verifierPrincipal));
+    precondition(verifier.baselineVerifierMappingVerified===true,"verifier-registration-failed");
     const finalLedger = (await atStage("final-ledger-invalid",()=>connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     precondition(acceptsMigrationLedger(files,finalLedger),"final-ledger-invalid");
     const {rows,security}=await atStage("final-catalog-invalid",async()=>{const observedRows=await collectLiveCatalog(connection),observedSecurity=await verifyLiveCatalogSecurity(connection);precondition(REQUIRED_CATALOG_KINDS.every((kind) => observedRows.some((row) => row.kind === kind)),"final-catalog-invalid");return{rows:observedRows,security:observedSecurity}});
@@ -225,7 +232,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       version: 1,
       reviewRequired: true,
       generatedFrom: "live-production-postgresql-16",
-      migrationHead: files[6].id,
+      migrationHead: files[7].id,
       schema: "nearyou",
       catalogChecksum: sha256(JSON.stringify(rows)),
       requiredKinds: REQUIRED_CATALOG_KINDS,
@@ -254,7 +261,7 @@ async function defaultConnect(connectionString: string): Promise<Connection> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
     const options = parseLiveCatalogPreparationArgs(process.argv.slice(2)), secret = (await readFile(options.databaseUrlFile, "utf8")).trim(), environment = process.env;
-    if (!/^postgres(?:ql)?:\/\//.test(secret) || Buffer.byteLength(secret) > 8192 || !environment.NEARYOU_DEPLOYED_SOURCE_COMMIT || !environment.NEARYOU_DEPLOYED_IMAGE_DIGEST || !environment.NEARYOU_CATALOG_EVIDENCE_BUCKET) throw new Error("live catalog preparation configuration invalid");
+    if (!/^postgres(?:ql)?:\/\//.test(secret) || Buffer.byteLength(secret) > 8192 || !environment.NEARYOU_DEPLOYED_SOURCE_COMMIT || !environment.NEARYOU_DEPLOYED_IMAGE_DIGEST || !environment.NEARYOU_CATALOG_EVIDENCE_BUCKET || !/^[A-Za-z0-9_.@-]{3,200}$/.test(environment.NEARYOU_OBSERVED_MIGRATION_DATABASE_USER??"")) throw new Error("live catalog preparation configuration invalid");
     const accessToken = await fetchGoogleMetadataAccessToken();
     const priorCoordinates=[environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_URI,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_GENERATION,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_SHA256];
     if(priorCoordinates.some(Boolean)&&!priorCoordinates.every(Boolean))throw new Error("live catalog preparation configuration invalid");
@@ -263,7 +270,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if(priorBaselineAttestation&&(!COMMIT.test(authoritativePredecessorSource!.commitSha)||!IMAGE.test(authoritativePredecessorSource!.imageDigest)))throw new Error("live catalog preparation configuration invalid");
     const sink=createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET, accessToken });
     const expectedPredecessorAttestation=priorBaselineAttestation?{uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,objectSha256:priorCoordinates[2]!}:undefined;
-    const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST },authoritativePredecessorSource,expectedPredecessorAttestation, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
+    const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeMigrationDatabaseUser:environment.NEARYOU_OBSERVED_MIGRATION_DATABASE_USER!, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST },authoritativePredecessorSource,expectedPredecessorAttestation, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
     process.stdout.write(`${JSON.stringify({ receipt: result.receipt, catalogChecksum: result.candidate.catalogChecksum, reviewRequired: true })}\n`);
   })().catch((error) => { process.stderr.write(`live catalog preparation failed: ${liveCatalogPreparationFailureCode(error)}\n`); process.exitCode = 1; });
 }

@@ -12,7 +12,7 @@ import { verifyPrivateTesterD1SourceBaseline } from "../scripts/private-tester-d
 
 const now = Date.parse("2026-08-14T18:00:00.000Z");
 const identity = "principal://near-prod/private-tester-reader";
-const postgresIdentity = "database:nearyou-private-tester-baseline@nearnight.iam.gserviceaccount.com";
+const postgresIdentity = "database:nearyou-private-tester-baseline@nearnight.iam";
 const signerPrincipal = "ci://github/nearyou/private-tester-deployment";
 const signerKeyId = "private-tester-deployment";
 const accountId = "1".repeat(32);
@@ -91,7 +91,7 @@ async function input(overrides = {}) {
 function productionEnvironment() {
   const instance = "nearnight:us-central1:nearyou-production";
   const artifact = readFileSync(new URL("../infra/production/cloud-sql-auth-proxy.args", import.meta.url), "utf8").replace("${CLOUD_SQL_INSTANCE_CONNECTION_NAME}", instance);
-  return { PRIVATE_TESTER_GCP_PROJECT: "near-prod", PRIVATE_TESTER_DNS_ZONE: "near-zone", PRIVATE_TESTER_READER_SUBJECT: "109876543210987654321", CLOUDFLARE_API_TOKEN: "token_abcdefghijklmnopqrstuvwxyz", PRIVATE_TESTER_BASELINE_DATABASE_URL: "postgresql://nearyou-private-tester-baseline%40nearnight.iam.gserviceaccount.com@127.0.0.1:5432/nearyou?sslmode=disable", CLOUD_SQL_IAM_CONNECTOR: "cloud-sql-auth-proxy", CLOUD_SQL_INSTANCE_CONNECTION_NAME: instance, CLOUD_SQL_PROXY_ARGS_CHECKSUM: createHash("sha256").update(artifact).digest("hex"), NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER: "nearyou-private-tester-baseline@nearnight.iam.gserviceaccount.com" };
+  return { PRIVATE_TESTER_GCP_PROJECT: "near-prod", PRIVATE_TESTER_DNS_ZONE: "near-zone", PRIVATE_TESTER_READER_SUBJECT: "109876543210987654321", CLOUDFLARE_API_TOKEN: "token_abcdefghijklmnopqrstuvwxyz", PRIVATE_TESTER_BASELINE_DATABASE_URL: "postgresql://nearyou-private-tester-baseline%40nearnight.iam@127.0.0.1:5432/nearyou?sslmode=disable", CLOUD_SQL_IAM_CONNECTOR: "cloud-sql-auth-proxy", CLOUD_SQL_INSTANCE_CONNECTION_NAME: instance, CLOUD_SQL_PROXY_ARGS_CHECKSUM: createHash("sha256").update(artifact).digest("hex"), NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER: "nearyou-private-tester-baseline@nearnight.iam" };
 }
 
 test("mechanically regenerates the reviewed 0000-0016 D1 source schema manifest", async () => {
@@ -179,6 +179,8 @@ test("production PostgreSQL reads and nonce consumption use only the mapped base
   const source = readFileSync(new URL("../scripts/capture-private-tester-baseline.ts", import.meta.url), "utf8");
   assert.match(source, /PRIVATE_TESTER_BASELINE_DATABASE_URL/);
   assert.match(source, /NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER/);
+  assert.match(source, /\^nearyou-private-tester-baseline@nearnight\\\.iam\$/);
+  assert.doesNotMatch(source, /nearyou-private-tester-baseline@nearnight\\\.iam\\\.gserviceaccount/);
   assert.match(source, /assert_private_tester_baseline_verifier\(\)/);
   assert.doesNotMatch(source, /EXISTS\(SELECT 1 FROM nearyou\.private_tester_baseline_verifier_identities/);
   assert.doesNotMatch(source, /READINESS_CONTROL_DATABASE_URL|NEARYOU_READINESS_DATABASE_USER/);
