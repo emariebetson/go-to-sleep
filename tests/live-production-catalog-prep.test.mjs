@@ -45,6 +45,7 @@ async function fixture(overrides = {}) {
   const pg = { transaction: async (run) => run({ query }) };
   const writes = [], baselineWrites=[];
   const priorCore = { migrationHead: "0006_private_canary_observation", catalogChecksum, attestedAt: Date.parse("2026-08-17T18:00:00.000Z"), release: "rel_20260817_private_01", source: { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` }, operationId:`op_${"d".repeat(64)}` };
+  const priorAttestation=overrides.priorBaselineAttestation ?? { ...priorCore, uri:"gs://nearyou-private-evidence/catalog/baseline-0006.json",generation:"122",objectSha256:"e".repeat(64), digest: sha256(JSON.stringify(priorCore)) };
   const result = await prepareLiveProductionCatalog({
     databaseUrl: "postgres://migration-admin@production/nearyou",
     release: "rel_20260817_private_01",
@@ -59,8 +60,10 @@ async function fixture(overrides = {}) {
     connect: async () => ({ pg, query, close: async () => events.push("close") }),
     migrations,
     authoritativeSource: { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` },
+    authoritativePredecessorSource: overrides.authoritativePredecessorSource ?? { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` },
+    expectedPredecessorAttestation:overrides.expectedPredecessorAttestation??{uri:priorAttestation.uri,generation:priorAttestation.generation,objectSha256:priorAttestation.objectSha256},
     reviewedBaseline: overrides.baseline ?? baseline,
-    ...(overrides.omitPrior ? {} : { priorBaselineAttestation: overrides.priorBaselineAttestation ?? { ...priorCore, uri:"gs://nearyou-private-evidence/catalog/baseline-0006.json",generation:"122", digest: sha256(JSON.stringify(priorCore)) } }),
+    ...(overrides.omitPrior ? {} : { priorBaselineAttestation:priorAttestation }),
     now: () => Date.parse("2026-08-17T18:00:00.000Z"),
     immutableSink: overrides.immutableSink ?? { writeOnce: async (entry) => { writes.push(entry); return { uri: `gs://nearyou-evidence/${entry.key}`, generation: "1723917600000000", contentSha256: entry.contentSha256 }; } },
     immutableBaselineSink: { writeOnce: async (entry) => { events.push("baseline-attested");baselineWrites.push(entry); return { uri:`gs://nearyou-evidence/${entry.key}`,generation:"1723917500000000",contentSha256:entry.contentSha256 }; } },
@@ -100,7 +103,7 @@ test("prepares a review-required catalog from exact live PostgreSQL 16 state and
   assert.equal(result.candidate.migrationHead, "0007_private_tester_deployment_manifest");
   assert.deepEqual(result.candidate.provenance.migrationLedger, migrations.map(({ id, checksum }) => ({ id, checksum })));
   assert.deepEqual(result.candidate.provenance.source, { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` });
-  assert.deepEqual(result.candidate.provenance.baseline, { migrationHead: "0006_private_canary_observation", catalogChecksum });
+  assert.equal(result.candidate.provenance.baseline.migrationHead,"0006_private_canary_observation");assert.equal(result.candidate.provenance.baseline.catalogChecksum,catalogChecksum);
   assert.deepEqual(result.candidate.provenance.identities, { controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal });
   assert.equal(Object.hasOwn(result.candidate, "ready"), false);
   assert.equal(Object.hasOwn(result.candidate, "gate"), false);
@@ -190,11 +193,13 @@ test("exact 0006 first run does not require a prior baseline attestation", async
 });
 
 test("first run baseline record supports byte-identical resume after a lost response", async () => {
-  const first=await fixture({omitPrior:true}), record=JSON.parse(first.baselineWrites[0].body), prior={...record,uri:"gs://nearyou-evidence/catalog/rel_20260817_private_01/baseline-0006.json",generation:"1723917500000000"};
+  const first=await fixture({omitPrior:true}), record=JSON.parse(first.baselineWrites[0].body), prior={...record,uri:"gs://nearyou-evidence/catalog/rel_20260817_private_01/baseline-0006.json",generation:"1723917500000000",objectSha256:first.baselineWrites[0].contentSha256};
   const resumed=await fixture({ledger:first.migrations.map(({id,checksum})=>({id,checksum})),priorBaselineAttestation:prior});
   assert.equal(resumed.writes[0].body,first.writes[0].body);
   assert.equal(resumed.writes[0].contentSha256,first.writes[0].contentSha256);
 });
+
+test("cross-version resume binds exact predecessor attestation and distinct current source",async()=>{const migrations=await loadPostgresMigrations(),ledger=migrations.map(({id,checksum})=>({id,checksum})),predecessor={commitSha:"c".repeat(40),imageDigest:`sha256:${"d".repeat(64)}`},core={migrationHead:"0006_private_canary_observation",catalogChecksum,attestedAt:Date.parse("2026-08-17T18:00:00.000Z"),release:"rel_20260817_private_01",source:predecessor,operationId:`op_${"d".repeat(64)}`},prior={...core,uri:"gs://nearyou-private-evidence/catalog/predecessor-baseline-0006.json",generation:"77",objectSha256:"e".repeat(64),digest:sha256(JSON.stringify(core))},expectedPredecessorAttestation={uri:prior.uri,generation:prior.generation,objectSha256:prior.objectSha256},result=await fixture({ledger,authoritativePredecessorSource:predecessor,expectedPredecessorAttestation,priorBaselineAttestation:prior});assert.deepEqual(result.result.candidate.provenance.source,{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`});assert.deepEqual(result.result.candidate.provenance.baseline.attestation,{uri:prior.uri,generation:prior.generation,objectSha256:prior.objectSha256,core,digest:prior.digest});for(const changed of [{...prior,source:{...predecessor,commitSha:"a".repeat(40)}},{...prior,release:"rel_wrong_12345678"},{...prior,operationId:`op_${"f".repeat(64)}`},{...prior,attestedAt:prior.attestedAt+1},{...prior,catalogChecksum:"f".repeat(64)},{...prior,generation:"78"}])await assert.rejects(()=>fixture({ledger,authoritativePredecessorSource:predecessor,expectedPredecessorAttestation,priorBaselineAttestation:{...changed,digest:prior.digest}}),/precondition/);await assert.rejects(()=>fixture({ledger,authoritativePredecessorSource:{commitSha:"a".repeat(40),imageDigest:predecessor.imageDigest},expectedPredecessorAttestation,priorBaselineAttestation:prior}),/precondition/)});
 
 test("rejects non-production, swapped, or equal identity tuples before mutation", async () => {
   const migrations = await loadPostgresMigrations(), base = { databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", operationId:`op_${"d".repeat(64)}`, operationStartedAt:1, candidateKey: "catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal };
@@ -209,7 +214,7 @@ test("promotion accepts exact live-production provenance and rejects tampering",
     const candidate = join(directory, "catalog-manifest.candidate.json"), receipt = join(directory, "catalog-manifest.receipt.json"), reviewed = join(directory, "catalog-manifest.reviewed.json"), candidateBody = `${JSON.stringify(result.candidate, null, 2)}\n`;
     await writeFile(candidate, candidateBody);
     await writeFile(receipt, `${JSON.stringify(result.receipt)}\n`);
-    const authority = { expectedCommitSha: "a".repeat(40), expectedImageDigest: `sha256:${"b".repeat(64)}`, expectedBaselineChecksum: catalogChecksum, expectedMigrationLedgerChecksum: result.candidate.provenance.migrationLedgerChecksum };
+    const baselineAttestation=result.candidate.provenance.baseline.attestation,authority = { expectedCommitSha: "a".repeat(40), expectedImageDigest: `sha256:${"b".repeat(64)}`, expectedBaselineChecksum: catalogChecksum, expectedMigrationLedgerChecksum: result.candidate.provenance.migrationLedgerChecksum,expectedReceiptUri:result.receipt.uri,expectedReceiptGeneration:result.receipt.generation,expectedReceiptContentSha256:result.receipt.contentSha256,expectedRelease:"rel_20260817_private_01",expectedOperationId:`op_${"d".repeat(64)}`,expectedOperationStartedAt:Date.parse("2026-08-17T18:00:00.000Z"),expectedPredecessorCommitSha:"a".repeat(40),expectedPredecessorImageDigest:`sha256:${"b".repeat(64)}`,expectedPredecessorAttestationUri:baselineAttestation.uri,expectedPredecessorAttestationGeneration:baselineAttestation.generation,expectedPredecessorAttestationObjectSha256:baselineAttestation.objectSha256,expectedPredecessorAttestationDigest:baselineAttestation.digest };
     const promoted = await promoteCatalogManifest({ candidate, receipt, output: reviewed, ...authority });
     assert.equal(promoted.generatedFrom, "reviewed-live-production-postgresql-16");
     const tampered = join(directory, "tampered-catalog-manifest.candidate.json");
@@ -219,6 +224,8 @@ test("promotion accepts exact live-production provenance and rejects tampering",
     await writeFile(wrongReceipt, `${JSON.stringify({ ...result.receipt, contentSha256: "0".repeat(64) })}\n`);
     await assert.rejects(() => promoteCatalogManifest({ candidate, receipt: wrongReceipt, output: join(directory, "wrong-catalog-manifest.reviewed.json"), ...authority }), /catalog promotion invalid/);
     await assert.rejects(() => promoteCatalogManifest({ candidate, receipt, output: join(directory, "wrong-authority.reviewed.json"), ...authority, expectedCommitSha: "c".repeat(40) }), /catalog promotion invalid/);
+    for(const [name,override] of [["swapped-predecessor",{expectedPredecessorCommitSha:"c".repeat(40)}],["unrelated-attestation",{expectedPredecessorAttestationUri:"gs://other/baseline.json"}],["changed-release",{expectedRelease:"rel_changed_12345678"}],["changed-operation",{expectedOperationId:`op_${"f".repeat(64)}`}],["changed-time",{expectedOperationStartedAt:authority.expectedOperationStartedAt+1}],["receipt-substitution",{expectedReceiptGeneration:"999"}]])await assert.rejects(()=>promoteCatalogManifest({candidate,receipt,output:join(directory,`${name}-catalog-manifest.reviewed.json`),...authority,...override}),/catalog promotion invalid/);
+    for(const [name,changeCore] of [["extra-baseline",false],["wrong-core-head",true]]){const original=result.candidate.provenance,originalAttestation=original.baseline.attestation,core=changeCore?{...originalAttestation.core,migrationHead:"0005_operational_evidence"}:originalAttestation.core,attestation={...originalAttestation,core,digest:sha256(JSON.stringify(core))},baseline=changeCore?{...original.baseline,attestation}:{...original.baseline,attestation,extra:true},provenance={...original,baseline},value={...result.candidate,provenance,provenanceChecksum:sha256(JSON.stringify(provenance))},path=join(directory,`${name}-catalog-manifest.candidate.json`),receiptPath=join(directory,`${name}-catalog-manifest.receipt.json`),body=`${JSON.stringify(value,null,2)}\n`,newReceipt={uri:`gs://nearyou-evidence/catalog/${name}-catalog-manifest.candidate.json`,generation:"777",contentSha256:sha256(body)};await writeFile(path,body);await writeFile(receiptPath,JSON.stringify(newReceipt));await assert.rejects(()=>promoteCatalogManifest({candidate:path,receipt:receiptPath,output:join(directory,`${name}-catalog-manifest.reviewed.json`),...authority,expectedReceiptUri:newReceipt.uri,expectedReceiptGeneration:newReceipt.generation,expectedReceiptContentSha256:newReceipt.contentSha256,expectedPredecessorAttestationDigest:attestation.digest}),/catalog promotion invalid/)}
     assert.equal(JSON.parse(await readFile(reviewed, "utf8")).catalogChecksum, result.candidate.catalogChecksum);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
@@ -263,7 +270,7 @@ test("prior baseline core is downloaded from its exact immutable generation and 
   let url;
   const loaded = await fetchPriorBaselineAttestation({ uri, generation, expectedObjectSha256, accessToken:"token_abcdefghijklmnopqrstuvwxyz", fetch:async (input)=>{url=input;return new Response(body,{status:200})} });
   assert.match(url, /generation=122/);
-  assert.deepEqual(loaded, { ...value, uri, generation });
+  assert.deepEqual(loaded, { ...value, uri, generation,objectSha256:expectedObjectSha256 });
 });
 
 test("production storage access uses a bounded workload metadata token", async () => {

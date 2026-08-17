@@ -79,7 +79,7 @@ export async function fetchPriorBaselineAttestation(input:{uri:string;generation
   const response = await (input.fetch ?? fetch)(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(match[1]!)}/o/${encodeURIComponent(match[2]!)}?alt=media&generation=${input.generation}`, { headers:{authorization:`Bearer ${input.accessToken}`} });
   const body = await response.text();
   if (!response.ok || sha256(body) !== input.expectedObjectSha256) throw new Error("baseline attestation invalid");
-  return { ...JSON.parse(body), uri:input.uri, generation:input.generation };
+  return { ...JSON.parse(body), uri:input.uri, generation:input.generation, objectSha256:input.expectedObjectSha256 };
 }
 
 export type LiveCatalogPreparationInput = {
@@ -98,8 +98,10 @@ type Dependencies = {
   connect(url: string): Promise<Connection>;
   migrations?: MigrationFile[];
   authoritativeSource: { commitSha: string; imageDigest: string };
+  authoritativePredecessorSource?: { commitSha:string;imageDigest:string };
+  expectedPredecessorAttestation?: {uri:string;generation:string;objectSha256:string};
   reviewedBaseline?: ReviewedBaseline;
-  priorBaselineAttestation?: { migrationHead:string;catalogChecksum:string;uri:string;generation:string;attestedAt:number;release:string;operationId:string;source:{commitSha:string;imageDigest:string};digest:string };
+  priorBaselineAttestation?: { migrationHead:string;catalogChecksum:string;uri:string;generation:string;objectSha256:string;attestedAt:number;release:string;operationId:string;source:{commitSha:string;imageDigest:string};digest:string };
   now(): number;
   immutableSink: { writeOnce(entry: SinkEntry): Promise<SinkReceipt> };
   immutableBaselineSink?: { writeOnce(entry: SinkEntry): Promise<SinkReceipt> };
@@ -173,6 +175,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     const from0006 = acceptsMigrationLedger(files.slice(0,6),liveLedger), from0007 = acceptsMigrationLedger(files,liveLedger);
     precondition(from0006 || from0007, "ledger-state-invalid");
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
+    let baselineBinding:Record<string,unknown>;
     if (from0006) {
       const baselineRows = await atStage("baseline-state-invalid", () => collectLiveCatalog(connection)), baselineChecksum = sha256(JSON.stringify(baselineRows));
       if (target.pristine === true || reviewedBaseline.generatedFrom !== "reviewed-live-production-postgresql-16" || reviewedBaseline.catalogChecksum !== baselineChecksum) {
@@ -189,11 +192,14 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       const baselineCore = { migrationHead:reviewedBaseline.migrationHead,catalogChecksum:reviewedBaseline.catalogChecksum,release:input.release,source:dependencies.authoritativeSource,attestedAt:input.operationStartedAt,operationId:input.operationId }, baselineRecord = { ...baselineCore,digest:sha256(JSON.stringify(baselineCore)) }, baselineBody = `${JSON.stringify(baselineRecord)}\n`, baselineKey = input.candidateKey.replace(/catalog-manifest\.candidate\.json$/, "baseline-0006.json"), baselineBodyChecksum = sha256(baselineBody);
       const baselineReceipt = await dependencies.immutableBaselineSink.writeOnce({key:baselineKey,body:baselineBody,contentSha256:baselineBodyChecksum});
       precondition(baselineReceipt.contentSha256 === baselineBodyChecksum && /^[1-9][0-9]{0,30}$/.test(baselineReceipt.generation));
+      baselineBinding={migrationHead:reviewedBaseline.migrationHead,catalogChecksum:reviewedBaseline.catalogChecksum,attestation:{uri:baselineReceipt.uri,generation:baselineReceipt.generation,objectSha256:baselineReceipt.contentSha256,core:baselineCore,digest:baselineRecord.digest}};
     } else {
       exactBaseline(reviewedBaseline, reviewedBaseline.catalogChecksum);
       precondition(dependencies.priorBaselineAttestation);
-      const { digest,uri,generation,...attestation } = dependencies.priorBaselineAttestation;
-      precondition(attestation.migrationHead === reviewedBaseline.migrationHead && attestation.catalogChecksum === reviewedBaseline.catalogChecksum && attestation.release === input.release && attestation.operationId===input.operationId && attestation.attestedAt===input.operationStartedAt && JSON.stringify(attestation.source) === JSON.stringify(dependencies.authoritativeSource) && /^gs:\/\//.test(uri) && /^[1-9][0-9]{0,30}$/.test(generation) && digest === sha256(JSON.stringify(attestation)));
+      const { digest,uri,generation,objectSha256,...attestation } = dependencies.priorBaselineAttestation,predecessor=dependencies.authoritativePredecessorSource,expected=dependencies.expectedPredecessorAttestation;
+      precondition(predecessor&&COMMIT.test(predecessor.commitSha)&&IMAGE.test(predecessor.imageDigest));
+      precondition(expected&&uri===expected.uri&&generation===expected.generation&&objectSha256===expected.objectSha256&&attestation.migrationHead === reviewedBaseline.migrationHead && attestation.catalogChecksum === reviewedBaseline.catalogChecksum && attestation.release === input.release && attestation.operationId===input.operationId && attestation.attestedAt===input.operationStartedAt && JSON.stringify(attestation.source) === JSON.stringify(predecessor) && /^gs:\/\//.test(uri) && /^[1-9][0-9]{0,30}$/.test(generation) && HASH.test(objectSha256) && digest === sha256(JSON.stringify(attestation)));
+      baselineBinding={migrationHead:reviewedBaseline.migrationHead,catalogChecksum:reviewedBaseline.catalogChecksum,attestation:{uri,generation,objectSha256,core:attestation,digest}};
     }
 
     await atStage("final-migration-failed",()=>applyPostgresMigrations(connection.pg, files, migrationChecksum(files)));
@@ -207,7 +213,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     const provenance = {
       database: { name: "nearyou", serverVersion: target.server_version, migrationAdmin: target.database_user },
       source: dependencies.authoritativeSource,
-      baseline: { migrationHead: reviewedBaseline.migrationHead, catalogChecksum: reviewedBaseline.catalogChecksum },
+      baseline: baselineBinding,
       migrationLedger: finalLedger,
       migrationLedgerChecksum: sha256(finalLedger.map(({id,checksum})=>`${id}:${checksum}`).join("\n")),
       identities: { controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal },
@@ -253,8 +259,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const priorCoordinates=[environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_URI,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_GENERATION,environment.NEARYOU_PRIOR_BASELINE_ATTESTATION_SHA256];
     if(priorCoordinates.some(Boolean)&&!priorCoordinates.every(Boolean))throw new Error("live catalog preparation configuration invalid");
     const priorBaselineAttestation=priorCoordinates.every(Boolean)?await fetchPriorBaselineAttestation({uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,expectedObjectSha256:priorCoordinates[2]!,accessToken}):undefined;
+    const authoritativePredecessorSource=priorBaselineAttestation?{commitSha:environment.NEARYOU_PREDECESSOR_SOURCE_COMMIT??"",imageDigest:environment.NEARYOU_PREDECESSOR_IMAGE_DIGEST??""}:undefined;
+    if(priorBaselineAttestation&&(!COMMIT.test(authoritativePredecessorSource!.commitSha)||!IMAGE.test(authoritativePredecessorSource!.imageDigest)))throw new Error("live catalog preparation configuration invalid");
     const sink=createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET, accessToken });
-    const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST }, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
+    const expectedPredecessorAttestation=priorBaselineAttestation?{uri:priorCoordinates[0]!,generation:priorCoordinates[1]!,objectSha256:priorCoordinates[2]!}:undefined;
+    const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST },authoritativePredecessorSource,expectedPredecessorAttestation, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
     process.stdout.write(`${JSON.stringify({ receipt: result.receipt, catalogChecksum: result.candidate.catalogChecksum, reviewRequired: true })}\n`);
   })().catch((error) => { process.stderr.write(`live catalog preparation failed: ${liveCatalogPreparationFailureCode(error)}\n`); process.exitCode = 1; });
 }
