@@ -123,7 +123,7 @@ export function databaseConnectionFailureCode(error: unknown) {
 }
 
 export function bootstrapMigrationFailureCode(error: unknown) {
-  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-6]_[a-z0-9_]+)/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}`:"";
+  const cause=error instanceof Error&&error.cause?error.cause:error, code=typeof cause==="object"&&cause!==null&&"code" in cause?String(cause.code):"", match=error instanceof Error?/migration execution failed:(000[1-6]_[a-z0-9_]+)(?::position-([1-9][0-9]{0,8}))?(?::routine-([a-z_]{1,80}))?/.exec(error.message):null, suffix=match?`-${match[1]!.slice(0,4)}${match[2]?`-p${match[2]}`:""}${match[3]?`-r${match[3]}`:""}`:"";
   if(code==="42501")return `bootstrap-migration-privilege${suffix}`;
   if(code==="0A000"||code==="58P01")return `bootstrap-migration-feature${suffix}`;
   if(code==="42P17"||code==="42601")return `bootstrap-migration-definition${suffix}`;
