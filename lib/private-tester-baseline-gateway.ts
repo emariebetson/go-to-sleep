@@ -122,6 +122,7 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
   const fetcher = input.fetch ?? fetch;
   const now = input.now ?? Date.now;
   return async (request: Request): Promise<Trust> => {
+    let failureStage = "authorization";
     try {
       const authorization = request.headers.get("authorization") ?? "";
       if (!authorization.startsWith("Bearer ")) throw new Error();
@@ -129,12 +130,15 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
       if (parts.length !== 3 || token.length > 16_384) throw new Error();
       const header = jwtObject(parts[0]!, ["alg", "kid", "typ"], ["alg", "kid"]);
       const claims = jwtObject(parts[1]!, ["aud", "azp", "email", "email_verified", "exp", "iat", "iss", "sub"], ["aud", "exp", "iat", "iss", "sub"]);
+      failureStage = "claims";
       const timestamp = now(), issuedAt = claims.iat, expiresAt = claims.exp;
       if (header.alg !== "RS256" || typeof header.kid !== "string" || (header.typ !== undefined && header.typ !== "JWT") || claims.iss !== input.issuer || claims.aud !== input.audience || claims.sub !== input.subject || (claims.azp !== undefined && claims.azp !== input.subject) || !Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(timestamp) || Number(issuedAt) > timestamp / 1000 + 30 || Number(expiresAt) <= timestamp / 1000 || Number(expiresAt) - Number(issuedAt) > 3_600) throw new Error();
+      failureStage = "jwks-fetch";
       const response = await fetcher(GOOGLE_JWKS, { redirect: "error", signal: AbortSignal.timeout(5_000) });
       const raw = await response.text();
       if (!response.ok || response.redirected || response.headers.get("content-type")?.split(";")[0] !== "application/json" || new TextEncoder().encode(raw).byteLength > MAX_JWKS_BYTES) throw new Error();
       const root = JSON.parse(raw) as unknown;
+      failureStage = "jwks-shape";
       if (!object(root) || Reflect.ownKeys(root).length !== 1 || !Array.isArray(root.keys) || root.keys.length < 1 || root.keys.length > 10) throw new Error();
       const keys = root.keys.map((item) => {
         if (!object(item) || JSON.stringify(Object.keys(item).sort()) !== JSON.stringify(["alg", "e", "kid", "kty", "n", "use"]) || item.kty !== "RSA" || item.alg !== "RS256" || item.use !== "sig" || item.e !== "AQAB" || typeof item.kid !== "string" || typeof item.n !== "string" || base64url(item.n).byteLength < 256) throw new Error();
@@ -143,12 +147,14 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
       if (new Set(keys.map((key) => key.kid)).size !== keys.length) throw new Error();
       const jwk = keys.find((key) => key.kid === header.kid);
       if (!jwk) throw new Error();
+      failureStage = "signature";
       const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
       const signature = base64url(parts[2]!);
       const signatureBuffer = Uint8Array.from(signature).buffer;
       if (signature.byteLength !== (key.algorithm as RsaHashedKeyAlgorithm).modulusLength / 8 || !await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signatureBuffer, new TextEncoder().encode(`${parts[0]}.${parts[1]}`))) throw new Error();
       return { issuer: input.issuer, audience: input.audience, subject: input.subject };
     } catch {
+      console.warn(`private tester service identity rejected at ${failureStage}`);
       throw new Error("private tester service identity invalid");
     }
   };
