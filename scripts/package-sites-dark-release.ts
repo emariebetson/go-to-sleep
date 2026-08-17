@@ -25,15 +25,15 @@ const FILES = Object.freeze([
   ["0014_nearlegacy_archive.sql", "864b124ebf0c215f6ab4a56619e6f8c4af964ef942467d29a8974592c2dbb5e1"],
   ["0015_platform_release_foundation.sql", "ae8dbe18672e424489b810217e3d1252fcc0880f960f1367ff2cd329c7f65f16"],
   ["0016_marketing_waitlist.sql", "d559c5b5f760d974f071d1f64d481519fb25a78b209213bf90a77090c4b987d1"],
-  ["0017_cutover_source_runtime.sql", "afd1108e856d5d14076f4f4d4026c2f204f1bd58dff952ac7db11f50f041ad92"],
-  ["0018_cutover_inventory_fence.generated.sql", "5e4a0bb6a40042d0397cefa592dfccdec1f908dfed5a95285375e3ac4603e46a"],
-  ["0019_mobile_entitlement_runtime.sql", "c54c3e2697265dc114242a561d3bdd918c75d8a635bb19d7b31e641e08835ca8"],
+  ["0017_cutover_source_runtime.sql", "2161df74e3ee4ef4e4b5ac60e1750742ff4beb7ae168983e9585b5b2c966c5fb"],
+  ["0018_cutover_inventory_fence.generated.sql", "f5309f824976f10487274a2742bcc930217908c9415b5b6ad929e4a422be102c"],
+  ["0019_mobile_entitlement_runtime.sql", "44d27949aa48d02c11828b7687daab443c9e225bdfd87a8adeae37c54791d8f1"],
   ["0020_product_release_readiness.sql", "546abbb1677b320358178d855963030259c4f74f18eea99386f750d0e9f1b719"],
   ["0021_story_rollout_telemetry.sql", "d12d8cea8688d7eadb4b72de35995ccf1b30a03e8a740cd6056fd79ba9960800"],
   ["0022_operational_outcome_outbox.sql", "d5cbdf52271e0728eb9b8849316078c66f64183efedeb94b7047bb954ec76353"],
-  ["0023_nearfamily_capacity.sql", "3ada5b98ee11c874e19640c84aa26928681cecbe6238dcc38bfbb49f73e0c149"],
-  ["0024_nearfamily_capacity_authority.sql", "2c4103a40e8b1efaaee570d76adf3343e1e9afaf01c08015701ea8771d0d6a85"],
-  ["0025_nearfamily_tenant_binding.sql", "6a17b3150830d984cb01566a02cf688af8379fa25a9b3a7a870b837f213a00ae"],
+  ["0023_nearfamily_capacity.sql", "30251bccf66675f376203d7624f4bc3d398152009b73853c2383291e0b82de21"],
+  ["0024_nearfamily_capacity_authority.sql", "2b89edfb6e76db6d8abac9477cf2f89b8ee71597c7eb845d06f1824f8876b083"],
+  ["0025_nearfamily_tenant_binding.sql", "869ae219a5a998f2e58de18c27891d97ec6dd4fe9c90d573b7d6cd9a5efb90d7"],
 ] as const);
 const DEPLOYED = FILES.slice(0, 17);
 const DEFERRED = FILES.slice(17);
