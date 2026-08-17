@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
-import { createGcsImmutableCatalogSink, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -108,6 +108,13 @@ test("maps provider failures to the exact non-sensitive preparation stage", asyn
     () => fixture({ queryFailure: /^SELECT kind::text,identity::text,definition::text/ }),
     /live catalog preparation baseline-state-invalid/,
   );
+});
+
+test("classifies database connection failures without exposing provider messages", () => {
+  assert.equal(databaseConnectionFailureCode(Object.assign(new Error("connect ETIMEDOUT 10.0.0.1"), { code: "ETIMEDOUT" })), "database-connect-network");
+  assert.equal(databaseConnectionFailureCode(Object.assign(new Error("password authentication failed for user secret"), { code: "28P01" })), "database-connect-auth");
+  assert.equal(databaseConnectionFailureCode(Object.assign(new Error("database secret does not exist"), { code: "3D000" })), "database-connect-database");
+  assert.equal(databaseConnectionFailureCode(new Error("opaque provider failure")), "database-connect-unknown");
 });
 
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {

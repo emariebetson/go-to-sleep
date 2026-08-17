@@ -110,11 +110,21 @@ function precondition(value: unknown, code = "precondition"): asserts value {
 
 async function atStage<T>(code: "database-connect-failed" | "target-authority-invalid" | "ledger-state-invalid" | "baseline-state-invalid", operation: () => Promise<T>): Promise<T> {
   try { return await operation(); }
-  catch { throw new Error(`live catalog preparation ${code}`); }
+  catch (error) { throw new Error(`live catalog preparation ${code}`, { cause: error }); }
+}
+
+export function databaseConnectionFailureCode(error: unknown) {
+  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT", "ENOTFOUND"].includes(code)) return "database-connect-network";
+  if (["28P01", "28000"].includes(code)) return "database-connect-auth";
+  if (code === "3D000") return "database-connect-database";
+  return "database-connect-unknown";
 }
 
 export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  if (message === "live catalog preparation database-connect-failed" && error instanceof Error && error.cause)
+    return databaseConnectionFailureCode(error.cause);
   for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
