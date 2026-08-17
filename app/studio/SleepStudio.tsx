@@ -5,6 +5,7 @@ import { SleepPlayer } from "@/components/SleepPlayer";
 import { SOLFEGGIO_OPTIONS, type SolfeggioFrequency } from "@/lib/frequency-layers";
 import { shouldApplyPronunciationGuess } from "@/lib/studio-pronunciation";
 import { shouldPreserveGenerationRequest } from "@/lib/studio-generation-retry";
+import { loadStudioBootstrap } from "@/lib/studio-bootstrap";
 
 type StudioData = {
   childName: string;
@@ -88,7 +89,7 @@ function formatSeconds(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
-export function SleepStudio() {
+export function SleepStudio({ initialProductionMode }: { initialProductionMode: boolean }) {
   const [step, setStep] = useState(1);
   const [data, setData] = useState<StudioData>(initialData);
   const [consented, setConsented] = useState(false);
@@ -110,7 +111,7 @@ export function SleepStudio() {
   const [savedAudioUrl, setSavedAudioUrl] = useState("");
   const [savedSessionId, setSavedSessionId] = useState("");
   const [pronunciationStatus, setPronunciationStatus] = useState("");
-  const [productionMode, setProductionMode] = useState<boolean | null>(null);
+  const [productionMode, setProductionMode] = useState<boolean | null>(initialProductionMode);
   const [onboardingAccepted, setOnboardingAccepted] = useState(false);
   const [onboardingVersion, setOnboardingVersion] = useState("");
   const [onboardingAttestation, setOnboardingAttestation] = useState("");
@@ -140,18 +141,14 @@ export function SleepStudio() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      fetch("/api/onboarding", { headers: { accept: "application/json" } }),
-      fetch("/api/v1/children", { headers: { accept: "application/json" } }),
-      fetch("/api/voices", { headers: { accept: "application/json" } }),
-    ]).then(async ([onboardingResponse, childrenResponse, voicesResponse]) => {
-      if (!onboardingResponse.ok && onboardingResponse.status !== 404) throw new Error("Production mode could not be verified.");
-      const onboarding = onboardingResponse.ok
+    loadStudioBootstrap(initialProductionMode).then(async ({ onboarding: onboardingResponse, children: childrenResponse, voices: voicesResponse }) => {
+      if (onboardingResponse && !onboardingResponse.ok && onboardingResponse.status !== 404) throw new Error("Production mode could not be verified.");
+      const onboarding = onboardingResponse?.ok
         ? await onboardingResponse.json() as { accepted?: boolean; version?: string; attestation?: string; productionMode?: boolean }
         : null;
-      const live = onboarding?.productionMode === true;
-      if (live && (!childrenResponse.ok || !voicesResponse.ok)) throw new Error("Selected-household Studio data could not be loaded.");
-      const childPayload = childrenResponse.ok ? await childrenResponse.json() as { children?: ChildProfile[] } : null;
+      const live = initialProductionMode;
+      if (live && (!childrenResponse?.ok || !voicesResponse.ok)) throw new Error("Selected-household Studio data could not be loaded.");
+      const childPayload = childrenResponse?.ok ? await childrenResponse.json() as { children?: ChildProfile[] } : null;
       const voicePayload = voicesResponse.ok ? await voicesResponse.json() as { voice?: { voiceId?: string; name: string } | null; voices?: PublicVoice[]; demoEnabled?: boolean; standardNarratorAvailable?: boolean; voiceCloneAllowed?: boolean; allowedNarrationDurations?: number[] } : null;
       if (!active) return;
       const productionDurations = (voicePayload?.allowedNarrationDurations || []).filter((duration): duration is number => SUPPORTED_DURATIONS.includes(duration as typeof SUPPORTED_DURATIONS[number]));
