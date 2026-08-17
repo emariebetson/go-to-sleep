@@ -91,6 +91,15 @@ test("fails before mutation unless database, authority, historical ledger, and r
 });
 
 test("maps provider failures to the exact non-sensitive preparation stage", async () => {
+  const migrations = await loadPostgresMigrations();
+  await assert.rejects(
+    () => prepareLiveProductionCatalog({ databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", operationId:`op_${"d".repeat(64)}`, operationStartedAt:1, candidateKey:"catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser:controllerUser, controllerPrincipal, verifierDatabaseUser:verifierUser, verifierPrincipal }, { migrations, authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`}, now:()=>1, connect:async()=>{throw new Error("opaque provider failure")}, immutableSink:{writeOnce:async()=>{throw new Error("unused")}} }),
+    /live catalog preparation database-connect-failed/,
+  );
+  await assert.rejects(
+    () => fixture({ queryFailure: /current_database\(\)/ }),
+    /live catalog preparation target-authority-invalid/,
+  );
   await assert.rejects(
     () => fixture({ queryFailure: /^SELECT id,checksum FROM nearyou\.schema_migrations/ }),
     /live catalog preparation ledger-state-invalid/,

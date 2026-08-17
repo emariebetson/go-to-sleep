@@ -108,14 +108,14 @@ function precondition(value: unknown, code = "precondition"): asserts value {
   if (!value) throw new Error(`live catalog preparation ${code}`);
 }
 
-async function atStage<T>(code: "ledger-state-invalid" | "baseline-state-invalid", operation: () => Promise<T>): Promise<T> {
+async function atStage<T>(code: "database-connect-failed" | "target-authority-invalid" | "ledger-state-invalid" | "baseline-state-invalid", operation: () => Promise<T>): Promise<T> {
   try { return await operation(); }
   catch { throw new Error(`live catalog preparation ${code}`); }
 }
 
 export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid"])
+  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
   if (/metadata token invalid/.test(message)) return "workload-token-failed";
@@ -137,12 +137,12 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   const files = dependencies.migrations ?? await loadPostgresMigrations();
   precondition(files.length === 7 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest", "migration-set-invalid");
   const historical = files.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }));
-  const connection = await dependencies.connect(input.databaseUrl);
+  const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
-    const target = (await connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean }>(
+    const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean }>(
       "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed FROM pg_roles WHERE rolname=current_user",
       [],
-    )).rows[0];
+    ))).rows[0];
     precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
