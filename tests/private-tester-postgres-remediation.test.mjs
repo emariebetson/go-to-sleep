@@ -33,6 +33,7 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
 
   const ledger = new Map(historicalMigrations);
   const executedBodies = [];
+  const ownershipStatements = [];
   const ledgerInserts = [];
   const pg = {
     transaction: async (run) => run({
@@ -47,6 +48,10 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
           return { rows: [] };
         }
         if (sql.startsWith("SELECT pg_advisory_xact_lock") || sql.startsWith("CREATE SCHEMA IF NOT EXISTS") || sql.startsWith("CREATE TABLE IF NOT EXISTS")) return { rows: [] };
+        if (/^(?:DO \$role\$|SELECT m\.admin_option|GRANT nearyou_.*_owner TO CURRENT_USER|REVOKE nearyou_.*_owner FROM CURRENT_USER)/.test(sql)) {
+          ownershipStatements.push(sql);
+          return { rows: [] };
+        }
         executedBodies.push(sql);
         return { rows: [] };
       },
@@ -57,6 +62,11 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
 
   assert.deepEqual([...ledger], [...historicalMigrations, [files[6].id, files[6].checksum]]);
   assert.deepEqual(executedBodies, [migrationBody(files[6].sql)]);
+  assert.equal(ownershipStatements.length, 12);
+  assert.match(ownershipStatements[0], /SELECT m\.admin_option,m\.inherit_option,m\.set_option/);
+  assert.match(ownershipStatements[1], /CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT/);
+  assert.match(ownershipStatements[2], /GRANT nearyou_policy_owner TO CURRENT_USER WITH ADMIN FALSE, INHERIT FALSE, SET TRUE/);
+  assert.match(ownershipStatements.at(-1), /REVOKE nearyou_policy_owner FROM CURRENT_USER/);
   assert.match(executedBodies[0], /DROP FUNCTION nearyou\.register_rollout_controller_identity\(name,text\)/);
   assert.match(executedBodies[0], /CREATE FUNCTION nearyou\.register_rollout_controller_identity\(p_database_user name,p_principal text\) RETURNS TABLE\(database_user text,principal text,effective boolean\)/);
   assert.match(executedBodies[0], /pg_has_role\(p_database_user,'nearyou_rollout_controller','USAGE'\)/);
