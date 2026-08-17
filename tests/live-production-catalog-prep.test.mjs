@@ -8,13 +8,14 @@ import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
 import { bootstrapMigrationFailureCode, createGcsImmutableCatalogSink, databaseConnectionFailureCode, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
+import { promoteLiveBaselineCatalog } from "../scripts/promote-live-baseline-catalog.ts";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const controllerUser = "nearyou-readiness-ctl@nearnight.iam.gserviceaccount.com";
 const verifierUser = "nearyou-private-tester-baseline@nearnight.iam.gserviceaccount.com";
 const controllerPrincipal = "service:nearyou-readiness-controller";
 const verifierPrincipal = "service:nearyou-private-tester-baseline-verifier";
-const catalogRows = REQUIRED_CATALOG_KINDS.map((kind, index) => ({ kind, identity: `nearyou.${kind}.${index}`, definition: `definition-${index}` }));
+const catalogRows = REQUIRED_CATALOG_KINDS.map((kind, index) => ({ kind, identity: `nearyou.${kind}.${index}`, definition: kind==="policy"?"nearyou_policy_owner|SELECT|true|":`definition-${index}` }));
 const catalogChecksum = sha256(JSON.stringify(catalogRows));
 const baseline = { version: 1, schema: "nearyou", catalogChecksum, generatedFrom: "reviewed-live-production-postgresql-16", reviewRequired: false, requiredKinds: REQUIRED_CATALOG_KINDS, requireForcedRls: ["household_members", "tenant_records"], forbidPublicExecute: true, migrationHead: "0006_private_canary_observation" };
 const retiredChecksums = [
@@ -87,6 +88,9 @@ test("pristine production database applies only reviewed 0001-0006 and stops wit
   assert.equal(candidate.reviewRequired,true);
   assert.equal(candidate.catalogChecksum,catalogChecksum);
   assert.equal(candidate.rows.length,catalogRows.length);
+  assert.equal(candidate.provenance.operationStartedAt,1);
+  assert.deepEqual(candidate.provenance.migrationLedger,migrations.slice(0,6).map(({id,checksum})=>({id,checksum})));
+  const directory=await mkdtemp(join(tmpdir(),"prepared-baseline-"));try{const candidatePath=join(directory,"catalog-manifest.baseline.candidate.json"),receiptPath=join(directory,"catalog-manifest.baseline.receipt.json"),output=join(directory,"catalog-manifest.baseline.reviewed.json"),receipt={uri:"gs://bucket/catalog/x/catalog-manifest.baseline.candidate.json",generation:"1",contentSha256:writes[0].contentSha256};await writeFile(candidatePath,writes[0].body);await writeFile(receiptPath,JSON.stringify(receipt));const reviewed=await promoteLiveBaselineCatalog({candidate:candidatePath,receipt:receiptPath,output,expectedCommitSha:"a".repeat(40),expectedImageDigest:`sha256:${"b".repeat(64)}`,expectedRelease:"rel_20260817_private_01",expectedOperationId:`op_${"d".repeat(64)}`,expectedOperationStartedAt:1,expectedDatabaseName:"nearyou",expectedDatabaseUser:"nearyou_migration_admin",expectedReceiptUri:receipt.uri,expectedReceiptGeneration:receipt.generation,expectedReceiptContentSha256:receipt.contentSha256});assert.equal(reviewed.catalogChecksum,candidate.catalogChecksum)}finally{await rm(directory,{recursive:true,force:true})}
 });
 
 test("prepares a review-required catalog from exact live PostgreSQL 16 state and records immutable provenance", async () => {

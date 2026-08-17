@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { REQUIRED_CATALOG_KINDS } from "./check-catalog-manifest";
-import { loadPostgresMigrations } from "./migrate";
+import { acceptsMigrationLedger, loadPostgresMigrations } from "./migrate";
 import { canonicalPolicyDefinition, validateCatalogRows } from "./postgres-catalog";
 
 const sha256=(value:string)=>createHash("sha256").update(value).digest("hex");
@@ -21,8 +21,8 @@ export async function promoteLiveBaselineCatalog(input:Input){
   if(candidate.catalogChecksum!==catalogChecksum||catalogChecksum==="0".repeat(64))throw invalid();
   const database=provenance.database as Record<string,unknown>|undefined,source=provenance.source as Record<string,unknown>|undefined,ledger=provenance.migrationLedger;
   if(database?.name!==input.expectedDatabaseName||database?.migrationAdmin!==input.expectedDatabaseUser||typeof database.serverVersion!=="number"||database.serverVersion<160000||database.serverVersion>=170000||source?.commitSha!==input.expectedCommitSha||source?.imageDigest!==input.expectedImageDigest||provenance.release!==input.expectedRelease||provenance.operationId!==input.expectedOperationId||provenance.operationStartedAt!==input.expectedOperationStartedAt||!Array.isArray(ledger))throw invalid();
-  const migrations=(await loadPostgresMigrations()).slice(0,6).map(({id,checksum})=>({id,checksum}));
-  if(JSON.stringify(ledger)!==JSON.stringify(migrations)||provenance.migrationLedgerChecksum!==sha256(migrations.map(row=>`${row.id}:${row.checksum}`).join("\n")))throw invalid();
+  const migrations=(await loadPostgresMigrations()).slice(0,6),actualLedger=ledger as {id:string;checksum:string}[];
+  if(!acceptsMigrationLedger(migrations,actualLedger)||provenance.migrationLedgerChecksum!==sha256(actualLedger.map(row=>`${row.id}:${row.checksum}`).join("\n")))throw invalid();
   const reviewed={version:1,schema:"nearyou",catalogChecksum,generatedFrom:"reviewed-live-production-postgresql-16",reviewRequired:false,requiredKinds:REQUIRED_CATALOG_KINDS,requireForcedRls:["household_members","tenant_records"],forbidPublicExecute:true,migrationHead:"0006_private_canary_observation"};
   await writeFile(input.output,`${JSON.stringify(reviewed)}\n`,{flag:"wx"});
   return reviewed;

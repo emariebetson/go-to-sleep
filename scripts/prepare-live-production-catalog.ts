@@ -13,7 +13,7 @@ const IMAGE = /^sha256:[a-f0-9]{64}$/;
 const OPERATION = /^op_[a-f0-9]{64}$/;
 const KEY = /^[A-Za-z0-9_./-]{10,500}catalog-manifest\.candidate\.json$/;
 const BASELINE_KEY = /^[A-Za-z0-9_./-]{10,500}baseline-0006\.json$/;
-const BASELINE_CANDIDATE_KEY = /^[A-Za-z0-9_./-]{10,500}baseline-0006\.candidate\.json$/;
+const BASELINE_CANDIDATE_KEY = /^[A-Za-z0-9_./-]{10,500}catalog-manifest\.baseline\.candidate\.json$/;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const migrationChecksum = (files: MigrationFile[]) => sha256(files.map((file) => `${file.id}:${file.checksum}`).join("\n"));
 
@@ -174,8 +174,9 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       const baselineRows = await atStage("baseline-state-invalid", () => collectLiveCatalog(connection)), baselineChecksum = sha256(JSON.stringify(baselineRows));
       if (target.pristine === true || reviewedBaseline.generatedFrom !== "reviewed-live-production-postgresql-16" || reviewedBaseline.catalogChecksum !== baselineChecksum) {
         const security = await atStage("baseline-state-invalid", () => verifyLiveCatalogSecurity(connection));
-        const baselineCandidate = { version:1,schema:"nearyou",catalogChecksum:baselineChecksum,generatedFrom:"live-production-postgresql-16",reviewRequired:true,requiredKinds:REQUIRED_CATALOG_KINDS,requireForcedRls:["household_members","tenant_records"],forbidPublicExecute:true,migrationHead:"0006_private_canary_observation",security,provenance:{database:{name:"nearyou",serverVersion:target.server_version,migrationAdmin:target.database_user},source:dependencies.authoritativeSource,release:input.release,operationId:input.operationId,capturedAt:input.operationStartedAt},rows:baselineRows };
-        const body=`${JSON.stringify(baselineCandidate,null,2)}\n`, contentSha256=sha256(body), key=input.candidateKey.replace(/catalog-manifest\.candidate\.json$/, "baseline-0006.candidate.json");
+        const acceptedLedger=liveLedger.map(({id,checksum})=>({id,checksum})),provenance={database:{name:"nearyou",serverVersion:target.server_version,migrationAdmin:target.database_user},source:dependencies.authoritativeSource,release:input.release,operationId:input.operationId,operationStartedAt:input.operationStartedAt,migrationLedger:acceptedLedger,migrationLedgerChecksum:sha256(acceptedLedger.map(row=>`${row.id}:${row.checksum}`).join("\n"))};
+        const baselineCandidate = { version:1,schema:"nearyou",catalogChecksum:baselineChecksum,generatedFrom:"live-production-postgresql-16",reviewRequired:true,requiredKinds:REQUIRED_CATALOG_KINDS,requireForcedRls:["household_members","tenant_records"],forbidPublicExecute:true,migrationHead:"0006_private_canary_observation",security,provenance,provenanceChecksum:sha256(JSON.stringify(provenance)),rows:baselineRows };
+        const body=`${JSON.stringify(baselineCandidate,null,2)}\n`, contentSha256=sha256(body), key=input.candidateKey.replace(/catalog-manifest\.candidate\.json$/, "catalog-manifest.baseline.candidate.json");
         const receipt=await dependencies.immutableSink.writeOnce({key,body,contentSha256});
         precondition(receipt.contentSha256===contentSha256,"baseline-state-invalid");
         throw new Error("live catalog preparation baseline-review-required");
