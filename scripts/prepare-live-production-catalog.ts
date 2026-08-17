@@ -161,12 +161,12 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   const historical = files.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }));
   const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
-    const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean }>(
-      "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed,to_regnamespace('nearyou') IS NULL AS pristine,EXISTS(SELECT 1 FROM pg_available_extensions WHERE name='vector') AS vector_available FROM pg_roles WHERE rolname=current_user",
+    const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean; can_set_cloudsqlsuperuser:boolean }>(
+      "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed,to_regnamespace('nearyou') IS NULL AS pristine,EXISTS(SELECT 1 FROM pg_available_extensions WHERE name='vector') AS vector_available,(rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','SET')) AS can_set_cloudsqlsuperuser FROM pg_roles WHERE rolname=current_user",
       [],
     ))).rows[0];
-    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
-    if (target.pristine === true) await atStage("bootstrap-migration-failed",()=>applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6))));
+    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && target.can_set_cloudsqlsuperuser === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
+    if (target.pristine === true) await atStage("bootstrap-migration-failed",()=>applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6)),{setLocalRole:"cloudsqlsuperuser"}));
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
     const from0006 = JSON.stringify(liveLedger) === JSON.stringify(historical), from0007 = JSON.stringify(liveLedger) === JSON.stringify(expectedLedger);

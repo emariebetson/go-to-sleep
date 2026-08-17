@@ -24,7 +24,8 @@ async function fixture(overrides = {}) {
   const events = [];
   const query = async (sql, args = []) => {
     if (overrides.queryFailure?.test(sql)) throw new Error(overrides.queryFailureMessage ?? "provider detail must not escape");
-    if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true, pristine: false, vector_available: true }] };
+    if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true, pristine: false, vector_available: true, can_set_cloudsqlsuperuser:true }] };
+    if (sql === "SET LOCAL ROLE cloudsqlsuperuser") { events.push("set-role"); return {rows:[]}; }
     if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")) return { rows: ledger };
     if (sql.startsWith("SELECT kind::text,identity::text,definition::text")) return { rows: catalogRows };
     if (sql.includes("public_execute_count")) return { rows: [{ forced_rls: ["household_members", "tenant_records"], public_execute_count: "0" }] };
@@ -64,7 +65,8 @@ async function fixture(overrides = {}) {
 test("pristine production database applies only reviewed 0001-0006 and stops with immutable live baseline candidate", async () => {
   const migrations = await loadPostgresMigrations(), ledger = [], writes = [], events = [];
   const query = async (sql, args = []) => {
-    if (sql.includes("current_database()")) return { rows: [{ database_name:"nearyou",server_version:160011,database_user:"nearyou_migration_admin",allowed:true,pristine:true,vector_available:true }] };
+    if (sql.includes("current_database()")) return { rows: [{ database_name:"nearyou",server_version:160011,database_user:"nearyou_migration_admin",allowed:true,pristine:true,vector_available:true,can_set_cloudsqlsuperuser:true }] };
+    if (sql === "SET LOCAL ROLE cloudsqlsuperuser") { events.push("set-role"); return {rows:[]}; }
     if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")) return { rows: ledger };
     if (sql.startsWith("SELECT checksum FROM nearyou.schema_migrations")) return { rows: [] };
     if (sql.startsWith("INSERT INTO nearyou.schema_migrations")) { ledger.push({id:args[0],checksum:args[1]}); events.push(`insert:${args[0]}`); return {rows:[]}; }
@@ -73,7 +75,7 @@ test("pristine production database applies only reviewed 0001-0006 and stops wit
     return {rows:[]};
   };
   await assert.rejects(() => prepareLiveProductionCatalog({databaseUrl:"postgres://admin/x",release:"rel_20260817_private_01",operationId:`op_${"d".repeat(64)}`,operationStartedAt:1,candidateKey:"catalog/x/catalog-manifest.candidate.json",controllerDatabaseUser:controllerUser,controllerPrincipal,verifierDatabaseUser:verifierUser,verifierPrincipal},{connect:async()=>({pg:{transaction:async run=>run({query})},query,close:async()=>{}}),migrations,authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`},reviewedBaseline:baseline,now:()=>1,immutableSink:{writeOnce:async entry=>{writes.push(entry);return{uri:`gs://bucket/${entry.key}`,generation:"1",contentSha256:entry.contentSha256}}}}), /baseline-review-required/);
-  assert.deepEqual(events, migrations.slice(0,6).map(file=>`insert:${file.id}`));
+  assert.deepEqual(events, ["set-role",...migrations.slice(0,6).map(file=>`insert:${file.id}`)]);
   assert.equal(writes.length,1);
   const candidate=JSON.parse(writes[0].body);
   assert.equal(candidate.migrationHead,"0006_private_canary_observation");
