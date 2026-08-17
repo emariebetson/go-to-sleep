@@ -47,7 +47,7 @@ test("catalog records the reviewed absence of NearYou role memberships",()=>{
   assert.match(LIVE_CATALOG_SECURITY_QUERY,/jsonb_agg\(c\.relname ORDER BY c\.relname\)/);
 });
 
-test("catalog policy identity binds exact C-ordered role sets",()=>{const restricted=canonicalPolicyDefinition({roles:["nearyou_policy_owner"],cmd:"SELECT",qual:"true",withCheck:null}),publicPolicy=canonicalPolicyDefinition({roles:["PUBLIC"],cmd:"SELECT",qual:"true",withCheck:null});assert.notEqual(restricted,publicPolicy);assert.equal(canonicalPolicyDefinition({roles:["nearyou_tenant","nearyou_policy_owner"],cmd:"ALL",qual:"tenant",withCheck:"tenant"}),"nearyou_policy_owner,nearyou_tenant|ALL|tenant|tenant");assert.match(LIVE_CATALOG_QUERY,/unnest\(roles\)[\s\S]*COLLATE "C"/)});
+test("catalog policy identity binds exact C-ordered role sets",()=>{const restricted=canonicalPolicyDefinition({roles:["nearyou_policy_owner"],cmd:"SELECT",qual:"true",withCheck:null}),publicPolicy=canonicalPolicyDefinition({roles:["PUBLIC"],cmd:"SELECT",qual:"true",withCheck:null});assert.notEqual(restricted,publicPolicy);assert.equal(restricted,"nearyou_policy_owner|SELECT|true|");assert.equal(canonicalPolicyDefinition({roles:["nearyou_tenant","nearyou_policy_owner"],cmd:"ALL",qual:"tenant",withCheck:"tenant"}),"nearyou_policy_owner,nearyou_tenant|ALL|tenant|tenant");assert.match(LIVE_CATALOG_QUERY,/unnest\(roles\)[\s\S]*COLLATE "C"/);assert.match(LIVE_CATALOG_QUERY,/COALESCE\(qual,''\),COALESCE\(with_check,''\)/)});
 
 test("catalog CLI reports only bounded failure classes",()=>{
   assert.equal(catalogCandidateFailureCode(new Error("catalog candidate incomplete")),"catalog-candidate-incomplete");
