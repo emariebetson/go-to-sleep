@@ -268,12 +268,15 @@ export function createPrivateTesterBaselineGateway(input: {
       return new Response("Unauthorized", { status: 401, headers: { "cache-control": "no-store" } });
     }
 
+    let evidenceFailureStage = "runtime-load";
     try {
       const url = new URL(request.url);
       const kind = url.pathname.startsWith(PREFIX) ? url.pathname.slice(PREFIX.length) : "";
       if (request.method !== "GET" || url.origin !== ORIGIN || url.search || url.hash || !KINDS.has(kind)) return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
       const loaded = await input.load();
+      evidenceFailureStage = "evidence-read";
       const body = await loaded.read(kind);
+      evidenceFailureStage = "observation";
       const observedAt = input.now();
       if (!Number.isSafeInteger(observedAt)) throw new Error("clock unavailable");
       assertWorkerRuntime(loaded.workerRuntime, loaded.release, observedAt);
@@ -288,6 +291,7 @@ export function createPrivateTesterBaselineGateway(input: {
         body,
       }, { headers: { "cache-control": "no-store" } });
     } catch {
+      console.warn(`private tester evidence unavailable at ${evidenceFailureStage}`);
       return new Response("Unavailable", { status: 503, headers: { "cache-control": "no-store" } });
     }
   };
