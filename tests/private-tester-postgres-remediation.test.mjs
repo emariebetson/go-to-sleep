@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
-import { applyPostgresMigrations, loadPostgresMigrations } from "../scripts/migrate.ts";
+import { acceptsMigrationLedger, applyPostgresMigrations, loadPostgresMigrations } from "../scripts/migrate.ts";
 import { registerRolloutController } from "../scripts/register-rollout-controller.ts";
 
 const execFile = promisify(execFileCallback);
@@ -27,8 +27,8 @@ const ledgerChecksum = (files) => sha256(files.map((file) => `${file.id}:${file.
 
 test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 without conflict", async () => {
   const files = await loadPostgresMigrations();
-  assert.notDeepEqual(files.slice(0, 3).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(0, 3));
-  assert.deepEqual(files.slice(3, 6).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(3, 6));
+  assert.notDeepEqual(files.slice(0, 4).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(0, 4));
+  assert.deepEqual(files.slice(4, 6).map(({ id, checksum }) => [id, checksum]), historicalMigrations.slice(4, 6));
   assert.equal(files[6]?.id, "0007_private_tester_deployment_manifest");
 
   const ledger = new Map(historicalMigrations);
@@ -60,7 +60,7 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
   assert.match(executedBodies[0], /DROP FUNCTION nearyou\.register_rollout_controller_identity\(name,text\)/);
   assert.match(executedBodies[0], /CREATE FUNCTION nearyou\.register_rollout_controller_identity\(p_database_user name,p_principal text\) RETURNS TABLE\(database_user text,principal text,effective boolean\)/);
   assert.match(executedBodies[0], /pg_has_role\(p_database_user,'nearyou_rollout_controller','USAGE'\)/);
-  assert.match(executedBodies[0], /ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(executedBodies[0], /rolname='nearyou_policy_owner' AND rolbypassrls[\s\S]*EXECUTE 'ALTER ROLE nearyou_policy_owner NOBYPASSRLS'/);
   assert.match(executedBodies[0], /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner USING \(true\)/);
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
@@ -77,7 +77,13 @@ test("Cloud SQL policy owners use narrow RLS policy access instead of unavailabl
   assert.match(first, /CREATE POLICY member_select ON nearyou\.household_members FOR SELECT TO nearyou_app/);
 });
 
-test("migration compatibility accepts only the three exact retired checksums", async () => {
+test("pristine Cloud SQL migrations never request superuser-only role attributes", async () => {
+  const files = await loadPostgresMigrations();
+  const pristineBootstrap = files.slice(0, 6).map(({ sql }) => sql).join("\n");
+  assert.doesNotMatch(pristineBootstrap, /\b(?:NO)?BYPASSRLS\b|\b(?:NO)?REPLICATION\b/);
+});
+
+test("migration compatibility accepts only exact retired checksums", async () => {
   const files = await loadPostgresMigrations();
   const pg = {
     transaction: async (run) => run({
@@ -90,6 +96,9 @@ test("migration compatibility accepts only the three exact retired checksums", a
     }),
   };
   await assert.rejects(() => applyPostgresMigrations(pg, files, ledgerChecksum(files)), /migration ledger conflict/);
+
+  const retiredSeventh = { ...files[6], checksum: "c08aee1dd804a49210239977c3cda3574a3142224f54f520e58ece7ffe7507e4" };
+  assert.equal(acceptsMigrationLedger(files, [...files.slice(0, 6), retiredSeventh]), false);
 });
 
 test("production evidence builds the catalog from the complete 0001 through 0007 migration set", async () => {

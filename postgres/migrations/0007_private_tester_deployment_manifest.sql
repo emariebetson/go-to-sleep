@@ -1,7 +1,7 @@
 BEGIN;
-ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
-ALTER ROLE nearyou_release_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
-ALTER ROLE nearyou_cutover_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='nearyou_policy_owner' AND rolbypassrls) THEN EXECUTE 'ALTER ROLE nearyou_policy_owner NOBYPASSRLS'; END IF; END $$;
+DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='nearyou_release_policy_owner' AND rolbypassrls) THEN EXECUTE 'ALTER ROLE nearyou_release_policy_owner NOBYPASSRLS'; END IF; END $$;
+DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='nearyou_cutover_policy_owner' AND rolbypassrls) THEN EXECUTE 'ALTER ROLE nearyou_cutover_policy_owner NOBYPASSRLS'; END IF; END $$;
 DROP POLICY member_select ON nearyou.household_members;
 CREATE POLICY member_select ON nearyou.household_members FOR SELECT TO nearyou_app USING (household_id=nearyou.current_household_id() AND nearyou.is_active_household_member(household_id));
 DROP POLICY IF EXISTS policy_owner_member_select ON nearyou.household_members;
@@ -11,7 +11,7 @@ CREATE FUNCTION nearyou.register_rollout_controller_identity(p_database_user nam
 ALTER FUNCTION nearyou.register_rollout_controller_identity(name,text) OWNER TO nearyou_release_policy_owner;
 REVOKE ALL ON FUNCTION nearyou.register_rollout_controller_identity(name,text) FROM PUBLIC,nearyou_app,nearyou_release_verifier,nearyou_rollout_controller;
 GRANT EXECUTE ON FUNCTION nearyou.register_rollout_controller_identity(name,text) TO nearyou_migration;
-CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT NOBYPASSRLS;
+CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT;
 REVOKE ALL ON SCHEMA nearyou FROM nearyou_private_tester_baseline_verifier;
 GRANT USAGE ON SCHEMA nearyou TO nearyou_private_tester_baseline_verifier;
 REVOKE ALL ON nearyou.schema_migrations FROM nearyou_rollout_controller,nearyou_private_tester_baseline_verifier;

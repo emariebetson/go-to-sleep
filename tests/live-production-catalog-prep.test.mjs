@@ -21,6 +21,7 @@ const retiredChecksums = [
   "ae9a5e8f26190063382d76eae25565a6a991523edf6ceefa1abd74b1fd88a194",
   "7ec295cb252f9d8cf54d951e899a59ddb834a1204de951a7d967eeeaf67c11f8",
   "ed449236853519c58fabbd13eca2587c515447bdff81b3a6153d9afe0436aede",
+  "481c48d0b1ca224decdf5b049325ec44c048b7dcc90572c24a66dd2d1e5301c9",
 ];
 
 async function fixture(overrides = {}) {
@@ -166,7 +167,7 @@ test("resumes exact 0007 state without replaying migration and converges registr
   assert.equal(result.candidate.migrationHead, migrations.at(-1).id);
 });
 
-test("legacy 0001-0003 ledger is remediated by 0007 and preserved exactly in provenance", async () => {
+test("legacy 0001-0004 ledger is remediated by 0007 and preserved exactly in provenance", async () => {
   const migrations = await loadPostgresMigrations();
   const legacyLedger = migrations.slice(0, 6).map(({ id, checksum }, index) => ({ id, checksum: retiredChecksums[index] ?? checksum }));
   const { result, events } = await fixture({ ledger: legacyLedger });

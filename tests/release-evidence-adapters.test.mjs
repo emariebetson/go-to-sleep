@@ -14,7 +14,8 @@ const crc32c = (text) => {
 
 const migration = readFileSync(new URL("../postgres/migrations/0002_release_evidence_trust.sql", import.meta.url), "utf8");
 test("Postgres evidence roles expose only narrow security-definer functions", () => {
-  assert.match(migration, /CREATE ROLE nearyou_release_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(migration, /CREATE ROLE nearyou_release_policy_owner NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE/);
+  assert.doesNotMatch(migration, /\b(?:NO)?BYPASSRLS\b|\b(?:NO)?REPLICATION\b/);
   assert.match(migration, /ALTER FUNCTION nearyou\.consume_evidence_nonce[\s\S]*OWNER TO nearyou_release_policy_owner/);
   assert.match(migration, /REVOKE ALL ON FUNCTION nearyou\.consume_evidence_nonce[\s\S]*FROM PUBLIC/);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION nearyou\.consume_evidence_nonce[\s\S]*TO nearyou_release_verifier/);
@@ -89,7 +90,7 @@ test("deployment manifest migration binds exact schema, identities, time, replay
   assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[^;]*TO nearyou_release_verifier/);
   assert.doesNotMatch(sql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE).*private_tester_deployment_manifest_nonces TO nearyou_release_verifier/);
   assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION nearyou\.consume_release_evidence|ALTER FUNCTION nearyou\.consume_release_evidence/);
-  assert.match(sql, /CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(sql, /CREATE ROLE nearyou_private_tester_baseline_verifier NOLOGIN NOINHERIT/);
   assert.match(sql, /GRANT USAGE ON SCHEMA nearyou TO nearyou_private_tester_baseline_verifier/);
   assert.match(sql, /GRANT SELECT ON nearyou\.schema_migrations TO nearyou_private_tester_baseline_verifier/);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_private_tester_deployment_manifest[\s\S]*TO nearyou_private_tester_baseline_verifier/);

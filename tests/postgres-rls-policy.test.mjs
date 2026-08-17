@@ -56,7 +56,7 @@ test("cutover checksum helper is policy-owned and not publicly executable", () =
 test("tenant RLS avoids recursive membership policies and grants app-scoped writes", () => {
   const memberPolicy = sql.match(/CREATE POLICY member_select[\s\S]*?;/)?.[0] || "";
   assert.match(memberPolicy, /is_active_household_member\(household_id\)/);
-  assert.match(sql, /CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(sql, /CREATE ROLE nearyou_policy_owner NOLOGIN NOINHERIT/);
   assert.match(sql, /ALTER FUNCTION nearyou\.is_active_household_member\(text\) OWNER TO nearyou_policy_owner/);
   assert.match(sql, /GRANT USAGE ON SCHEMA nearyou TO nearyou_policy_owner/);
   assert.match(sql, /GRANT SELECT ON nearyou\.household_members TO nearyou_policy_owner/);
@@ -70,12 +70,13 @@ test("tenant RLS avoids recursive membership policies and grants app-scoped writ
 
 test("application identities cannot inherit migration or bypass RLS privileges", () => {
   assert.match(sql, /CREATE ROLE nearyou_migration NOLOGIN NOINHERIT/);
-  assert.match(sql, /CREATE ROLE nearyou_app NOLOGIN NOINHERIT NOBYPASSRLS/);
-  assert.match(sql, /CREATE ROLE nearyou_billing_worker NOLOGIN NOINHERIT NOBYPASSRLS/);
-  assert.match(sql, /CREATE ROLE nearyou_job_worker NOLOGIN NOINHERIT NOBYPASSRLS/);
+  assert.match(sql, /CREATE ROLE nearyou_app NOLOGIN NOINHERIT/);
+  assert.match(sql, /CREATE ROLE nearyou_billing_worker NOLOGIN NOINHERIT/);
+  assert.match(sql, /CREATE ROLE nearyou_job_worker NOLOGIN NOINHERIT/);
   assert.doesNotMatch(sql, /GRANT nearyou_migration TO nearyou_(?:app|billing_worker|job_worker)/);
-  for (const role of ["nearyou_app", "nearyou_billing_worker", "nearyou_job_worker"]) assert.match(sql, new RegExp(`ALTER ROLE ${role} NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`));
-  assert.match(sql, /ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION/);
+  for (const role of ["nearyou_app", "nearyou_billing_worker", "nearyou_job_worker"]) assert.match(sql, new RegExp(`ALTER ROLE ${role} NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE`));
+  assert.match(sql, /ALTER ROLE nearyou_policy_owner NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE/);
+  assert.doesNotMatch(sql, /\b(?:NO)?BYPASSRLS\b|\b(?:NO)?REPLICATION\b/);
 });
 
 test("tenant transaction requires a checked-out connection and resets context before returning it", async () => {

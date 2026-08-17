@@ -19,7 +19,7 @@ ALTER FUNCTION nearyou.reject_product_audit_mutation() OWNER TO nearyou_release_
 REVOKE ALL ON FUNCTION nearyou.reject_product_audit_mutation() FROM PUBLIC;
 CREATE TRIGGER product_rollout_audit_immutable BEFORE UPDATE OR DELETE ON nearyou.product_rollout_audit FOR EACH ROW EXECUTE FUNCTION nearyou.reject_product_audit_mutation();
 REVOKE ALL ON nearyou.product_rollout_state,nearyou.product_rollout_audit,nearyou.product_canary_invites FROM PUBLIC,nearyou_app;
-CREATE ROLE nearyou_rollout_controller NOLOGIN NOINHERIT NOBYPASSRLS;
+CREATE ROLE nearyou_rollout_controller NOLOGIN NOINHERIT;
 CREATE TABLE nearyou.rollout_controller_identities(database_user name NOT NULL,principal text NOT NULL CHECK(principal~'^service:[A-Za-z0-9_-]{3,100}$'),PRIMARY KEY(database_user,principal));
 ALTER TABLE nearyou.rollout_controller_identities OWNER TO nearyou_release_policy_owner;
 REVOKE ALL ON nearyou.rollout_controller_identities FROM PUBLIC,nearyou_app,nearyou_release_verifier,nearyou_rollout_controller;
