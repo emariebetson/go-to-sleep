@@ -104,8 +104,18 @@ type Dependencies = {
   immutableBaselineSink?: { writeOnce(entry: SinkEntry): Promise<SinkReceipt> };
 };
 
-function precondition(value: unknown): asserts value {
-  if (!value) throw new Error("live catalog preparation precondition failed");
+function precondition(value: unknown, code = "precondition"): asserts value {
+  if (!value) throw new Error(`live catalog preparation ${code}`);
+}
+
+export function liveCatalogPreparationFailureCode(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "target-authority-invalid", "ledger-state-invalid"])
+    if (message === `live catalog preparation ${code}`) return code;
+  if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
+  if (/metadata token invalid/.test(message)) return "workload-token-failed";
+  if (/immutable catalog sink/.test(message)) return "storage-invalid";
+  return "preparation-failed";
 }
 
 function exactBaseline(value: ReviewedBaseline, checksum: string) {
@@ -116,11 +126,11 @@ function exactBaseline(value: ReviewedBaseline, checksum: string) {
 }
 
 export async function prepareLiveProductionCatalog(input: LiveCatalogPreparationInput, dependencies: Dependencies) {
-  precondition(/^postgres(?:ql)?:\/\//.test(input.databaseUrl) && RELEASE.test(input.release) && OPERATION.test(input.operationId) && Number.isSafeInteger(input.operationStartedAt) && input.operationStartedAt>0 && KEY.test(input.candidateKey));
-  precondition(COMMIT.test(dependencies.authoritativeSource.commitSha) && IMAGE.test(dependencies.authoritativeSource.imageDigest));
-  precondition(JSON.stringify({ controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal }) === JSON.stringify(PRODUCTION_IDENTITIES));
+  precondition(/^postgres(?:ql)?:\/\//.test(input.databaseUrl) && RELEASE.test(input.release) && OPERATION.test(input.operationId) && Number.isSafeInteger(input.operationStartedAt) && input.operationStartedAt>0 && KEY.test(input.candidateKey), "input-invalid");
+  precondition(COMMIT.test(dependencies.authoritativeSource.commitSha) && IMAGE.test(dependencies.authoritativeSource.imageDigest), "source-invalid");
+  precondition(JSON.stringify({ controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal }) === JSON.stringify(PRODUCTION_IDENTITIES), "identity-invalid");
   const files = dependencies.migrations ?? await loadPostgresMigrations();
-  precondition(files.length === 7 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest");
+  precondition(files.length === 7 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest", "migration-set-invalid");
   const historical = files.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }));
   const connection = await dependencies.connect(input.databaseUrl);
   try {
@@ -128,11 +138,11 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed FROM pg_roles WHERE rolname=current_user",
       [],
     )).rows[0];
-    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && /migration|postgres|admin/i.test(target.database_user));
+    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
     const liveLedger = (await connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", [])).rows;
     const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
     const from0006 = JSON.stringify(liveLedger) === JSON.stringify(historical), from0007 = JSON.stringify(liveLedger) === JSON.stringify(expectedLedger);
-    precondition(from0006 || from0007);
+    precondition(from0006 || from0007, "ledger-state-invalid");
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
     if (from0006) {
       const baselineRows = await collectLiveCatalog(connection), baselineChecksum = sha256(JSON.stringify(baselineRows));
@@ -210,5 +220,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const sink=createGcsImmutableCatalogSink({ bucket: environment.NEARYOU_CATALOG_EVIDENCE_BUCKET, accessToken });
     const result = await prepareLiveProductionCatalog({ databaseUrl: secret, release: options.release, operationId:options.operationId, operationStartedAt:options.operationStartedAt, candidateKey: options.candidateKey, ...PRODUCTION_IDENTITIES }, { connect: defaultConnect, authoritativeSource: { commitSha: environment.NEARYOU_DEPLOYED_SOURCE_COMMIT, imageDigest: environment.NEARYOU_DEPLOYED_IMAGE_DIGEST }, priorBaselineAttestation, now: () => options.operationStartedAt, immutableSink:sink,immutableBaselineSink:sink });
     process.stdout.write(`${JSON.stringify({ receipt: result.receipt, catalogChecksum: result.candidate.catalogChecksum, reviewRequired: true })}\n`);
-  })().catch(() => { process.stderr.write("live catalog preparation failed\n"); process.exitCode = 1; });
+  })().catch((error) => { process.stderr.write(`live catalog preparation failed: ${liveCatalogPreparationFailureCode(error)}\n`); process.exitCode = 1; });
 }

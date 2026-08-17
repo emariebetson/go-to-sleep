@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadPostgresMigrations } from "../scripts/migrate.ts";
 import { REQUIRED_CATALOG_KINDS } from "../scripts/check-catalog-manifest.ts";
-import { createGcsImmutableCatalogSink, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
+import { createGcsImmutableCatalogSink, fetchGoogleMetadataAccessToken, fetchPriorBaselineAttestation, liveCatalogPreparationFailureCode, parseLiveCatalogPreparationArgs, prepareLiveProductionCatalog } from "../scripts/prepare-live-production-catalog.ts";
 import { promoteCatalogManifest } from "../scripts/promote-catalog-manifest.ts";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -86,7 +86,7 @@ test("fails before mutation unless database, authority, historical ledger, and r
     { ledger: [] },
     { baseline: { ...baseline, migrationHead: "0007_private_tester_deployment_manifest" } },
     { baseline: { ...baseline, catalogChecksum: "f".repeat(64) } },
-  ]) await assert.rejects(() => fixture(overrides), /live catalog preparation precondition failed/);
+  ]) await assert.rejects(() => fixture(overrides), /live catalog preparation (?:target-authority-invalid|ledger-state-invalid|precondition)/);
 });
 
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {
@@ -113,9 +113,9 @@ test("first run baseline record supports byte-identical resume after a lost resp
 });
 
 test("rejects non-production, swapped, or equal identity tuples before mutation", async () => {
-  const migrations = await loadPostgresMigrations(), base = { databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", candidateKey: "catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal };
+  const migrations = await loadPostgresMigrations(), base = { databaseUrl: "postgres://admin/x", release: "rel_20260817_private_01", operationId:`op_${"d".repeat(64)}`, operationStartedAt:1, candidateKey: "catalog/x/catalog-manifest.candidate.json", controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal };
   const dependencies = { migrations, authoritativeSource: { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` }, reviewedBaseline: baseline, now: () => 1, connect: async () => { throw new Error("must not connect"); }, immutableSink: { writeOnce: async () => { throw new Error("must not write"); } } };
-  for (const input of [{ ...base, controllerDatabaseUser: verifierUser }, { ...base, verifierPrincipal: controllerPrincipal }, { ...base, verifierDatabaseUser: controllerUser }]) await assert.rejects(() => prepareLiveProductionCatalog(input, dependencies), /precondition failed/);
+  for (const input of [{ ...base, controllerDatabaseUser: verifierUser }, { ...base, verifierPrincipal: controllerPrincipal }, { ...base, verifierDatabaseUser: controllerUser }]) await assert.rejects(() => prepareLiveProductionCatalog(input, dependencies), /identity-invalid/);
 });
 
 test("promotion accepts exact live-production provenance and rejects tampering", async () => {
@@ -192,4 +192,10 @@ test("production storage access uses a bounded workload metadata token", async (
   assert.equal(request.init.headers["Metadata-Flavor"], "Google");
   assert.match(token, /^ya29\./);
   await assert.rejects(() => fetchGoogleMetadataAccessToken({ fetch: async () => new Response(JSON.stringify({ access_token: "short", expires_in: 60, token_type: "Bearer" }), { status: 200 }) }), /metadata token invalid/);
+});
+
+test("production failures expose only bounded non-secret classes", () => {
+  assert.equal(liveCatalogPreparationFailureCode(new Error("live catalog preparation target-authority-invalid")), "target-authority-invalid");
+  assert.equal(liveCatalogPreparationFailureCode(new Error("password authentication failed for user secret-value")), "database-connect-failed");
+  assert.equal(liveCatalogPreparationFailureCode(new Error("arbitrary provider detail")), "preparation-failed");
 });
