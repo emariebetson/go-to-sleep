@@ -122,7 +122,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = nearyou, pg_temp AS $$
   )
 $$;
 REVOKE ALL ON FUNCTION nearyou.is_active_household_member(text) FROM PUBLIC;
-ALTER FUNCTION nearyou.is_active_household_member(text) OWNER TO nearyou_policy_owner;
 
 CREATE FUNCTION nearyou.is_household_manager(candidate_household_id text) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = nearyou, pg_temp AS $$
@@ -135,7 +134,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = nearyou, pg_temp AS $$
   )
 $$;
 REVOKE ALL ON FUNCTION nearyou.is_household_manager(text) FROM PUBLIC;
-ALTER FUNCTION nearyou.is_household_manager(text) OWNER TO nearyou_policy_owner;
 GRANT USAGE ON SCHEMA nearyou TO nearyou_policy_owner;
 GRANT SELECT ON nearyou.household_members TO nearyou_policy_owner;
 GRANT EXECUTE ON FUNCTION nearyou.current_household_id(), nearyou.current_user_id() TO nearyou_policy_owner;
@@ -178,5 +176,8 @@ GRANT SELECT ON nearyou.households, nearyou.household_members, nearyou.tenant_re
 GRANT SELECT, INSERT, UPDATE, DELETE ON nearyou.tenant_records TO nearyou_app;
 GRANT SELECT, INSERT, UPDATE ON nearyou.mobile_entitlement_events TO nearyou_billing_worker;
 GRANT SELECT, INSERT, UPDATE ON nearyou.durable_jobs TO nearyou_job_worker;
+
+ALTER FUNCTION nearyou.is_active_household_member(text) OWNER TO nearyou_policy_owner;
+ALTER FUNCTION nearyou.is_household_manager(text) OWNER TO nearyou_policy_owner;
 
 COMMIT;
