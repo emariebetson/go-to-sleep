@@ -153,6 +153,7 @@ test("classifies bootstrap SQL failures without exposing provider messages", () 
   assert.equal(bootstrapMigrationFailureCode(new Error("secret unknown detail")),"bootstrap-migration-unknown");
   assert.equal(bootstrapMigrationFailureCode(new Error("migration execution failed:0001_nearyou_tenant_foundation",{cause:Object.assign(new Error("secret role detail"),{code:"42501"})})),"bootstrap-migration-privilege-0001");
   assert.equal(bootstrapMigrationFailureCode(new Error("migration execution failed:0001_nearyou_tenant_foundation:position-123:routine-have_createrole_privilege",{cause:Object.assign(new Error("secret role detail"),{code:"42501"})})),"bootstrap-migration-privilege-0001-p123-rhave_createrole_privilege");
+  assert.equal(bootstrapMigrationFailureCode(new Error("migration execution failed:0001_nearyou_tenant_foundation:step-extension_vector",{cause:Object.assign(new Error("secret extension detail"),{code:"42501"})})),"bootstrap-migration-privilege-0001-sextension_vector");
 });
 
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {
