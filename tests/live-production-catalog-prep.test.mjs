@@ -23,6 +23,7 @@ async function fixture(overrides = {}) {
   const ledger = (overrides.ledger ?? migrations.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }))).map((row) => ({ ...row }));
   const events = [];
   const query = async (sql, args = []) => {
+    if (overrides.queryFailure?.test(sql)) throw new Error(overrides.queryFailureMessage ?? "provider detail must not escape");
     if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true }] };
     if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")) return { rows: ledger };
     if (sql.startsWith("SELECT kind::text,identity::text,definition::text")) return { rows: catalogRows };
@@ -87,6 +88,17 @@ test("fails before mutation unless database, authority, historical ledger, and r
     { baseline: { ...baseline, migrationHead: "0007_private_tester_deployment_manifest" } },
     { baseline: { ...baseline, catalogChecksum: "f".repeat(64) } },
   ]) await assert.rejects(() => fixture(overrides), /live catalog preparation (?:target-authority-invalid|ledger-state-invalid|precondition)/);
+});
+
+test("maps provider failures to the exact non-sensitive preparation stage", async () => {
+  await assert.rejects(
+    () => fixture({ queryFailure: /^SELECT id,checksum FROM nearyou\.schema_migrations/ }),
+    /live catalog preparation ledger-state-invalid/,
+  );
+  await assert.rejects(
+    () => fixture({ queryFailure: /^SELECT kind::text,identity::text,definition::text/ }),
+    /live catalog preparation baseline-state-invalid/,
+  );
 });
 
 test("fails closed when the immutable sink does not attest the exact bytes", async () => {

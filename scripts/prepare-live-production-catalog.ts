@@ -108,9 +108,14 @@ function precondition(value: unknown, code = "precondition"): asserts value {
   if (!value) throw new Error(`live catalog preparation ${code}`);
 }
 
+async function atStage<T>(code: "ledger-state-invalid" | "baseline-state-invalid", operation: () => Promise<T>): Promise<T> {
+  try { return await operation(); }
+  catch { throw new Error(`live catalog preparation ${code}`); }
+}
+
 export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "target-authority-invalid", "ledger-state-invalid"])
+  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
   if (/metadata token invalid/.test(message)) return "workload-token-failed";
@@ -139,13 +144,13 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       [],
     )).rows[0];
     precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
-    const liveLedger = (await connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", [])).rows;
+    const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
     const from0006 = JSON.stringify(liveLedger) === JSON.stringify(historical), from0007 = JSON.stringify(liveLedger) === JSON.stringify(expectedLedger);
     precondition(from0006 || from0007, "ledger-state-invalid");
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
     if (from0006) {
-      const baselineRows = await collectLiveCatalog(connection), baselineChecksum = sha256(JSON.stringify(baselineRows));
+      const baselineRows = await atStage("baseline-state-invalid", () => collectLiveCatalog(connection)), baselineChecksum = sha256(JSON.stringify(baselineRows));
       exactBaseline(reviewedBaseline, baselineChecksum);
       precondition(dependencies.immutableBaselineSink);
       const baselineCore = { migrationHead:reviewedBaseline.migrationHead,catalogChecksum:reviewedBaseline.catalogChecksum,release:input.release,source:dependencies.authoritativeSource,attestedAt:input.operationStartedAt,operationId:input.operationId }, baselineRecord = { ...baselineCore,digest:sha256(JSON.stringify(baselineCore)) }, baselineBody = `${JSON.stringify(baselineRecord)}\n`, baselineKey = input.candidateKey.replace(/catalog-manifest\.candidate\.json$/, "baseline-0006.json"), baselineBodyChecksum = sha256(baselineBody);
