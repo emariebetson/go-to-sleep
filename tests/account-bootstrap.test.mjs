@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { AccountBootstrapError, accountBootstrapCauseClassName, runAccountBootstrap } from "../lib/account-bootstrap.ts";
 
@@ -63,4 +65,12 @@ test("a bootstrap failure reports the failing stage without account data", async
 test("bootstrap diagnostics use cause class names for non-Error failures", () => {
   assert.equal(accountBootstrapCauseClassName(new TypeError("database detail")), "TypeError");
   assert.equal(accountBootstrapCauseClassName("database detail"), "String");
+});
+
+test("a first-recording bootstrap failure emits only its safe stage diagnostic", () => {
+  const hooks = fileURLToPath(new URL("./fixtures/cloudflare-test-hooks.mjs", import.meta.url));
+  const runner = fileURLToPath(new URL("./fixtures/account-bootstrap-logging-runner.mjs", import.meta.url));
+  assert.doesNotThrow(() => execFileSync(process.execPath, ["--import", "tsx", "--import", hooks, runner], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8", stdio: "pipe", timeout: 30_000,
+  }));
 });

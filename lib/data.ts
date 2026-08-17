@@ -74,6 +74,7 @@ export async function ensureUser(user: AppUser) {
   } catch (error) {
     if (error instanceof AccountBootstrapError) {
       console.error(JSON.stringify({ stage: error.stage, cause: accountBootstrapCauseClassName(error.cause) }));
+      throw new AccountBootstrapError(error.stage, undefined);
     }
     throw error;
   }

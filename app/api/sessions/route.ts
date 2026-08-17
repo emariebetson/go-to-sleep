@@ -3,6 +3,7 @@ import { and, eq, gt, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { childProfiles, children, sleepSessions, usageEvents, users, voiceConsents, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
+import { AccountBootstrapError } from "@/lib/account-bootstrap";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
 import { validateSessionInput } from "@/lib/sleep-session";
@@ -246,7 +247,7 @@ export async function POST(request: Request) {
     if (storedAudioKey) {
       try { await (env as unknown as RuntimeEnv).AUDIO?.delete(storedAudioKey); } catch { /* orphan cleanup is reconciled operationally */ }
     }
-    console.error("Session generation failed", sessionId, error);
+    if (!(error instanceof AccountBootstrapError)) console.error("Session generation failed", sessionId, error);
     return jsonNoStore({ error: "The bedtime could not be generated." }, { status: 500 });
   }
 }
