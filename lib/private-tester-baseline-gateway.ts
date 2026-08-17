@@ -117,6 +117,18 @@ function jwtObject(value: string, allowed: readonly string[], required: readonly
   return parsed;
 }
 
+async function fetchWithin(fetcher: typeof fetch, resource: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fetcher(resource, init),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("request timed out")), timeoutMs); }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?: typeof fetch; now?: () => number }) {
   if (input.issuer !== GOOGLE_ISSUER || input.audience !== GOOGLE_ORIGIN || !/^[1-9][0-9]{10,30}$/.test(input.subject)) configurationError();
   const fetcher = input.fetch ?? fetch;
@@ -134,7 +146,7 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
       const timestamp = now(), issuedAt = claims.iat, expiresAt = claims.exp;
       if (header.alg !== "RS256" || typeof header.kid !== "string" || (header.typ !== undefined && header.typ !== "JWT") || claims.iss !== input.issuer || claims.aud !== input.audience || claims.sub !== input.subject || (claims.azp !== undefined && claims.azp !== input.subject) || !Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(timestamp) || Number(issuedAt) > timestamp / 1000 + 30 || Number(expiresAt) <= timestamp / 1000 || Number(expiresAt) - Number(issuedAt) > 3_600) throw new Error();
       failureStage = "jwks-fetch";
-      const response = await fetcher(GOOGLE_JWKS, { redirect: "error", signal: AbortSignal.timeout(5_000) });
+      const response = await fetchWithin(fetcher, GOOGLE_JWKS, { redirect: "error" }, 5_000);
       const raw = await response.text();
       if (!response.ok || response.redirected || response.headers.get("content-type")?.split(";")[0] !== "application/json" || new TextEncoder().encode(raw).byteLength > MAX_JWKS_BYTES) throw new Error();
       const root = JSON.parse(raw) as unknown;
@@ -216,7 +228,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     const state = crypto.randomUUID();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     for (const [key, value] of [["client_id", GOOGLE_CLIENT_ID], ["redirect_uri", GOOGLE_REDIRECT], ["response_type", "code"], ["scope", "openid email profile"], ["state", state], ["nonce", state], ["prompt", "none"]]) url.searchParams.set(key, value);
-    const response = await fetcher(url, { redirect: "manual", signal: AbortSignal.timeout(5_000) });
+    const response = await fetchWithin(fetcher, url, { redirect: "manual" }, 5_000);
     const location = response.headers.get("location");
     let returned: URL;
     try { returned = new URL(location ?? ""); } catch { throw new Error("private tester gateway evidence unavailable"); }
