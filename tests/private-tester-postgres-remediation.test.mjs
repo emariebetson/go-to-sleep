@@ -66,6 +66,7 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0007 wi
   assert.match(ownershipStatements[0], /SELECT m\.admin_option,m\.inherit_option,m\.set_option/);
   assert.match(ownershipStatements[1], /CREATE ROLE nearyou_app NOLOGIN NOINHERIT/);
   assert.match(ownershipStatements[2], /GRANT nearyou_app TO CURRENT_USER WITH ADMIN FALSE, INHERIT FALSE, SET TRUE/);
+  assert.equal(ownershipStatements.some(sql => /GRANT nearyou_policy_owner TO CURRENT_USER WITH ADMIN FALSE, INHERIT TRUE, SET TRUE/.test(sql)), true);
   assert.equal(ownershipStatements.some(sql => /CREATE ROLE nearyou_(?:rollout_controller|private_tester_baseline_verifier)/.test(sql)), false);
   assert.equal(ownershipStatements.some(sql => /REVOKE nearyou_private_tester_baseline_verifier FROM CURRENT_USER/.test(sql)), true);
   assert.match(ownershipStatements.at(-1), /REVOKE nearyou_app FROM CURRENT_USER/);
