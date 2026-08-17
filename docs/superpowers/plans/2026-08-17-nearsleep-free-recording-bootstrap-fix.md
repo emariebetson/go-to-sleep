@@ -165,4 +165,3 @@ Expected: type-check, build, and all repository tests pass.
 git add lib/account-bootstrap.ts lib/data.ts tests/account-bootstrap.test.mjs
 git commit -m "fix: avoid redundant account bootstrap writes"
 ```
-
