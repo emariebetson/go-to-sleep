@@ -13,6 +13,7 @@ const IMAGE = /^sha256:[a-f0-9]{64}$/;
 const OPERATION = /^op_[a-f0-9]{64}$/;
 const KEY = /^[A-Za-z0-9_./-]{10,500}catalog-manifest\.candidate\.json$/;
 const BASELINE_KEY = /^[A-Za-z0-9_./-]{10,500}baseline-0006\.json$/;
+const BASELINE_CANDIDATE_KEY = /^[A-Za-z0-9_./-]{10,500}baseline-0006\.candidate\.json$/;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const migrationChecksum = (files: MigrationFile[]) => sha256(files.map((file) => `${file.id}:${file.checksum}`).join("\n"));
 
@@ -43,7 +44,7 @@ export function createGcsImmutableCatalogSink(input: { bucket: string; accessTok
   if (!/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(input.bucket) || !/^[A-Za-z0-9._-]{20,4096}$/.test(input.accessToken)) throw new Error("immutable catalog sink configuration invalid");
   const request = input.fetch ?? fetch;
   return { writeOnce: async (entry: SinkEntry): Promise<SinkReceipt> => {
-    if (!(KEY.test(entry.key) || BASELINE_KEY.test(entry.key)) || !HASH.test(entry.contentSha256) || sha256(entry.body) !== entry.contentSha256) throw new Error("immutable catalog sink failed");
+    if (!(KEY.test(entry.key) || BASELINE_KEY.test(entry.key) || BASELINE_CANDIDATE_KEY.test(entry.key)) || !HASH.test(entry.contentSha256) || sha256(entry.body) !== entry.contentSha256) throw new Error("immutable catalog sink failed");
     const boundary = `nearyou-${crypto.randomUUID()}`;
     const metadata = JSON.stringify({ name: entry.key, metadata: { contentSha256: entry.contentSha256 } });
     const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${entry.body}\r\n--${boundary}--`;
@@ -125,7 +126,7 @@ export function liveCatalogPreparationFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (message === "live catalog preparation database-connect-failed" && error instanceof Error && error.cause)
     return databaseConnectionFailureCode(error.cause);
-  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid"])
+  for (const code of ["input-invalid", "source-invalid", "identity-invalid", "migration-set-invalid", "database-connect-failed", "target-authority-invalid", "ledger-state-invalid", "baseline-state-invalid", "baseline-review-required"])
     if (message === `live catalog preparation ${code}`) return code;
   if (/connect|ECONN|timeout|ENOTFOUND|password authentication/i.test(message)) return "database-connect-failed";
   if (/metadata token invalid/.test(message)) return "workload-token-failed";
@@ -134,7 +135,7 @@ export function liveCatalogPreparationFailureCode(error: unknown) {
 }
 
 function exactBaseline(value: ReviewedBaseline, checksum: string) {
-  precondition(value.version === 1 && value.schema === "nearyou" && value.generatedFrom === "reviewed-supported-postgresql-16" && value.reviewRequired !== true);
+  precondition(value.version === 1 && value.schema === "nearyou" && value.generatedFrom === "reviewed-live-production-postgresql-16" && value.reviewRequired !== true);
   precondition(value.migrationHead === "0006_private_canary_observation" && value.catalogChecksum === checksum && HASH.test(value.catalogChecksum));
   precondition(JSON.stringify(value.requiredKinds) === JSON.stringify(REQUIRED_CATALOG_KINDS));
   precondition(JSON.stringify(value.requireForcedRls) === JSON.stringify(["household_members", "tenant_records"]) && value.forbidPublicExecute === true);
@@ -149,11 +150,12 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   const historical = files.slice(0, 6).map(({ id, checksum }) => ({ id, checksum }));
   const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
-    const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean }>(
-      "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed FROM pg_roles WHERE rolname=current_user",
+    const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean }>(
+      "SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user,(rolcreaterole AND (rolsuper OR pg_has_role(current_user,'cloudsqlsuperuser','USAGE'))) AS allowed,to_regnamespace('nearyou') IS NULL AS pristine,EXISTS(SELECT 1 FROM pg_available_extensions WHERE name='vector') AS vector_available FROM pg_roles WHERE rolname=current_user",
       [],
     ))).rows[0];
-    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
+    precondition(target?.database_name === "nearyou" && target.server_version >= 160000 && target.server_version < 170000 && target.allowed === true && target.vector_available === true && /migration|postgres|admin/i.test(target.database_user), "target-authority-invalid");
+    if (target.pristine === true) await applyPostgresMigrations(connection.pg, files.slice(0,6), migrationChecksum(files.slice(0,6)));
     const liveLedger = (await atStage("ledger-state-invalid", () => connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     const expectedLedger = files.map(({ id, checksum }) => ({ id, checksum }));
     const from0006 = JSON.stringify(liveLedger) === JSON.stringify(historical), from0007 = JSON.stringify(liveLedger) === JSON.stringify(expectedLedger);
@@ -161,6 +163,14 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     const reviewedBaseline = dependencies.reviewedBaseline ?? JSON.parse(await readFile(new URL("../postgres/catalog-manifest.json", import.meta.url), "utf8")) as ReviewedBaseline;
     if (from0006) {
       const baselineRows = await atStage("baseline-state-invalid", () => collectLiveCatalog(connection)), baselineChecksum = sha256(JSON.stringify(baselineRows));
+      if (target.pristine === true || reviewedBaseline.generatedFrom !== "reviewed-live-production-postgresql-16" || reviewedBaseline.catalogChecksum !== baselineChecksum) {
+        const security = await atStage("baseline-state-invalid", () => verifyLiveCatalogSecurity(connection));
+        const baselineCandidate = { version:1,schema:"nearyou",catalogChecksum:baselineChecksum,generatedFrom:"live-production-postgresql-16",reviewRequired:true,requiredKinds:REQUIRED_CATALOG_KINDS,requireForcedRls:["household_members","tenant_records"],forbidPublicExecute:true,migrationHead:"0006_private_canary_observation",security,provenance:{database:{name:"nearyou",serverVersion:target.server_version,migrationAdmin:target.database_user},source:dependencies.authoritativeSource,release:input.release,operationId:input.operationId,capturedAt:input.operationStartedAt},rows:baselineRows };
+        const body=`${JSON.stringify(baselineCandidate,null,2)}\n`, contentSha256=sha256(body), key=input.candidateKey.replace(/catalog-manifest\.candidate\.json$/, "baseline-0006.candidate.json");
+        const receipt=await dependencies.immutableSink.writeOnce({key,body,contentSha256});
+        precondition(receipt.contentSha256===contentSha256,"baseline-state-invalid");
+        throw new Error("live catalog preparation baseline-review-required");
+      }
       exactBaseline(reviewedBaseline, baselineChecksum);
       precondition(dependencies.immutableBaselineSink);
       const baselineCore = { migrationHead:reviewedBaseline.migrationHead,catalogChecksum:reviewedBaseline.catalogChecksum,release:input.release,source:dependencies.authoritativeSource,attestedAt:input.operationStartedAt,operationId:input.operationId }, baselineRecord = { ...baselineCore,digest:sha256(JSON.stringify(baselineCore)) }, baselineBody = `${JSON.stringify(baselineRecord)}\n`, baselineKey = input.candidateKey.replace(/catalog-manifest\.candidate\.json$/, "baseline-0006.json"), baselineBodyChecksum = sha256(baselineBody);

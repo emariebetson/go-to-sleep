@@ -16,7 +16,7 @@ const controllerPrincipal = "service:nearyou-readiness-controller";
 const verifierPrincipal = "service:nearyou-private-tester-baseline-verifier";
 const catalogRows = REQUIRED_CATALOG_KINDS.map((kind, index) => ({ kind, identity: `nearyou.${kind}.${index}`, definition: `definition-${index}` }));
 const catalogChecksum = sha256(JSON.stringify(catalogRows));
-const baseline = { version: 1, schema: "nearyou", catalogChecksum, generatedFrom: "reviewed-supported-postgresql-16", reviewRequired: false, requiredKinds: REQUIRED_CATALOG_KINDS, requireForcedRls: ["household_members", "tenant_records"], forbidPublicExecute: true, migrationHead: "0006_private_canary_observation" };
+const baseline = { version: 1, schema: "nearyou", catalogChecksum, generatedFrom: "reviewed-live-production-postgresql-16", reviewRequired: false, requiredKinds: REQUIRED_CATALOG_KINDS, requireForcedRls: ["household_members", "tenant_records"], forbidPublicExecute: true, migrationHead: "0006_private_canary_observation" };
 
 async function fixture(overrides = {}) {
   const migrations = await loadPostgresMigrations();
@@ -24,7 +24,7 @@ async function fixture(overrides = {}) {
   const events = [];
   const query = async (sql, args = []) => {
     if (overrides.queryFailure?.test(sql)) throw new Error(overrides.queryFailureMessage ?? "provider detail must not escape");
-    if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true }] };
+    if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true, pristine: false, vector_available: true }] };
     if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")) return { rows: ledger };
     if (sql.startsWith("SELECT kind::text,identity::text,definition::text")) return { rows: catalogRows };
     if (sql.includes("public_execute_count")) return { rows: [{ forced_rls: ["household_members", "tenant_records"], public_execute_count: "0" }] };
@@ -61,6 +61,28 @@ async function fixture(overrides = {}) {
   return { result, writes, baselineWrites, events, migrations };
 }
 
+test("pristine production database applies only reviewed 0001-0006 and stops with immutable live baseline candidate", async () => {
+  const migrations = await loadPostgresMigrations(), ledger = [], writes = [], events = [];
+  const query = async (sql, args = []) => {
+    if (sql.includes("current_database()")) return { rows: [{ database_name:"nearyou",server_version:160011,database_user:"nearyou_migration_admin",allowed:true,pristine:true,vector_available:true }] };
+    if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")) return { rows: ledger };
+    if (sql.startsWith("SELECT checksum FROM nearyou.schema_migrations")) return { rows: [] };
+    if (sql.startsWith("INSERT INTO nearyou.schema_migrations")) { ledger.push({id:args[0],checksum:args[1]}); events.push(`insert:${args[0]}`); return {rows:[]}; }
+    if (sql.startsWith("SELECT kind::text,identity::text,definition::text")) return {rows:catalogRows};
+    if (sql.includes("public_execute_count")) return {rows:[{forced_rls:["household_members","tenant_records"],public_execute_count:"0"}]};
+    return {rows:[]};
+  };
+  await assert.rejects(() => prepareLiveProductionCatalog({databaseUrl:"postgres://admin/x",release:"rel_20260817_private_01",operationId:`op_${"d".repeat(64)}`,operationStartedAt:1,candidateKey:"catalog/x/catalog-manifest.candidate.json",controllerDatabaseUser:controllerUser,controllerPrincipal,verifierDatabaseUser:verifierUser,verifierPrincipal},{connect:async()=>({pg:{transaction:async run=>run({query})},query,close:async()=>{}}),migrations,authoritativeSource:{commitSha:"a".repeat(40),imageDigest:`sha256:${"b".repeat(64)}`},reviewedBaseline:baseline,now:()=>1,immutableSink:{writeOnce:async entry=>{writes.push(entry);return{uri:`gs://bucket/${entry.key}`,generation:"1",contentSha256:entry.contentSha256}}}}), /baseline-review-required/);
+  assert.deepEqual(events, migrations.slice(0,6).map(file=>`insert:${file.id}`));
+  assert.equal(writes.length,1);
+  const candidate=JSON.parse(writes[0].body);
+  assert.equal(candidate.migrationHead,"0006_private_canary_observation");
+  assert.equal(candidate.generatedFrom,"live-production-postgresql-16");
+  assert.equal(candidate.reviewRequired,true);
+  assert.equal(candidate.catalogChecksum,catalogChecksum);
+  assert.equal(candidate.rows.length,catalogRows.length);
+});
+
 test("prepares a review-required catalog from exact live PostgreSQL 16 state and records immutable provenance", async () => {
   const { result, writes, events, migrations } = await fixture();
   assert.equal(result.candidate.generatedFrom, "live-production-postgresql-16");
@@ -87,7 +109,7 @@ test("fails before mutation unless database, authority, historical ledger, and r
     { ledger: [] },
     { baseline: { ...baseline, migrationHead: "0007_private_tester_deployment_manifest" } },
     { baseline: { ...baseline, catalogChecksum: "f".repeat(64) } },
-  ]) await assert.rejects(() => fixture(overrides), /live catalog preparation (?:target-authority-invalid|ledger-state-invalid|precondition)/);
+  ]) await assert.rejects(() => fixture(overrides), /live catalog preparation (?:target-authority-invalid|ledger-state-invalid|precondition|baseline-review-required)/);
 });
 
 test("maps provider failures to the exact non-sensitive preparation stage", async () => {
