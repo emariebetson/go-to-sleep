@@ -46,7 +46,7 @@ test("official Sites archive contains the exact 0000 through 0016 byte-identical
     const result = await packageDarkSitesRelease({
       root: new URL("../", import.meta.url),
       archive,
-      officialHelper: "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+      officialHelper: "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.37/scripts/package-site.sh",
     });
     assert.equal(result.deployedMigrations.length, 17);
     assert.equal(result.deferredMigrations.length, 9);
@@ -62,10 +62,13 @@ test("existing-schema Sites archive contains no migration payload and retains th
     const result = await packageExistingSitesRelease({
       root: new URL("../", import.meta.url),
       archive,
-      officialHelper: "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+      commitSha: "a".repeat(40),
+      officialHelper: "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.37/scripts/package-site.sh",
     });
     assert.equal(result.requiredSchemaHead, "0016_marketing_waitlist.sql");
     assert.equal(result.packagedMigrations.length, 0);
+    assert.equal(result.buildIdentity.commitSha, "a".repeat(40));
+    assert.equal(result.buildIdentity.buildId, (await readFile(new URL("../dist/server/BUILD_ID", import.meta.url), "utf8")).trim());
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -81,7 +84,8 @@ test("production CLI requires existing-schema mode and emits an archive without 
       new URL("../scripts/package-sites-dark-release.ts", import.meta.url).pathname,
       "--mode", "existing-schema",
       "--archive", archive,
-      "--helper", "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+      "--commit-sha", "a".repeat(40),
+      "--helper", "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.37/scripts/package-site.sh",
     ]);
     const { stdout } = await execFile("tar", ["-tzf", archive]);
     assert.match(stdout, /^dist\/server\/index\.js$/m);
@@ -90,7 +94,8 @@ test("production CLI requires existing-schema mode and emits an archive without 
       "--import", "tsx",
       new URL("../scripts/package-sites-dark-release.ts", import.meta.url).pathname,
       "--archive", archive,
-      "--helper", "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.34/scripts/package-site.sh",
+      "--commit-sha", "a".repeat(40),
+      "--helper", "/Users/elizabethbetson/.codex/plugins/cache/openai-bundled/sites/0.1.37/scripts/package-site.sh",
     ]));
   } finally {
     await rm(temp, { recursive: true, force: true });
