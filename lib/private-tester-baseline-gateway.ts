@@ -9,6 +9,7 @@ const KINDS = new Set([
   "d1-schema",
   "d1-convergence-ledger",
   "d1-convergence-schema",
+  "d1-convergence-shape",
   "d1-source-fingerprint",
   "d1-source-manifest",
   "gates",
@@ -75,6 +76,21 @@ const D1_MIGRATIONS = Object.freeze([
   "0015_platform_release_foundation",
   "0016_marketing_waitlist",
 ]);
+const D1_CONVERGENCE_TABLES = Object.freeze([
+  "auth_sessions", "auth_verifications", "child_profiles", "children", "contributors", "entitlements",
+  "household_invitations", "household_members", "households", "jobs", "marketing_waitlist_contacts",
+  "marketing_waitlist_interests", "marketing_waitlist_sync", "media_assets", "oauth_accounts", "playlist_items",
+  "playlists", "sleep_sessions", "stripe_events", "usage_events", "usage_ledger", "users", "voice_consents", "voices",
+]);
+const D1_CONVERGENCE_TABLE_SQL = D1_CONVERGENCE_TABLES.map((name) => `'${name}'`).join(",");
+const D1_CONVERGENCE_SHAPE_QUERIES = Object.freeze({
+  table_xinfo: `/* table_xinfo */ SELECT m.name AS "tableName",p.cid AS cid,p.name AS name,p.type AS type,p."notnull" AS "notNull",p.dflt_value AS "defaultValue",p.pk AS "primaryKey",p.hidden AS hidden FROM sqlite_schema AS m JOIN pragma_table_xinfo(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.cid`,
+  foreign_key_list: `/* foreign_key_list */ SELECT m.name AS "tableName",p.id AS id,p.seq AS seq,p."table" AS "parentTable",p."from" AS "fromColumn",p."to" AS "toColumn",p.on_update AS "onUpdate",p.on_delete AS "onDelete",p.match AS match FROM sqlite_schema AS m JOIN pragma_foreign_key_list(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.id,p.seq`,
+  index_list: `/* index_list */ SELECT m.name AS "tableName",p.seq AS seq,p.name AS name,p."unique" AS "unique",p.origin AS origin,p.partial AS partial FROM sqlite_schema AS m JOIN pragma_index_list(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.seq,p.name`,
+  index_xinfo: `/* index_xinfo */ SELECT m.name AS "indexName",p.seqno AS seqno,p.cid AS cid,p.name AS name,p.desc AS desc,p.coll AS coll,p."key" AS "key" FROM sqlite_schema AS m JOIN pragma_index_xinfo(m.name) AS p WHERE m.type='index' AND m.tbl_name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.seqno`,
+  row_counts: `/* row_counts */ ${D1_CONVERGENCE_TABLES.map((name) => `SELECT '${name}' AS "tableName",COUNT(*) AS "rowCount" FROM "${name}"`).join(" UNION ALL ")}`,
+  foreign_key_check: "/* foreign_key_check */ SELECT \"table\" AS \"tableName\",rowid AS \"rowId\",parent AS \"parentTable\",fkid AS \"fkId\" FROM pragma_foreign_key_check LIMIT 101",
+});
 
 function configurationError(): never { throw new Error("private tester gateway configuration invalid"); }
 function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
@@ -275,6 +291,27 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     });
     return { providerMigrationRows };
   };
+  const d1ConvergenceShape = async () => {
+    const read = async (key: keyof typeof D1_CONVERGENCE_SHAPE_QUERIES, maximum: number) => {
+      const result = await db.prepare(D1_CONVERGENCE_SHAPE_QUERIES[key]).all();
+      if (!Array.isArray(result.results) || result.results.length > maximum) throw new Error("private tester gateway evidence unavailable");
+      return result.results;
+    };
+    const [tables, foreignKeys, indexes, indexColumns, rowCounts, foreignKeyViolations] = await Promise.all([
+      read("table_xinfo", 1_000), read("foreign_key_list", 1_000), read("index_list", 1_000),
+      read("index_xinfo", 2_000), read("row_counts", D1_CONVERGENCE_TABLES.length), read("foreign_key_check", 101),
+    ]);
+    const exact = (row: unknown, keys: readonly string[]) => object(row) && JSON.stringify(Reflect.ownKeys(row).sort()) === JSON.stringify([...keys].sort());
+    const identifier = (value: unknown) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value);
+    const integer = (value: unknown, minimum = 0) => Number.isSafeInteger(value) && Number(value) >= minimum;
+    if (tables.length < D1_CONVERGENCE_TABLES.length || tables.some((row) => !exact(row, ["tableName", "cid", "name", "type", "notNull", "defaultValue", "primaryKey", "hidden"]) || !D1_CONVERGENCE_TABLES.includes(String((row as Record<string, unknown>).tableName)) || !integer((row as Record<string, unknown>).cid) || !identifier((row as Record<string, unknown>).name) || typeof (row as Record<string, unknown>).type !== "string" || String((row as Record<string, unknown>).type).length > 64 || ![0, 1].includes(Number((row as Record<string, unknown>).notNull)) || ![0, 1].includes(Number((row as Record<string, unknown>).primaryKey)) || ![0, 1, 2, 3].includes(Number((row as Record<string, unknown>).hidden)) || ((row as Record<string, unknown>).defaultValue !== null && !diagnosticText((row as Record<string, unknown>).defaultValue)))) throw new Error("private tester gateway evidence unavailable");
+    if (foreignKeys.some((row) => !exact(row, ["tableName", "id", "seq", "parentTable", "fromColumn", "toColumn", "onUpdate", "onDelete", "match"]) || !D1_CONVERGENCE_TABLES.includes(String((row as Record<string, unknown>).tableName)) || !integer((row as Record<string, unknown>).id) || !integer((row as Record<string, unknown>).seq) || !identifier((row as Record<string, unknown>).parentTable) || !identifier((row as Record<string, unknown>).fromColumn) || ((row as Record<string, unknown>).toColumn !== null && !identifier((row as Record<string, unknown>).toColumn)) || !["NO ACTION", "RESTRICT", "SET NULL", "SET DEFAULT", "CASCADE"].includes(String((row as Record<string, unknown>).onUpdate)) || !["NO ACTION", "RESTRICT", "SET NULL", "SET DEFAULT", "CASCADE"].includes(String((row as Record<string, unknown>).onDelete)) || typeof (row as Record<string, unknown>).match !== "string")) throw new Error("private tester gateway evidence unavailable");
+    if (indexes.some((row) => !exact(row, ["tableName", "seq", "name", "unique", "origin", "partial"]) || !D1_CONVERGENCE_TABLES.includes(String((row as Record<string, unknown>).tableName)) || !integer((row as Record<string, unknown>).seq) || !identifier((row as Record<string, unknown>).name) || ![0, 1].includes(Number((row as Record<string, unknown>).unique)) || !["c", "u", "pk"].includes(String((row as Record<string, unknown>).origin)) || ![0, 1].includes(Number((row as Record<string, unknown>).partial)))) throw new Error("private tester gateway evidence unavailable");
+    if (indexColumns.some((row) => !exact(row, ["indexName", "seqno", "cid", "name", "desc", "coll", "key"]) || !identifier((row as Record<string, unknown>).indexName) || !integer((row as Record<string, unknown>).seqno) || !Number.isSafeInteger((row as Record<string, unknown>).cid) || ((row as Record<string, unknown>).name !== null && !identifier((row as Record<string, unknown>).name)) || ![0, 1].includes(Number((row as Record<string, unknown>).desc)) || ((row as Record<string, unknown>).coll !== null && !identifier((row as Record<string, unknown>).coll)) || ![0, 1].includes(Number((row as Record<string, unknown>).key)))) throw new Error("private tester gateway evidence unavailable");
+    if (rowCounts.length !== D1_CONVERGENCE_TABLES.length || rowCounts.some((row, index) => !exact(row, ["tableName", "rowCount"]) || (row as Record<string, unknown>).tableName !== D1_CONVERGENCE_TABLES[index] || !integer((row as Record<string, unknown>).rowCount))) throw new Error("private tester gateway evidence unavailable");
+    if (foreignKeyViolations.length > 100 || foreignKeyViolations.some((row) => !exact(row, ["tableName", "rowId", "parentTable", "fkId"]) || !identifier((row as Record<string, unknown>).tableName) || !Number.isSafeInteger((row as Record<string, unknown>).rowId) || !identifier((row as Record<string, unknown>).parentTable) || !integer((row as Record<string, unknown>).fkId))) throw new Error("private tester gateway evidence unavailable");
+    return { tables, foreignKeys, indexes, indexColumns, rowCounts, foreignKeyViolations };
+  };
   const oauth = async () => {
     const state = crypto.randomUUID();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -293,6 +330,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       if (kind === "d1-schema") return d1Schema();
       if (kind === "d1-convergence-ledger") return d1ConvergenceLedger();
       if (kind === "d1-convergence-schema") return d1ConvergenceSchema();
+      if (kind === "d1-convergence-shape") return d1ConvergenceShape();
       if (kind === "d1-source-fingerprint") return d1SourceFingerprint();
       if (kind === "d1-source-manifest") return d1SourceManifest();
       if (kind === "gates") return { nearfamily: false, nearstory: false, scheduler: false };

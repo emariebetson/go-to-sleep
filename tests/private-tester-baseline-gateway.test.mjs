@@ -200,6 +200,38 @@ test("captures bounded raw Sites convergence schema and provider migration rows 
   await assert.rejects(() => unsafe.read("d1-convergence-ledger"), /evidence unavailable/);
 });
 
+test("captures only allowlisted D1 structural metadata and aggregate counts for convergence planning", async () => {
+  const liveTables = ["auth_sessions", "auth_verifications", "child_profiles", "children", "contributors", "entitlements", "household_invitations", "household_members", "households", "jobs", "marketing_waitlist_contacts", "marketing_waitlist_interests", "marketing_waitlist_sync", "media_assets", "oauth_accounts", "playlist_items", "playlists", "sleep_sessions", "stripe_events", "usage_events", "usage_ledger", "users", "voice_consents", "voices"];
+  const fixtures = {
+    table_xinfo: liveTables.map((tableName) => ({ tableName, cid: 0, name: "id", type: "TEXT", notNull: 1, defaultValue: null, primaryKey: 1, hidden: 0 })),
+    foreign_key_list: [{ tableName: "children", id: 0, seq: 0, parentTable: "users", fromColumn: "user_id", toColumn: "id", onUpdate: "NO ACTION", onDelete: "CASCADE", match: "NONE" }],
+    index_list: [{ tableName: "users", seq: 0, name: "sqlite_autoindex_users_1", unique: 1, origin: "pk", partial: 0 }],
+    index_xinfo: [{ indexName: "sqlite_autoindex_users_1", seqno: 0, cid: 0, name: "id", desc: 0, coll: "BINARY", key: 1 }],
+    row_counts: liveTables.map((tableName, index) => ({ tableName, rowCount: index === liveTables.length - 1 ? 3 : 0 })),
+    foreign_key_check: [],
+  };
+  const statements = [];
+  const DB = { prepare: (sql) => ({ all: async () => {
+    statements.push(sql);
+    const key = Object.keys(fixtures).find((name) => sql.includes(`/* ${name} */`));
+    if (!key) throw new Error("unexpected query");
+    return { results: fixtures[key] };
+  } }) };
+  const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
+  assert.deepEqual(await runtime.read("d1-convergence-shape"), {
+    tables: fixtures.table_xinfo,
+    foreignKeys: fixtures.foreign_key_list,
+    indexes: fixtures.index_list,
+    indexColumns: fixtures.index_xinfo,
+    rowCounts: fixtures.row_counts,
+    foreignKeyViolations: fixtures.foreign_key_check,
+  });
+  assert.equal(statements.length, 6);
+  assert.equal(statements.every((sql) => !sql.includes("?")), true);
+  assert.equal(statements.some((sql) => /SELECT\s+\*/i.test(sql)), false);
+  assert.equal(statements.every((sql) => !/email_ciphertext|email_iv|display_name|story|transcript|recording/i.test(sql)), true);
+});
+
 test("OAuth redirect proof rejects wrong origin, state, error, or an authorization code", async () => {
   const locations = [
     (state) => `https://attacker.example/api/auth/callback/google?state=${state}&error=interaction_required`,
