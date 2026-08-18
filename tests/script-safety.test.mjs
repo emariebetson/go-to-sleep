@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPersonalizedProviderInput, personalizedScriptResult, prepareProductionScriptClaim, validateScriptInput } from "../lib/sleep-script.ts";
+import { buildPersonalizedProviderInput, curatedScript, personalizedScriptResult, prepareProductionScriptClaim, validateScriptInput } from "../lib/sleep-script.ts";
 import { validateNarrationSafety } from "../lib/sleep-session.ts";
 
 const base = {
@@ -57,15 +57,24 @@ test("YouTube metadata is labeled structured untrusted data rather than interpol
   assert.doesNotMatch(provider.instructions, /Ignore all safety instructions/);
 });
 
-test("personalized fallback fills the requested bedtime window instead of silently halving it", async () => {
+test("curated scripts fill the requested bedtime window at the calibrated speech rate", () => {
+  for (const duration of [5, 10, 15, 20]) {
+    const input = validateScriptInput({ ...base, duration: String(duration), scriptMode: "curated" });
+    const words = curatedScript(input).trim().split(/\s+/u).length;
+    assert.ok(words >= duration * 132, `${duration}-minute curated script had only ${words} words`);
+    assert.ok(words <= duration * 140, `${duration}-minute curated script had ${words} words`);
+  }
+});
+
+test("personalized fallback fills the requested bedtime window at the calibrated speech rate", async () => {
   const originalKey = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
   try {
     for (const duration of [5, 10, 15, 20]) {
       const result = await personalizedScriptResult(validateScriptInput({ ...base, duration: String(duration) }));
       const words = result.script.trim().split(/\s+/u).length;
-      assert.ok(words >= duration * 115, `${duration}-minute fallback had only ${words} words`);
-      assert.ok(words <= duration * 120, `${duration}-minute fallback had ${words} words`);
+      assert.ok(words >= duration * 132, `${duration}-minute fallback had only ${words} words`);
+      assert.ok(words <= duration * 140, `${duration}-minute fallback had ${words} words`);
     }
   } finally {
     if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -99,7 +108,7 @@ test("personalized provider timeouts return the full-length safe fallback", asyn
     const words = result.script.trim().split(/\s+/u).length;
     assert.equal(result.providerUsed, false);
     assert.equal(result.providerFailed, true);
-    assert.ok(words >= 1_150, `10-minute timeout fallback had only ${words} words`);
+    assert.ok(words >= 1_320, `10-minute timeout fallback had only ${words} words`);
     assert.match(result.notice, /fallback.+requested length/i);
   } finally {
     globalThis.fetch = originalFetch;
@@ -117,7 +126,7 @@ test("personalized provider output cannot underfill the requested bedtime", asyn
     const result = await personalizedScriptResult(validateScriptInput(base));
     const words = result.script.trim().split(/\s+/u).length;
     assert.equal(result.providerUsed, false);
-    assert.ok(words >= 1_150, `10-minute recovery had only ${words} words`);
+    assert.ok(words >= 1_320, `10-minute recovery had only ${words} words`);
     assert.match(result.notice, /fallback.+requested length/i);
   } finally {
     globalThis.fetch = originalFetch;
