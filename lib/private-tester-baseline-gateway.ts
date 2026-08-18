@@ -7,6 +7,7 @@ const PREFIX = "/api/internal/private-tester-baseline/";
 const KINDS = new Set([
   "d1-ledger",
   "d1-schema",
+  "d1-convergence-ledger",
   "d1-convergence-schema",
   "d1-source-fingerprint",
   "d1-source-manifest",
@@ -262,6 +263,9 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       previous = key;
       return { type: String(row.type), name: row.name, tableName: row.tbl_name, rootPage: Number(row.rootpage), sql: row.sql as string | null };
     });
+    return { sqliteVersion: versionResult.results[0].version, objects };
+  };
+  const d1ConvergenceLedger = async () => {
     const providerResult = await db.prepare("SELECT * FROM __appgarden_migrations ORDER BY 1").all();
     if (!Array.isArray(providerResult.results) || providerResult.results.length < 1 || providerResult.results.length > 26) throw new Error("private tester gateway evidence unavailable");
     const providerMigrationRows = providerResult.results.map((row) => {
@@ -271,7 +275,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       for (const value of Object.values(row)) if (value !== null && !(typeof value === "number" && Number.isSafeInteger(value)) && !diagnosticText(value)) throw new Error("private tester gateway evidence unavailable");
       return { ...row };
     });
-    return { sqliteVersion: versionResult.results[0].version, objects, providerMigrationRows };
+    return { providerMigrationRows };
   };
   const oauth = async () => {
     const state = crypto.randomUUID();
@@ -289,6 +293,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     async read(kind: string) {
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
+      if (kind === "d1-convergence-ledger") return d1ConvergenceLedger();
       if (kind === "d1-convergence-schema") return d1ConvergenceSchema();
       if (kind === "d1-source-fingerprint") return d1SourceFingerprint();
       if (kind === "d1-source-manifest") return d1SourceManifest();

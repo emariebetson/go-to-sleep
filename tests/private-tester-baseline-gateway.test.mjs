@@ -191,14 +191,14 @@ test("captures bounded raw Sites convergence schema and provider migration rows 
   assert.deepEqual(await runtime.read("d1-convergence-schema"), {
     sqliteVersion: "3.49.1",
     objects: schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, rootPage: row.rootpage, sql: row.sql })),
-    providerMigrationRows: providerRows,
   });
+  assert.deepEqual(await runtime.read("d1-convergence-ledger"), { providerMigrationRows: providerRows });
 
   const unsafeDB = { prepare: (sql) => ({ all: async () => ({
     results: sql === "SELECT sqlite_version() AS version" ? [{ version: "3.49.1" }] : sql === schemaQuery ? schemaRows : [{ id: 1, name: `bad${String.fromCharCode(0)}name` }],
   }) }) };
   const unsafe = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB: unsafeDB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
-  await assert.rejects(() => unsafe.read("d1-convergence-schema"), /evidence unavailable/);
+  await assert.rejects(() => unsafe.read("d1-convergence-ledger"), /evidence unavailable/);
 });
 
 test("OAuth redirect proof rejects wrong origin, state, error, or an authorization code", async () => {
