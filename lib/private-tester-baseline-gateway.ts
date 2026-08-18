@@ -7,6 +7,7 @@ const PREFIX = "/api/internal/private-tester-baseline/";
 const KINDS = new Set([
   "d1-ledger",
   "d1-schema",
+  "d1-source-fingerprint",
   "gates",
   "oauth",
 ]);
@@ -219,6 +220,15 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     if (await sha256(JSON.stringify(definitions)) !== expectedD1SchemaDefinitionHash) throw new Error("private tester gateway evidence unavailable");
     return { schema: "sqlite_schema", objects };
   };
+  const d1SourceFingerprint = async () => {
+    const result = await db.prepare("SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all();
+    if (!Array.isArray(result.results) || result.results.length < 1 || result.results.length > 1_000) throw new Error("private tester gateway evidence unavailable");
+    const definitions = result.results.map((row) => {
+      if (!object(row) || Reflect.ownKeys(row).length !== 5 || !["table", "index", "trigger", "view"].includes(String(row.type)) || typeof row.name !== "string" || typeof row.tbl_name !== "string" || !Number.isSafeInteger(row.rootpage) || (row.sql !== null && typeof row.sql !== "string")) throw new Error("private tester gateway evidence unavailable");
+      return { type: String(row.type), name: row.name, tableName: row.tbl_name, sql: row.sql as string | null };
+    }).filter(({ type, name, tableName }) => !D1_PROVIDER_INTERNAL_IDENTITIES.has(`${type}\u0000${name}\u0000${tableName}`));
+    return { sourceObjectCount: definitions.length, sourceDefinitionsSha256: await sha256(JSON.stringify(definitions)) };
+  };
   const oauth = async () => {
     const state = crypto.randomUUID();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -235,6 +245,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     async read(kind: string) {
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
+      if (kind === "d1-source-fingerprint") return d1SourceFingerprint();
       if (kind === "gates") return { nearfamily: false, nearstory: false, scheduler: false };
       if (kind === "oauth") return oauth();
       throw new Error("private tester gateway evidence unavailable");
