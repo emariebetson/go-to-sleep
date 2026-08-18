@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users, voiceConsents, voices } from "@/db/schema";
@@ -6,6 +7,7 @@ import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readLimitedBytes } from "@/lib/http";
 import { classifyVoiceRequestException, parseVoiceCreationResponse } from "@/lib/elevenlabs";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
+import { createLegacyVoice } from "@/lib/legacy-voice-insert";
 import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
 const ELEVENLABS = "https://api.elevenlabs.io/v1";
@@ -96,7 +98,7 @@ export async function POST(request: Request) {
     const consentId = crypto.randomUUID();
     const db = getDb();
     try {
-      await db.insert(voices).values({ id: voiceId, userId: user.userId, householdId, currentConsentId: null, providerVoiceId: providerResult.voiceId, name, status: "ready", consentAttestedAt: consentedAt, createdAt: consentedAt });
+      await createLegacyVoice(env.DB, { id: voiceId, userId: user.userId, householdId, providerVoiceId: providerResult.voiceId, name, status: "ready", consentAttestedAt: consentedAt, createdAt: consentedAt });
       await db.insert(voiceConsents).values({
         id: consentId,
         householdId,

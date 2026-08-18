@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createLegacyFreeEntitlement } from "../lib/legacy-entitlement-bootstrap.ts";
+import { createLegacyVoice } from "../lib/legacy-voice-insert.ts";
 import { loadStudioBootstrap } from "../lib/studio-bootstrap.ts";
 
 const migrations = [
@@ -70,6 +71,36 @@ test("legacy free entitlement bootstrap writes only pre-0011 entitlement columns
     legacy_credits_remaining: 1,
   });
   assert.equal(database.prepare("SELECT count(*) AS count FROM entitlements WHERE id = ?").get(input.id).count, 1);
+});
+
+test("legacy voice insert writes only pre-0011 voice columns", async () => {
+  const { database, db } = legacyFixture();
+  assert.equal(database.prepare("SELECT count(*) AS count FROM pragma_table_info('voices') WHERE name = 'creation_request_id'").get().count, 0);
+
+  await createLegacyVoice(db, {
+    id: "voice:legacy:new-user",
+    userId: "new-user",
+    householdId: "household:new-user",
+    providerVoiceId: "elevenlabs-voice-1",
+    name: "Parent voice",
+    status: "ready",
+    consentAttestedAt: new Date(1700000000000),
+    createdAt: new Date(1700000000000),
+  });
+
+  assert.deepEqual({ ...database.prepare(`SELECT id, user_id, household_id, current_consent_id, provider_voice_id, name, status, consent_attested_at, created_at, deleted_at
+    FROM voices WHERE id = ?`).get("voice:legacy:new-user") }, {
+    id: "voice:legacy:new-user",
+    user_id: "new-user",
+    household_id: "household:new-user",
+    current_consent_id: null,
+    provider_voice_id: "elevenlabs-voice-1",
+    name: "Parent voice",
+    status: "ready",
+    consent_attested_at: 1700000000000,
+    created_at: 1700000000000,
+    deleted_at: null,
+  });
 });
 
 test("Studio bootstrap requests production-only endpoints only in production mode", async () => {

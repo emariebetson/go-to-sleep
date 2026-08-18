@@ -17,7 +17,7 @@ test("self-attestation remains pending and legacy voice creation respects consen
   assert.doesNotMatch(v1, /status: "active_verified"/);
 
   const legacy = source("app/api/voices/route.ts");
-  const voiceInsert = legacy.indexOf("currentConsentId: null");
+  const voiceInsert = legacy.indexOf("createLegacyVoice(env.DB");
   const consentInsert = legacy.indexOf("db.insert(voiceConsents)");
   const pointerUpdate = legacy.indexOf("currentConsentId: consentId");
   assert.ok(voiceInsert >= 0 && voiceInsert < consentInsert && consentInsert < pointerUpdate);
