@@ -46,7 +46,7 @@ test("production audio parsing fingerprints stable local child, voice, billing, 
 });
 
 test("a Free-compatible five-minute request rejects oversized prepared narration before provider work", async () => {
-  await assert.rejects(() => parseProductionAudioRequest({ ...base, script: "gentle ".repeat(601) }), /too long for a 5-minute session/i);
+  await assert.rejects(() => parseProductionAudioRequest({ ...base, script: "gentle ".repeat(701) }), /too long for a 5-minute session/i);
 });
 
 test("bedtime speech slows the narrator enough for duration-calibrated scripts", async () => {

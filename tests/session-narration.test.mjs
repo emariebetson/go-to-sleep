@@ -19,7 +19,8 @@ test("empty pronunciation keeps preview and full narration unchanged", () => {
 
 test("prepared narration is bounded by selected duration before allowance or provider spend", () => {
   assert.equal(validateNarrationDuration("gentle ".repeat(550), 5), 550);
-  assert.throws(() => validateNarrationDuration("gentle ".repeat(601), 5), /too long for a 5-minute session/i);
+  assert.throws(() => validateNarrationDuration("gentle ".repeat(701), 5), /too long for a 5-minute session/i);
   assert.equal(validateNarrationDuration("gentle ".repeat(1200), 10), 1200);
-  assert.throws(() => validateNarrationDuration("gentle ".repeat(1201), 10), /too long for a 10-minute session/i);
+  assert.equal(validateNarrationDuration("gentle ".repeat(1320), 10), 1320);
+  assert.throws(() => validateNarrationDuration("gentle ".repeat(1401), 10), /too long for a 10-minute session/i);
 });
