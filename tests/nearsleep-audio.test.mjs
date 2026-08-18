@@ -49,6 +49,11 @@ test("a Free-compatible five-minute request rejects oversized prepared narration
   await assert.rejects(() => parseProductionAudioRequest({ ...base, script: "gentle ".repeat(601) }), /too long for a 5-minute session/i);
 });
 
+test("bedtime speech slows the narrator enough for duration-calibrated scripts", async () => {
+  const audio = await import("../lib/nearsleep-audio.ts");
+  assert.equal(audio.bedtimeVoiceSettings?.().speed, 0.8);
+});
+
 test("preview spend measurement uses only the prepared excerpt while duration validation uses the full script", async () => {
   const script = Array.from({ length: 100 }, (_, index) => `gentle${index}`).join(" ");
   const parsed = await parseProductionAudioRequest({ ...base, generationMode: "preview", script });
