@@ -197,7 +197,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     const names = result.results.map((row) => object(row) ? row.name : undefined);
     if (!D1_LEDGER_DISCOVERY_ENABLED && JSON.stringify(names) !== JSON.stringify(expected) && JSON.stringify(names) !== JSON.stringify(expectedWithoutExtension)) throw new Error("private tester gateway evidence unavailable");
     const appliedMigrations = result.results.map((row, index) => {
-      if (!object(row) || Reflect.ownKeys(row).length !== 3 || row.id !== index + 1 || typeof row.name !== "string" || !/^[0-9]{4}_[a-z0-9_]{1,96}(?:\.sql)?$/.test(row.name) || typeof row.applied_at !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?$/.test(row.applied_at)) throw new Error("private tester gateway evidence unavailable");
+      if (!object(row) || Reflect.ownKeys(row).length !== 3 || row.id !== index + 1 || typeof row.name !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(row.name) || (typeof row.applied_at !== "string" && !Number.isSafeInteger(row.applied_at)) || String(row.applied_at).length < 1 || String(row.applied_at).length > 64) throw new Error("private tester gateway evidence unavailable");
       return { sequence: row.id, name: row.name, appliedAt: row.applied_at };
     });
     return { appliedMigrations };
