@@ -176,6 +176,31 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   await assert.rejects(() => runtime.read("sites-version"), /evidence unavailable/);
 });
 
+test("captures bounded raw Sites convergence schema and provider migration rows without user data", async () => {
+  const providerRows = [
+    { id: 1, name: "0000_nearnight_foundation.sql", applied_at: "2026-08-17 00:00:00" },
+    { id: 2, name: "0016_marketing_waitlist.sql", applied_at: "2026-08-17 00:01:00" },
+  ];
+  const DB = { prepare: (sql) => ({ all: async () => {
+    if (sql === "SELECT sqlite_version() AS version") return { results: [{ version: "3.49.1" }] };
+    if (sql === schemaQuery) return { results: schemaRows };
+    if (sql === "SELECT * FROM __appgarden_migrations ORDER BY 1") return { results: providerRows };
+    throw new Error("unexpected query");
+  } }) };
+  const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
+  assert.deepEqual(await runtime.read("d1-convergence-schema"), {
+    sqliteVersion: "3.49.1",
+    objects: schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, rootPage: row.rootpage, sql: row.sql })),
+    providerMigrationRows: providerRows,
+  });
+
+  const unsafeDB = { prepare: (sql) => ({ all: async () => ({
+    results: sql === "SELECT sqlite_version() AS version" ? [{ version: "3.49.1" }] : sql === schemaQuery ? schemaRows : [{ id: 1, name: `bad${String.fromCharCode(0)}name` }],
+  }) }) };
+  const unsafe = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB: unsafeDB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
+  await assert.rejects(() => unsafe.read("d1-convergence-schema"), /evidence unavailable/);
+});
+
 test("OAuth redirect proof rejects wrong origin, state, error, or an authorization code", async () => {
   const locations = [
     (state) => `https://attacker.example/api/auth/callback/google?state=${state}&error=interaction_required`,

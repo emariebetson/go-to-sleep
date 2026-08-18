@@ -7,6 +7,7 @@ const PREFIX = "/api/internal/private-tester-baseline/";
 const KINDS = new Set([
   "d1-ledger",
   "d1-schema",
+  "d1-convergence-schema",
   "d1-source-fingerprint",
   "d1-source-manifest",
   "gates",
@@ -78,6 +79,12 @@ function configurationError(): never { throw new Error("private tester gateway c
 function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
 async function sha256(value: string): Promise<string> { return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))), (byte) => byte.toString(16).padStart(2, "0")).join(""); }
 function exactStrings(value: unknown, expected: readonly string[]): boolean { return Array.isArray(value) && JSON.stringify(value) === JSON.stringify(expected); }
+function diagnosticText(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 2_048 && Array.from(value).every((character) => {
+    const code = character.charCodeAt(0);
+    return code === 9 || code === 10 || code === 13 || (code >= 32 && code <= 126);
+  });
+}
 
 export function validateExactD1ProviderObjects(objects: readonly { type: string; name: string; tableName: string; sql: string | null }[]): void {
   const providerRecords = objects
@@ -242,6 +249,30 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     }
     return { objects: rows };
   };
+  const d1ConvergenceSchema = async () => {
+    const versionResult = await db.prepare("SELECT sqlite_version() AS version").all();
+    if (!Array.isArray(versionResult.results) || versionResult.results.length !== 1 || !object(versionResult.results[0]) || Reflect.ownKeys(versionResult.results[0]).length !== 1 || typeof versionResult.results[0].version !== "string" || !/^3\.[0-9]{1,3}\.[0-9]{1,3}$/.test(versionResult.results[0].version)) throw new Error("private tester gateway evidence unavailable");
+    const schemaResult = await db.prepare("SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all();
+    if (!Array.isArray(schemaResult.results) || schemaResult.results.length < 1 || schemaResult.results.length > 1_000) throw new Error("private tester gateway evidence unavailable");
+    let previous = "";
+    const objects = schemaResult.results.map((row) => {
+      if (!object(row) || Reflect.ownKeys(row).length !== 5 || !["table", "index", "trigger", "view"].includes(String(row.type)) || typeof row.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.name) || typeof row.tbl_name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.tbl_name) || !Number.isSafeInteger(row.rootpage) || Number(row.rootpage) < 0 || (row.sql !== null && (typeof row.sql !== "string" || row.sql.length < 1 || row.sql.length > 1_048_576))) throw new Error("private tester gateway evidence unavailable");
+      const key = `${row.type}\u0000${row.name}\u0000${row.tbl_name}`;
+      if (key <= previous) throw new Error("private tester gateway evidence unavailable");
+      previous = key;
+      return { type: String(row.type), name: row.name, tableName: row.tbl_name, rootPage: Number(row.rootpage), sql: row.sql as string | null };
+    });
+    const providerResult = await db.prepare("SELECT * FROM __appgarden_migrations ORDER BY 1").all();
+    if (!Array.isArray(providerResult.results) || providerResult.results.length < 1 || providerResult.results.length > 26) throw new Error("private tester gateway evidence unavailable");
+    const providerMigrationRows = providerResult.results.map((row) => {
+      if (!object(row)) throw new Error("private tester gateway evidence unavailable");
+      const rowKeys = Reflect.ownKeys(row);
+      if (rowKeys.length < 1 || rowKeys.length > 8 || rowKeys.some((key) => typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key))) throw new Error("private tester gateway evidence unavailable");
+      for (const value of Object.values(row)) if (value !== null && !(typeof value === "number" && Number.isSafeInteger(value)) && !diagnosticText(value)) throw new Error("private tester gateway evidence unavailable");
+      return { ...row };
+    });
+    return { sqliteVersion: versionResult.results[0].version, objects, providerMigrationRows };
+  };
   const oauth = async () => {
     const state = crypto.randomUUID();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -258,6 +289,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     async read(kind: string) {
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
+      if (kind === "d1-convergence-schema") return d1ConvergenceSchema();
       if (kind === "d1-source-fingerprint") return d1SourceFingerprint();
       if (kind === "d1-source-manifest") return d1SourceManifest();
       if (kind === "gates") return { nearfamily: false, nearstory: false, scheduler: false };
