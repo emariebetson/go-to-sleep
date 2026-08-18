@@ -2,6 +2,7 @@ import { Link } from "./Link";
 import { Brand } from "./Brand";
 import { getAppUser } from "@/lib/auth";
 import { myNightsHref } from "@/lib/my-nights-navigation";
+import { MobileMenu } from "./MobileMenu";
 
 export async function SiteHeader() {
   const user = await getAppUser();
@@ -19,6 +20,7 @@ export async function SiteHeader() {
           <Link href="/sign-in">Sign in</Link>
           <Link className="btn btn-secondary btn-small" href={nightsHref}>My nights</Link>
           <Link className="btn btn-primary btn-small" href="/studio">Create a bedtime</Link>
+          <MobileMenu primary={{ href: "/studio", label: "Create a bedtime" }} account={{ href: user ? nightsHref : "/sign-in", label: user ? "My nights" : "Sign in" }} links={[{ href: "/nearsleep#recommended", label: "Recommended" }, { href: "/nearsleep#how-it-works", label: "How it works" }, { href: "/nearsleep#safety", label: "Safety & privacy" }, { href: "/#products", label: "NearYou products" }, { href: "/pricing", label: "Pricing" }]} />
         </nav>
       </div>
     </header>

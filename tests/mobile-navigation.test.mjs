@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const source = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("shared mobile menu is wired into every site navigation surface", () => {
+  for (const path of ["components/SiteHeader.tsx", "components/CompanyHeader.tsx", "components/AppShell.tsx"]) {
+    assert.match(source(path), /MobileMenu/);
+  }
+  assert.match(source("components/MobileMenu.tsx"), /aria-expanded/);
+  assert.match(source("components/MobileMenu.tsx"), /Escape/);
+});
+
+test("mobile navigation keeps the header pinned and exposes the approved menu affordances", () => {
+  const css = source("app/globals.css");
+  assert.match(css, /\.site-header[^{]*\{[^}]*position:\s*sticky/);
+  assert.match(css, /\.mobile-menu-toggle/);
+  assert.match(css, /\.mobile-menu-panel/);
+  assert.match(css, /safe-area-inset-top/);
+  assert.match(css, /\.nav-links > a:not\(\.btn\)/);
+});

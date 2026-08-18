@@ -3,6 +3,7 @@ import { getAppUser, isAdmin } from "@/lib/auth";
 import { Brand } from "./Brand";
 import { SignOutButton } from "./SignOutButton";
 import { appNavigationLinks, resolveFamilyNavigationAvailability } from "./app-navigation";
+import { MobileMenu } from "./MobileMenu";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -31,6 +32,7 @@ export async function AppShell({ children, active, familyAvailable }: AppShellPr
           <div className="nav-links">
             <Link href="/pricing">Plan</Link>
             <Link className="btn btn-secondary btn-small" href="/">View site</Link>
+            <MobileMenu primary={{ href: "/studio", label: "Create a bedtime" }} account={{ href: "/account", label: "Voice & account" }} links={links.map(([, href, label]) => ({ href, label }))} />
           </div>
         </div>
       </header>
