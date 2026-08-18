@@ -4,8 +4,8 @@ import {SITES_D1_PHASE_A_ARTIFACT} from "@/lib/sites-d1-phase-a-artifact.generat
 import {SITES_D1_PHASE_B_ARTIFACT} from "@/lib/sites-d1-phase-b-artifact.generated";
 import {SitesD1PhaseBOperation} from "@/lib/sites-d1-phase-b-operation";
 
-const ROUTE_ENABLED=true as const;
-const TEMPORARY_ACTIVATION_ENABLED=true as const;
+const ROUTE_ENABLED=false as const;
+const TEMPORARY_ACTIVATION_ENABLED=false as const;
 const ID=/^[A-Za-z0-9:_-]{8,128}$/,HASH=/^[a-f0-9]{64}$/;
 type Runtime={DB:D1Database;READINESS_OIDC_ISSUER:string;READINESS_OIDC_AUDIENCE:string;READINESS_OIDC_SUBJECT:string;READINESS_OIDC_JWKS_URL:string};
 
