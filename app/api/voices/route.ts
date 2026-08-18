@@ -4,7 +4,7 @@ import { users, voiceConsents, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { ensureUser } from "@/lib/data";
 import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readLimitedBytes } from "@/lib/http";
-import { classifyVoiceCreationError } from "@/lib/elevenlabs";
+import { classifyVoiceRequestException, parseVoiceCreationResponse } from "@/lib/elevenlabs";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
 import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
 
@@ -30,6 +30,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let failureStage = "request";
   try {
     if (nearSleepProductionEnabled(featureFlagsFromEnv(process.env))) {
       const { postProductionVoice } = await import("./production");
@@ -71,21 +72,31 @@ export async function POST(request: Request) {
     providerForm.append("description", "Parent-owned voice for private bedtime narration");
     providerForm.append("files", sample, sample.name || "voice-sample.webm");
     providerForm.append("remove_background_noise", "true");
-    const response = await fetchWithTimeout(`${ELEVENLABS}/voices/add`, { method: "POST", headers: { "xi-api-key": apiKey }, body: providerForm }, 90_000);
-    const payload = await response.json() as { voice_id?: string; detail?: { message?: string; status?: string; code?: string } | string };
-    if (!response.ok || !payload.voice_id) {
-      const failure = classifyVoiceCreationError(response.status, payload);
+    failureStage = "provider_request";
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(`${ELEVENLABS}/voices/add`, { method: "POST", headers: { "xi-api-key": apiKey }, body: providerForm }, 90_000);
+    } catch (error) {
+      const classified = classifyVoiceRequestException(error);
+      console.error("ElevenLabs voice request failed", { causeClass: classified.causeClass });
+      return jsonNoStore({ error: classified.failure.message, code: classified.failure.code }, { status: classified.failure.httpStatus });
+    }
+    failureStage = "provider_response";
+    const providerResult = await parseVoiceCreationResponse(response);
+    if (!providerResult.ok) {
+      const failure = providerResult.failure;
       const demoEnabled = failure.code === "voice_cloning_unavailable" && demoNarratorEnabled();
-      console.error("ElevenLabs voice creation failed", response.status, failure.code);
+      console.error("ElevenLabs voice creation failed", { status: response.status, code: failure.code, responseReadable: providerResult.responseReadable });
       return jsonNoStore({ error: `${failure.message}${demoEnabled ? " You can continue with the demo narrator for testing; it is not your voice." : ""}`, code: failure.code, demoEnabled }, { status: failure.httpStatus });
     }
 
+    failureStage = "persistence";
     const consentedAt = new Date();
     const voiceId = crypto.randomUUID();
     const consentId = crypto.randomUUID();
     const db = getDb();
     try {
-      await db.insert(voices).values({ id: voiceId, userId: user.userId, householdId, currentConsentId: null, providerVoiceId: payload.voice_id, name, status: "ready", consentAttestedAt: consentedAt, createdAt: consentedAt });
+      await db.insert(voices).values({ id: voiceId, userId: user.userId, householdId, currentConsentId: null, providerVoiceId: providerResult.voiceId, name, status: "ready", consentAttestedAt: consentedAt, createdAt: consentedAt });
       await db.insert(voiceConsents).values({
         id: consentId,
         householdId,
@@ -102,13 +113,14 @@ export async function POST(request: Request) {
     } catch (error) {
       try { await db.delete(voices).where(eq(voices.id, voiceId)); } catch { /* retried account cleanup handles a failed local rollback */ }
       try {
-        await fetchWithTimeout(`${ELEVENLABS}/voices/${encodeURIComponent(payload.voice_id)}`, { method: "DELETE", headers: { "xi-api-key": apiKey } });
+        await fetchWithTimeout(`${ELEVENLABS}/voices/${encodeURIComponent(providerResult.voiceId)}`, { method: "DELETE", headers: { "xi-api-key": apiKey } });
       } catch { /* provider cleanup will be reconciled from request logs */ }
       throw error;
     }
-    return jsonNoStore({ voiceId: payload.voice_id });
+    return jsonNoStore({ voiceId: providerResult.voiceId });
   } catch (error) {
     if (error instanceof Response) return error;
+    console.error("Legacy voice setup failed", { stage: failureStage, causeClass: classifyVoiceRequestException(error).causeClass });
     return jsonNoStore({ error: "Voice setup failed. Please try again." }, { status: 500 });
   }
 }
