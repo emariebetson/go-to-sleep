@@ -25,10 +25,10 @@ export const PLAN_CATALOG = {
     name: "NearSleep Free",
     monthlyPriceUsd: 0,
     annualPriceUsd: 0,
-    monthlyAllowanceMilliunits: 1_000,
+    monthlyAllowanceMilliunits: 3_000,
     maxAdultVoices: 1,
     features: { nearsleep: true, nearstoryParentControlled: false, nearlegacy: false, childMicrophone: false },
-    limits: { children: 1, voices: 1, members: 1, narrationMinutes: 1, transcriptionMinutes: 0, storageBytes: 1_000_000_000 },
+    limits: { children: 1, voices: 1, members: 1, narrationMinutes: 3, transcriptionMinutes: 0, storageBytes: 1_000_000_000 },
   },
   nearsleep_plus_legacy: {
     id: "nearsleep_plus_legacy",

@@ -39,7 +39,7 @@ export default async function AccountPage() {
     const allowanceLabel = entitlement?.planId === "nearsleep_plus_legacy"
       ? `${remaining.toLocaleString()} session ${remaining === 1 ? "credit" : "credits"} remaining`
       : entitlement?.planId === "nearsleep_free"
-        ? entitlement.remainingMilliunits >= 1_000 ? "one five-minute creation remaining" : "five-minute creation used"
+        ? `${Math.max(0, Math.floor(entitlement.remainingMilliunits / 1_000))} of three free generations remaining · 5 or 10 minutes each`
         : `${remaining.toLocaleString()} narration ${remaining === 1 ? "minute" : "minutes"} remaining`;
     return <AppShell active="account">
       <span className="eyebrow">Selected household controls</span><h1 className="app-title display">Voice & account</h1><p className="muted">Billing, consent, and generation limits below apply to the household currently selected in NearYou.</p>

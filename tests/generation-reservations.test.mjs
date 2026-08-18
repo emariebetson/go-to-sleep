@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as usageReservations from "../lib/usage-reservations.ts";
 import {
   allowanceWeightForNarration,
   narrationSavePolicy,
@@ -16,7 +17,8 @@ test("customer allowance stays separate from provider spend and follows the hous
   assert.equal(allowanceWeightForScript("curated"), 0);
   assert.equal(allowanceWeightForScript("personalized"), 0);
   assert.equal(allowanceWeightForNarration("nearsleep_free", "save", 5), 1000);
-  assert.throws(() => allowanceWeightForNarration("nearsleep_free", "save", 20), /five-minute/);
+  assert.equal(allowanceWeightForNarration("nearsleep_free", "save", 10), 1000);
+  assert.throws(() => allowanceWeightForNarration("nearsleep_free", "save", 20), /paid plan/);
   assert.equal(allowanceWeightForNarration("nearsleep_plus_legacy", "preview", 10), 0);
   assert.equal(allowanceWeightForNarration("nearsleep_plus_legacy", "save", 10), 1000);
   assert.equal(allowanceWeightForNarration("nearyou_plus", "preview", 10), 0);
@@ -24,12 +26,26 @@ test("customer allowance stays separate from provider spend and follows the hous
   assert.equal(allowanceWeightForNarration("nearyou_plus", "save", 20), 20000);
 });
 
+test("legacy free accounts can generate only five or ten minute bedtimes", () => {
+  assert.equal(typeof usageReservations.assertLegacyNarrationDuration, "function");
+  if (typeof usageReservations.assertLegacyNarrationDuration !== "function") return;
+  assert.doesNotThrow(() => usageReservations.assertLegacyNarrationDuration("free", 5));
+  assert.doesNotThrow(() => usageReservations.assertLegacyNarrationDuration("free", 10));
+  assert.throws(() => usageReservations.assertLegacyNarrationDuration("free", 15), /paid plan/);
+  assert.throws(() => usageReservations.assertLegacyNarrationDuration("free", 20), /paid plan/);
+  assert.doesNotThrow(() => usageReservations.assertLegacyNarrationDuration("active", 20));
+});
+
 test("script provider work is blocked when the selected duration cannot be saved", () => {
-  assert.deepEqual(narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 1_000 }, 5), {
-    allowedDurations: [5],
+  assert.deepEqual(narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 3_000 }, 5), {
+    allowedDurations: [5, 10],
     requiredMilliunits: 1_000,
   });
-  assert.throws(() => narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 1_000 }, 10), /five-minute/);
+  assert.deepEqual(narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 3_000 }, 10), {
+    allowedDurations: [5, 10],
+    requiredMilliunits: 1_000,
+  });
+  assert.throws(() => narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 3_000 }, 20), /paid plan/);
   assert.throws(() => narrationSavePolicy({ planId: "nearsleep_free", remainingMilliunits: 0 }, 5), /allowance_exhausted/);
   assert.deepEqual(narrationSavePolicy({ planId: "nearyou_plus", remainingMilliunits: 15_000 }, 15), {
     allowedDurations: [5, 10, 15, 20],

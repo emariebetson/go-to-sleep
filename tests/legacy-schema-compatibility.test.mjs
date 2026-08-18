@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { createLegacyFreeEntitlement } from "../lib/legacy-entitlement-bootstrap.ts";
+import * as legacyEntitlementBootstrap from "../lib/legacy-entitlement-bootstrap.ts";
 import { createLegacyVoice } from "../lib/legacy-voice-insert.ts";
 import { loadStudioBootstrap } from "../lib/studio-bootstrap.ts";
 
@@ -24,6 +24,7 @@ function applyMigration(database, name) {
 class D1Fixture {
   constructor(database) {
     this.database = database;
+    this.batchCalls = 0;
   }
 
   prepare(query) {
@@ -33,8 +34,23 @@ class D1Fixture {
           const result = this.database.prepare(query).run(...parameters);
           return { success: true, meta: { changes: result.changes } };
         },
+        all: async () => ({ success: true, results: this.database.prepare(query).all(...parameters) }),
       }),
     };
+  }
+
+  async batch(statements) {
+    this.batchCalls += 1;
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      this.database.exec("COMMIT");
+      return results;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 }
 
@@ -56,8 +72,8 @@ test("legacy free entitlement bootstrap writes only pre-0011 entitlement columns
   assert.equal(database.prepare("SELECT count(*) AS count FROM pragma_table_info('entitlements') WHERE name = 'billing_period_start'").get().count, 0);
 
   const input = { id: "entitlement:legacy:new-user", householdId: "household:new-user", now: new Date(1700000000000) };
-  await createLegacyFreeEntitlement(db, input);
-  await createLegacyFreeEntitlement(db, input);
+  await legacyEntitlementBootstrap.createLegacyFreeEntitlement(db, input);
+  await legacyEntitlementBootstrap.createLegacyFreeEntitlement(db, input);
 
   assert.deepEqual({ ...database.prepare(`SELECT id, household_id, plan_id, source, status, allowance_milliunits, remaining_milliunits, legacy_credits_remaining
     FROM entitlements WHERE id = ?`).get(input.id) }, {
@@ -66,11 +82,47 @@ test("legacy free entitlement bootstrap writes only pre-0011 entitlement columns
     plan_id: "nearsleep_free",
     source: "legacy",
     status: "active",
-    allowance_milliunits: 1000,
-    remaining_milliunits: 1000,
-    legacy_credits_remaining: 1,
+    allowance_milliunits: 3000,
+    remaining_milliunits: 3000,
+    legacy_credits_remaining: 3,
   });
   assert.equal(database.prepare("SELECT count(*) AS count FROM entitlements WHERE id = ?").get(input.id).count, 1);
+});
+
+test("existing free accounts receive exactly two additional lifetime credits once", async () => {
+  const { database, db } = legacyFixture();
+  const grant = legacyEntitlementBootstrap.grantLegacyFreeGenerationCredits;
+  assert.equal(typeof grant, "function", "the idempotent free-credit grant must exist");
+  if (typeof grant !== "function") return;
+  await legacyEntitlementBootstrap.createLegacyFreeEntitlement(db, {
+    id: "entitlement:legacy:new-user",
+    householdId: "household:new-user",
+    now: new Date(1700000000000),
+  });
+  database.prepare("UPDATE users SET credits_remaining = 0 WHERE id = 'new-user'").run();
+  database.prepare("UPDATE entitlements SET allowance_milliunits = 1000, remaining_milliunits = 0, legacy_credits_remaining = 0 WHERE id = 'entitlement:legacy:new-user'").run();
+
+  const input = { userId: "new-user", householdId: "household:new-user", entitlementId: "entitlement:legacy:new-user", now: new Date(1700000001000) };
+  await grant(db, input);
+  await grant(db, { ...input, now: new Date(1700000002000) });
+
+  assert.equal(database.prepare("SELECT credits_remaining value FROM users WHERE id = 'new-user'").get().value, 2);
+  assert.deepEqual({ ...database.prepare("SELECT allowance_milliunits, remaining_milliunits, legacy_credits_remaining FROM entitlements WHERE id = 'entitlement:legacy:new-user'").get() }, {
+    allowance_milliunits: 3000,
+    remaining_milliunits: 2000,
+    legacy_credits_remaining: 2,
+  });
+  assert.equal(database.prepare("SELECT count(*) value FROM usage_events WHERE type = 'free_generation_credit_grant'").get().value, 1);
+});
+
+test("paid accounts skip the free-credit write batch", async () => {
+  const { database, db } = legacyFixture();
+  database.prepare("UPDATE users SET subscription_status = 'active' WHERE id = 'new-user'").run();
+  const grant = legacyEntitlementBootstrap.grantLegacyFreeGenerationCredits;
+  assert.equal(typeof grant, "function");
+  if (typeof grant !== "function") return;
+  await grant(db, { userId: "new-user", householdId: "household:new-user", entitlementId: "entitlement:legacy:new-user", now: new Date(1700000001000) });
+  assert.equal(db.batchCalls, 0);
 });
 
 test("legacy voice insert writes only pre-0011 voice columns", async () => {

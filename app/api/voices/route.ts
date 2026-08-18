@@ -9,6 +9,7 @@ import { classifyVoiceRequestException, parseVoiceCreationResponse } from "@/lib
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
 import { createLegacyVoice } from "@/lib/legacy-voice-insert";
 import { featureFlagsFromEnv, nearSleepProductionEnabled } from "@/lib/nearyou-foundation";
+import { legacyAccountIsPaid } from "@/lib/usage-reservations";
 
 const ELEVENLABS = "https://api.elevenlabs.io/v1";
 
@@ -20,11 +21,24 @@ export async function GET(request: Request) {
     }
     const user = await requireApiUser(request);
     await ensureUser(user);
-    const voice = await getDb().select({ providerVoiceId: voices.providerVoiceId, name: voices.name })
+    const db = getDb();
+    const [voice, account] = await Promise.all([
+      db.select({ providerVoiceId: voices.providerVoiceId, name: voices.name })
       .from(voices)
       .where(and(eq(voices.userId, user.userId), eq(voices.status, "ready")))
-      .get();
-    return jsonNoStore({ voice: voice ? { voiceId: voice.providerVoiceId, name: voice.name } : null, demoEnabled: demoNarratorEnabled() });
+      .get(),
+      db.select({ subscriptionStatus: users.subscriptionStatus, creditsRemaining: users.creditsRemaining })
+        .from(users).where(eq(users.id, user.userId)).get(),
+    ]);
+    const paid = legacyAccountIsPaid(account?.subscriptionStatus || "free");
+    return jsonNoStore({
+      voice: voice ? { voiceId: voice.providerVoiceId, name: voice.name } : null,
+      demoEnabled: demoNarratorEnabled(),
+      planId: paid ? "nearsleep_plus_legacy" : "nearsleep_free",
+      creditsRemaining: account?.creditsRemaining || 0,
+      allowedNarrationDurations: paid ? [5, 10, 15, 20] : [5, 10],
+      lockedNarrationDurations: paid ? [] : [20],
+    });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonNoStore({ error: "Voice profile could not be loaded." }, { status: 500 });

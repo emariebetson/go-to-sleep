@@ -103,6 +103,7 @@ export function SleepStudio({ initialProductionMode }: { initialProductionMode: 
   const [demoNarratorEnabled, setDemoNarratorEnabled] = useState(false);
   const [voiceCloneAllowed, setVoiceCloneAllowed] = useState(true);
   const [allowedDurations, setAllowedDurations] = useState<number[]>([...SUPPORTED_DURATIONS]);
+  const [lockedNarrationDurations, setLockedNarrationDurations] = useState<number[]>([]);
   const [script, setScript] = useState("");
   const [source, setSource] = useState<SourceMetadata | null>(null);
   const [busy, setBusy] = useState<BusyAction>("");
@@ -149,12 +150,14 @@ export function SleepStudio({ initialProductionMode }: { initialProductionMode: 
       const live = initialProductionMode;
       if (live && (!childrenResponse?.ok || !voicesResponse.ok)) throw new Error("Selected-household Studio data could not be loaded.");
       const childPayload = childrenResponse?.ok ? await childrenResponse.json() as { children?: ChildProfile[] } : null;
-      const voicePayload = voicesResponse.ok ? await voicesResponse.json() as { voice?: { voiceId?: string; name: string } | null; voices?: PublicVoice[]; demoEnabled?: boolean; standardNarratorAvailable?: boolean; voiceCloneAllowed?: boolean; allowedNarrationDurations?: number[] } : null;
+      const voicePayload = voicesResponse.ok ? await voicesResponse.json() as { voice?: { voiceId?: string; name: string } | null; voices?: PublicVoice[]; demoEnabled?: boolean; standardNarratorAvailable?: boolean; voiceCloneAllowed?: boolean; allowedNarrationDurations?: number[]; lockedNarrationDurations?: number[] } : null;
       if (!active) return;
-      const productionDurations = (voicePayload?.allowedNarrationDurations || []).filter((duration): duration is number => SUPPORTED_DURATIONS.includes(duration as typeof SUPPORTED_DURATIONS[number]));
-      if (live && productionDurations.length === 0) throw new Error("Selected-household narration policy could not be loaded.");
-      const nextDurations = live ? productionDurations : [...SUPPORTED_DURATIONS];
+      const policyDurations = (voicePayload?.allowedNarrationDurations || []).filter((duration): duration is number => SUPPORTED_DURATIONS.includes(duration as typeof SUPPORTED_DURATIONS[number]));
+      if (live && policyDurations.length === 0) throw new Error("Selected-household narration policy could not be loaded.");
+      const nextDurations = policyDurations.length > 0 ? policyDurations : [...SUPPORTED_DURATIONS];
+      const nextLockedDurations = (voicePayload?.lockedNarrationDurations || []).filter((duration): duration is number => SUPPORTED_DURATIONS.includes(duration as typeof SUPPORTED_DURATIONS[number]));
       setAllowedDurations(nextDurations);
+      setLockedNarrationDurations(nextLockedDurations);
       setData((current) => nextDurations.includes(Number(current.duration)) ? current : { ...current, duration: String(nextDurations[0]) });
       setProductionMode(live);
       setOnboardingAccepted(Boolean(onboarding?.accepted));
@@ -613,7 +616,7 @@ export function SleepStudio({ initialProductionMode }: { initialProductionMode: 
           <div className="field"><label htmlFor="pronunciation">Pronounced like</label><input id="pronunciation" disabled={Boolean(childId)} maxLength={64} value={data.pronunciation} onChange={(event) => updatePronunciation(event.target.value)} placeholder="LOCK-ee" autoComplete="off" aria-describedby="pronunciation-help pronunciation-status" /><div className="field-helper-row"><small id="pronunciation-help">Type it how it sounds. We use this only for narration.</small><button className="text-button" type="button" disabled={Boolean(childId) || !data.childName.trim() || pronunciationStatus === "Finding our best guess…"} onClick={() => void guessPronunciation(true)}>{data.pronunciation ? "Guess again" : "Make a guess"}</button></div><span className="field-status" id="pronunciation-status" aria-live="polite">{pronunciationStatus}</span></div>
           <div className="field"><label htmlFor="ageMonths">Age in months</label><input id="ageMonths" disabled={Boolean(childId)} min="0" max="96" inputMode="numeric" type="number" value={data.ageMonths} onChange={(event) => update("ageMonths", event.target.value)} /></div>
           <div className="field"><label htmlFor="challenge">What feels hardest tonight?</label><select id="challenge" disabled={Boolean(childId)} value={data.challenge} onChange={(event) => update("challenge", event.target.value)}><option value="settling">Settling at bedtime</option><option value="frequent-waking">Frequent waking</option><option value="separation">Parent separation</option><option value="overtired">Overtired or fussy</option><option value="nap-transition">Nap transition</option></select></div>
-          <div className="field"><label htmlFor="duration">Session length</label><select id="duration" value={data.duration} onChange={(event) => update("duration", event.target.value)}>{allowedDurations.map((duration) => <option value={duration} key={duration}>{duration} minutes</option>)}</select></div>
+          <div className="field"><label htmlFor="duration">Session length</label><select id="duration" value={data.duration} onChange={(event) => update("duration", event.target.value)}>{allowedDurations.map((duration) => <option value={duration} key={duration}>{duration} minutes</option>)}{lockedNarrationDurations.map((duration) => <option value={duration} key={`locked-${duration}`} disabled>{duration} minutes — Plus</option>)}</select>{lockedNarrationDurations.includes(20) && <small><a href="/pricing">Unlock 20-minute bedtimes with a paid plan →</a></small>}</div>
           <ChoiceGroup label="Story world" type="theme" value={data.theme} onChange={(value) => update("theme", value)} />
         </div>
         {message && <div className="alert" role="alert">{message}</div>}

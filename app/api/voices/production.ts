@@ -58,6 +58,7 @@ export async function getProductionVoices(request: Request) {
       standardNarratorAvailable: policy.standardNarratorAvailable,
       voiceCloneAllowed: policy.privateVoiceCloneAllowed,
       allowedNarrationDurations,
+      lockedNarrationDurations: entitlement.planId === "nearsleep_free" ? [20] : [],
     });
   } catch (error) {
     if (error instanceof Response) return error;

@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { entitlements, householdMembers, households, users } from "@/db/schema";
 import type { AppUser } from "./auth";
 import { AccountBootstrapError, accountBootstrapCauseClassName, runAccountBootstrap } from "./account-bootstrap";
-import { createLegacyFreeEntitlement } from "./legacy-entitlement-bootstrap";
+import { createLegacyFreeEntitlement, grantLegacyFreeGenerationCredits } from "./legacy-entitlement-bootstrap";
 import { householdIdForUser } from "./nearyou-foundation";
 
 export async function ensureUser(user: AppUser) {
@@ -59,6 +59,9 @@ export async function ensureUser(user: AppUser) {
       },
       async createEntitlement() {
         await createLegacyFreeEntitlement(env.DB, { id: entitlementId, householdId, now });
+      },
+      async grantFreeCredits() {
+        await grantLegacyFreeGenerationCredits(env.DB, { userId: user.userId, householdId, entitlementId, now });
       },
     });
   } catch (error) {

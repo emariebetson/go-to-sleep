@@ -112,7 +112,8 @@ test("Free duration and remaining allowance are checked before script provider w
   assert.ok(entitlement >= 0 && savePolicy > entitlement && youtube > savePolicy && openai > savePolicy);
   assert.match(voices, /allowedNarrationDurations/);
   assert.match(studio, /allowedNarrationDurations/);
-  assert.match(studio, /allowedDurations\.map/);
-  assert.match(account, /one five-minute creation remaining/);
-  assert.match(account, /five-minute creation used/);
+  assert.match(studio, /lockedNarrationDurations/);
+  assert.match(studio, /Unlock 20-minute bedtimes/);
+  assert.match(account, /three free generations/i);
+  assert.match(source("app/pricing/page.tsx"), /three free generations/i);
 });
