@@ -88,7 +88,6 @@ const D1_CONVERGENCE_SHAPE_QUERIES = Object.freeze({
   foreign_key_list: `/* foreign_key_list */ SELECT m.name AS "tableName",p.id AS id,p.seq AS seq,p."table" AS "parentTable",p."from" AS "fromColumn",p."to" AS "toColumn",p.on_update AS "onUpdate",p.on_delete AS "onDelete",p.match AS match FROM sqlite_schema AS m JOIN pragma_foreign_key_list(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.id,p.seq`,
   index_list: `/* index_list */ SELECT m.name AS "tableName",p.seq AS seq,p.name AS name,p."unique" AS "unique",p.origin AS origin,p.partial AS partial FROM sqlite_schema AS m JOIN pragma_index_list(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.seq,p.name`,
   index_xinfo: `/* index_xinfo */ SELECT m.name AS "indexName",p.seqno AS seqno,p.cid AS cid,p.name AS name,p.desc AS desc,p.coll AS coll,p."key" AS "key" FROM sqlite_schema AS m JOIN pragma_index_xinfo(m.name) AS p WHERE m.type='index' AND m.tbl_name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.seqno`,
-  row_counts: `/* row_counts */ ${D1_CONVERGENCE_TABLES.map((name) => `SELECT '${name}' AS "tableName",COUNT(*) AS "rowCount" FROM "${name}"`).join(" UNION ALL ")}`,
   foreign_key_check: "/* foreign_key_check */ SELECT \"table\" AS \"tableName\",rowid AS \"rowId\",parent AS \"parentTable\",fkid AS \"fkId\" FROM pragma_foreign_key_check LIMIT 101",
 });
 
@@ -300,10 +299,18 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
         return result.results;
       } catch { return shapeFailure(`${key}-query`); }
     };
-    const [tables, foreignKeys, indexes, indexColumns, rowCounts, foreignKeyViolations] = await Promise.all([
+    const [tables, foreignKeys, indexes, indexColumns, foreignKeyViolations] = await Promise.all([
       read("table_xinfo", 1_000), read("foreign_key_list", 1_000), read("index_list", 1_000),
-      read("index_xinfo", 2_000), read("row_counts", D1_CONVERGENCE_TABLES.length), read("foreign_key_check", 101),
+      read("index_xinfo", 2_000), read("foreign_key_check", 101),
     ]);
+    const rowCounts = [];
+    for (const tableName of D1_CONVERGENCE_TABLES) {
+      try {
+        const result = await db.prepare(`/* row_counts:${tableName} */ SELECT COUNT(*) AS "rowCount" FROM "${tableName}"`).all();
+        if (!Array.isArray(result.results) || result.results.length !== 1 || !object(result.results[0]) || JSON.stringify(Reflect.ownKeys(result.results[0]).sort()) !== JSON.stringify(["rowCount"])) return shapeFailure("row-count-shape");
+        rowCounts.push({ tableName, rowCount: result.results[0].rowCount });
+      } catch { return shapeFailure("row-count-query"); }
+    }
     const exact = (row: unknown, keys: readonly string[]) => object(row) && JSON.stringify(Reflect.ownKeys(row).sort()) === JSON.stringify([...keys].sort());
     const identifier = (value: unknown) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value);
     const integer = (value: unknown, minimum = 0) => Number.isSafeInteger(value) && Number(value) >= minimum;

@@ -207,12 +207,16 @@ test("captures only allowlisted D1 structural metadata and aggregate counts for 
     foreign_key_list: [{ tableName: "children", id: 0, seq: 0, parentTable: "users", fromColumn: "user_id", toColumn: "id", onUpdate: "NO ACTION", onDelete: "CASCADE", match: "NONE" }],
     index_list: [{ tableName: "users", seq: 0, name: "sqlite_autoindex_users_1", unique: 1, origin: "pk", partial: 0 }],
     index_xinfo: [{ indexName: "sqlite_autoindex_users_1", seqno: 0, cid: 0, name: "id", desc: 0, coll: "BINARY", key: 1 }],
-    row_counts: liveTables.map((tableName, index) => ({ tableName, rowCount: index === liveTables.length - 1 ? 3 : 0 })),
+    row_counts: liveTables.map((tableName) => ({ tableName, rowCount: tableName === "users" ? 3 : 0 })),
     foreign_key_check: [],
   };
   const statements = [];
   const DB = { prepare: (sql) => ({ all: async () => {
     statements.push(sql);
+    if (sql.includes("/* row_counts:")) {
+      const tableName = /row_counts:([A-Za-z0-9_]+)/.exec(sql)?.[1];
+      return { results: [{ rowCount: tableName === "users" ? 3 : 0 }] };
+    }
     const key = Object.keys(fixtures).find((name) => sql.includes(`/* ${name} */`));
     if (!key) throw new Error("unexpected query");
     return { results: fixtures[key] };
@@ -226,7 +230,7 @@ test("captures only allowlisted D1 structural metadata and aggregate counts for 
     rowCounts: fixtures.row_counts,
     foreignKeyViolations: fixtures.foreign_key_check,
   });
-  assert.equal(statements.length, 6);
+  assert.equal(statements.length, 29);
   assert.equal(statements.every((sql) => !sql.includes("?")), true);
   assert.equal(statements.some((sql) => /SELECT\s+\*/i.test(sql)), false);
   assert.equal(statements.every((sql) => !/email_ciphertext|email_iv|display_name|story|transcript|recording/i.test(sql)), true);
