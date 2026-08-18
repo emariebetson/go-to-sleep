@@ -190,8 +190,9 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
 
   const d1Ledger = async () => {
     if (environment.PRIVATE_TESTER_D1_DISCOVERY === "true") {
-      const schema = await db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name='d1_migrations' OR tbl_name='d1_migrations' ORDER BY type,name").all();
-      const ledger = await db.prepare("SELECT * FROM d1_migrations ORDER BY 1").all();
+      try { await db.prepare("SELECT count(*) AS count FROM households").all(); } catch { return { diagnosticStage: "user-query-unavailable" }; }
+      let schema: D1Result; try { schema = await db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name='d1_migrations' OR tbl_name='d1_migrations' ORDER BY type,name").all(); } catch { return { diagnosticStage: "schema-query-unavailable" }; }
+      let ledger: D1Result; try { ledger = await db.prepare("SELECT * FROM d1_migrations ORDER BY 1").all(); } catch { return { diagnosticStage: "ledger-query-unavailable" }; }
       if (!Array.isArray(schema.results) || schema.results.length < 1 || schema.results.length > 8 || !Array.isArray(ledger.results) || ledger.results.length < 1 || ledger.results.length > 26) throw new Error("private tester gateway evidence unavailable");
       const clean = (rows: unknown[]) => rows.map((row) => { if (!object(row) || Reflect.ownKeys(row).length < 1 || Reflect.ownKeys(row).length > 8) throw new Error("private tester gateway evidence unavailable"); const output: Record<string, string | number | null> = {}; for (const key of Reflect.ownKeys(row)) { const value = row[key as string]; if (typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key) || (value !== null && typeof value !== "string" && !Number.isSafeInteger(value)) || (typeof value === "string" && (!/^[\x20-\x7e\n\r\t]*$/.test(value) || value.length > 2048))) throw new Error("private tester gateway evidence unavailable"); output[key] = value as string | number | null; } return output; });
       return { diagnosticSchema: clean(schema.results), diagnosticRows: clean(ledger.results) };
