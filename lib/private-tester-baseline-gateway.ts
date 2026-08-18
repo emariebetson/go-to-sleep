@@ -8,6 +8,7 @@ const KINDS = new Set([
   "d1-ledger",
   "d1-schema",
   "d1-source-fingerprint",
+  "d1-source-manifest",
   "gates",
   "oauth",
 ]);
@@ -229,6 +230,18 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     }).filter(({ type, name, tableName }) => !D1_PROVIDER_INTERNAL_IDENTITIES.has(`${type}\u0000${name}\u0000${tableName}`));
     return { sourceObjectCount: definitions.length, sourceDefinitionsSha256: await sha256(JSON.stringify(definitions)) };
   };
+  const d1SourceManifest = async () => {
+    const result = await db.prepare("SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all();
+    if (!Array.isArray(result.results) || result.results.length < 1 || result.results.length > 1_000) throw new Error("private tester gateway evidence unavailable");
+    const rows = [];
+    for (const row of result.results) {
+      if (!object(row) || Reflect.ownKeys(row).length !== 5 || !["table", "index", "trigger", "view"].includes(String(row.type)) || typeof row.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.name) || typeof row.tbl_name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.tbl_name) || !Number.isSafeInteger(row.rootpage) || Number(row.rootpage) < 0 || (row.sql !== null && (typeof row.sql !== "string" || row.sql.length < 1 || row.sql.length > 1_048_576))) throw new Error("private tester gateway evidence unavailable");
+      const type = String(row.type), tableName = row.tbl_name;
+      if (D1_PROVIDER_INTERNAL_IDENTITIES.has(`${type}\u0000${row.name}\u0000${tableName}`)) continue;
+      rows.push({ type, name: row.name, tableName, sqlSha256: await sha256(String(row.sql ?? "")) });
+    }
+    return { objects: rows };
+  };
   const oauth = async () => {
     const state = crypto.randomUUID();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -246,6 +259,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
       if (kind === "d1-source-fingerprint") return d1SourceFingerprint();
+      if (kind === "d1-source-manifest") return d1SourceManifest();
       if (kind === "gates") return { nearfamily: false, nearstory: false, scheduler: false };
       if (kind === "oauth") return oauth();
       throw new Error("private tester gateway evidence unavailable");

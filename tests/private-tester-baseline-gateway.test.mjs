@@ -171,6 +171,7 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   assert.equal(/\bLIMIT\b/i.test(statements[1]), false);
   assert.equal((await runtime.read("d1-schema")).objects.some((object) => object.name === "sqlite_autoindex_accounts_1" && object.sql === null), true);
   assert.deepEqual(await runtime.read("d1-source-fingerprint"), { sourceObjectCount: sourceSchemaRows.length, sourceDefinitionsSha256: schemaDefinitionHash });
+  assert.equal((await runtime.read("d1-source-manifest")).objects.length, sourceSchemaRows.length);
   assert.equal(oauthCalls.every(([, init]) => init.redirect === "manual"), true);
   await assert.rejects(() => runtime.read("sites-version"), /evidence unavailable/);
 });
