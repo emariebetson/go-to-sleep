@@ -309,7 +309,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
         const result = await db.prepare(`/* row_counts:${tableName} */ SELECT COUNT(*) AS "rowCount" FROM "${tableName}"`).all();
         if (!Array.isArray(result.results) || result.results.length !== 1 || !object(result.results[0]) || JSON.stringify(Reflect.ownKeys(result.results[0]).sort()) !== JSON.stringify(["rowCount"])) return shapeFailure("row-count-shape");
         rowCounts.push({ tableName, rowCount: result.results[0].rowCount });
-      } catch { return shapeFailure("row-count-query"); }
+      } catch { return shapeFailure(`row-count-query-${tableName}`); }
     }
     const exact = (row: unknown, keys: readonly string[]) => object(row) && JSON.stringify(Reflect.ownKeys(row).sort()) === JSON.stringify([...keys].sort());
     const identifier = (value: unknown) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value);
