@@ -191,9 +191,12 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   const d1Ledger = async () => {
     const result = await db.prepare("SELECT id,name,applied_at FROM d1_migrations ORDER BY id").all();
     const expected = D1_MIGRATIONS.map((id) => `${id}.sql`);
+    const expectedWithoutExtension = [...D1_MIGRATIONS];
     if (!Array.isArray(result.results) || result.results.length !== expected.length) throw new Error("private tester gateway evidence unavailable");
+    const names = result.results.map((row) => object(row) ? row.name : undefined);
+    if (JSON.stringify(names) !== JSON.stringify(expected) && JSON.stringify(names) !== JSON.stringify(expectedWithoutExtension)) throw new Error("private tester gateway evidence unavailable");
     const appliedMigrations = result.results.map((row, index) => {
-      if (!object(row) || Reflect.ownKeys(row).length !== 3 || row.id !== index + 1 || row.name !== expected[index] || typeof row.applied_at !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?$/.test(row.applied_at)) throw new Error("private tester gateway evidence unavailable");
+      if (!object(row) || Reflect.ownKeys(row).length !== 3 || row.id !== index + 1 || typeof row.applied_at !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?$/.test(row.applied_at)) throw new Error("private tester gateway evidence unavailable");
       return { sequence: row.id, name: row.name, appliedAt: row.applied_at };
     });
     return { appliedMigrations };

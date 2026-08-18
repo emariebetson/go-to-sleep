@@ -158,6 +158,9 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   });
 
   assert.deepEqual(await runtime.read("d1-ledger"), { appliedMigrations: migrationRows.map((row) => ({ sequence: row.id, name: row.name, appliedAt: row.applied_at })) });
+  const extensionlessRows = migrationRows.map((row) => ({ ...row, name: row.name.slice(0, -4) }));
+  const extensionlessRuntime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB: { prepare: () => ({ all: async () => ({ results: extensionlessRows }) }) } }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
+  assert.deepEqual(await extensionlessRuntime.read("d1-ledger"), { appliedMigrations: extensionlessRows.map((row) => ({ sequence: row.id, name: row.name, appliedAt: row.applied_at })) });
   assert.deepEqual(await runtime.read("d1-schema"), { schema: "sqlite_schema", objects: schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, rootPage: row.rootpage, sql: row.sql })) });
   assert.deepEqual(await runtime.read("gates"), { nearfamily: false, nearstory: false, scheduler: false });
   assert.deepEqual(await runtime.read("oauth"), { issuer: "https://accounts.google.com", audience: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", clientId: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", providerAcceptedRedirectUri: "https://nearyoustill.com/api/auth/callback/google", proof: "interaction_required" });
