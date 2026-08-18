@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { readSitesBuildIdentity } from "./read-sites-build-identity";
 
 const execFile = promisify(execFileCallback);
 const FILES = Object.freeze([
@@ -70,7 +71,7 @@ export async function stageDarkSitesRelease(input: { root: URL; stageDirectory: 
   });
 }
 
-export async function packageExistingSitesRelease(input: { root: URL; archive: string; officialHelper: string }) {
+export async function packageExistingSitesRelease(input: { root: URL; archive: string; officialHelper: string; commitSha: string }) {
   if (!input.archive.startsWith("/") || !input.officialHelper.startsWith("/")) throw new Error("Sites package paths invalid");
   const stage = await mkdtemp(join(tmpdir(), "nearyou-sites-existing-stage-"));
   const extracted = await mkdtemp(join(tmpdir(), "nearyou-sites-existing-verify-"));
@@ -89,11 +90,17 @@ export async function packageExistingSitesRelease(input: { root: URL; archive: s
       (error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; },
     );
     if (!(await stat(join(extracted, "dist/server/index.js"))).isFile() || !(await stat(join(extracted, "dist/.openai/hosting.json"))).isFile()) throw new Error("Sites package runtime invalid");
+    const buildIdentity = await readSitesBuildIdentity({
+      root: extracted,
+      commitSha: input.commitSha,
+      archiveSha256: await sha256(input.archive),
+    });
     return Object.freeze({
       requiredSchemaHead: DEPLOYED.at(-1)![0],
       requiredMigrations: Object.freeze(DEPLOYED.map(([name]) => name)),
       packagedMigrations: Object.freeze([] as string[]),
       archive: input.archive,
+      buildIdentity,
     });
   } finally {
     await rm(stage, { recursive: true, force: true });
@@ -127,8 +134,8 @@ export async function packageDarkSitesRelease(input: { root: URL; archive: strin
 }
 
 function parseArgs(args: string[]) {
-  if (args.length !== 6 || args[0] !== "--mode" || args[1] !== "existing-schema" || args[2] !== "--archive" || args[4] !== "--helper") throw new Error("Sites package arguments invalid");
-  return { archive: resolve(args[3]!), officialHelper: resolve(args[5]!) };
+  if (args.length !== 8 || args[0] !== "--mode" || args[1] !== "existing-schema" || args[2] !== "--archive" || args[4] !== "--commit-sha" || args[6] !== "--helper") throw new Error("Sites package arguments invalid");
+  return { archive: resolve(args[3]!), commitSha: args[5]!, officialHelper: resolve(args[7]!) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
