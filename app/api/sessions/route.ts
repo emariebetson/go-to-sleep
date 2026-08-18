@@ -181,16 +181,6 @@ export async function POST(request: Request) {
     creditReserved = true;
     await db.update(sleepSessions).set({ status: "generating" }).where(eq(sleepSessions.id, sessionId));
 
-    const response = await generateSpeech(apiKey, providerVoiceId, narration.full);
-    if (!response.ok) {
-      const detail = await response.text();
-      const failure = classifySpeechGenerationError(response.status, detail);
-      console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));
-      await db.update(sleepSessions).set({ status: "failed", errorCode: `elevenlabs_${response.status}` }).where(eq(sleepSessions.id, sessionId));
-      await refundCredit();
-      return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
-    }
-    const audio = await response.arrayBuffer();
     const childSavedAt = new Date();
     const child = await db.insert(children).values({
       id: crypto.randomUUID(),
@@ -214,9 +204,8 @@ export async function POST(request: Request) {
       },
     }).returning({ id: children.id }).get();
     if (!child) throw new Error("The child settings could not be saved.");
-    const childProfileId = `child-profile:${child.id}`;
-    await upsertLegacyChildProfile(env.DB, {
-      id: childProfileId,
+    const childProfileId = await upsertLegacyChildProfile(env.DB, {
+      id: `child-profile:${child.id}`,
       householdId,
       legacyChildId: child.id,
       nickname: input.childName,
@@ -226,6 +215,17 @@ export async function POST(request: Request) {
       now: childSavedAt,
     });
     await db.update(children).set({ householdId, profileId: childProfileId }).where(eq(children.id, child.id));
+
+    const response = await generateSpeech(apiKey, providerVoiceId, narration.full);
+    if (!response.ok) {
+      const detail = await response.text();
+      const failure = classifySpeechGenerationError(response.status, detail);
+      console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));
+      await db.update(sleepSessions).set({ status: "failed", errorCode: `elevenlabs_${response.status}` }).where(eq(sleepSessions.id, sessionId));
+      await refundCredit();
+      return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
+    }
+    const audio = await response.arrayBuffer();
     const runtime = env as unknown as RuntimeEnv;
     const audioKey = `audio/${user.userId}/${sessionId}.mp3`;
 

@@ -31,6 +31,7 @@ class D1Fixture {
   prepare(query) {
     return {
       bind: (...parameters) => ({
+        first: async () => this.database.prepare(query).get(...parameters) || null,
         run: async () => {
           const result = this.database.prepare(query).run(...parameters);
           return { success: true, meta: { changes: result.changes } };
@@ -163,7 +164,7 @@ test("legacy session save upserts child profiles without the post-0006 pronuncia
     (id, user_id, household_id, nickname, normalized_nickname, pronunciation, age_months, bedtime_challenge, created_at, updated_at)
     VALUES ('child-1', 'new-user', 'household:new-user', 'Lachlan', 'lachlan', 'LOCK-lin', 48, 'settling', 1700000000000, 1700000000000)`).run();
 
-  await upsertLegacyChildProfile(db, {
+  const insertedProfileId = await upsertLegacyChildProfile(db, {
     id: "child-profile:child-1",
     householdId: "household:new-user",
     legacyChildId: "child-1",
@@ -173,7 +174,7 @@ test("legacy session save upserts child profiles without the post-0006 pronuncia
     bedtimeChallenge: "settling",
     now: new Date(1700000000000),
   });
-  await upsertLegacyChildProfile(db, {
+  const updatedProfileId = await upsertLegacyChildProfile(db, {
     id: "child-profile:replacement-id",
     householdId: "household:new-user",
     legacyChildId: "child-1",
@@ -183,6 +184,9 @@ test("legacy session save upserts child profiles without the post-0006 pronuncia
     bedtimeChallenge: "night waking",
     now: new Date(1700000001000),
   });
+
+  assert.equal(insertedProfileId, "child-profile:child-1");
+  assert.equal(updatedProfileId, "child-profile:child-1");
 
   assert.deepEqual({ ...database.prepare(`SELECT id, household_id, legacy_child_id, nickname, normalized_nickname,
       age_months, bedtime_challenge, created_at, updated_at
@@ -197,6 +201,16 @@ test("legacy session save upserts child profiles without the post-0006 pronuncia
     created_at: 1700000000000,
     updated_at: 1700000001000,
   });
+});
+
+test("legacy full-session save validates child persistence before paid speech generation", () => {
+  const source = readFileSync(new URL("../app/api/sessions/route.ts", import.meta.url), "utf8");
+  const fullSpeech = source.indexOf("generateSpeech(apiKey, providerVoiceId, narration.full)");
+  const childPersistence = source.indexOf("upsertLegacyChildProfile(env.DB");
+
+  assert.notEqual(fullSpeech, -1);
+  assert.notEqual(childPersistence, -1);
+  assert.ok(childPersistence < fullSpeech, "child persistence must succeed before invoking the paid speech provider");
 });
 
 test("Studio bootstrap requests production-only endpoints only in production mode", async () => {
