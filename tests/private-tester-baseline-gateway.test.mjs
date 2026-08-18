@@ -161,9 +161,6 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   const extensionlessRows = migrationRows.map((row) => ({ ...row, name: row.name.slice(0, -4) }));
   const extensionlessRuntime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB: { prepare: () => ({ all: async () => ({ results: extensionlessRows }) }) } }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
   assert.deepEqual(await extensionlessRuntime.read("d1-ledger"), { appliedMigrations: extensionlessRows.map((row) => ({ sequence: row.id, name: row.name, appliedAt: row.applied_at })) });
-  const discoveryRows = migrationRows.slice(0, -1).map((row, index) => index === 0 ? { ...row, name: "0000_historical_foundation.sql" } : row);
-  const discoveryRuntime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB: { prepare: () => ({ all: async () => ({ results: discoveryRows }) }) } }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
-  assert.deepEqual((await discoveryRuntime.read("d1-ledger")).appliedMigrations.length, discoveryRows.length);
   assert.deepEqual(await runtime.read("d1-schema"), { schema: "sqlite_schema", objects: schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, rootPage: row.rootpage, sql: row.sql })) });
   assert.deepEqual(await runtime.read("gates"), { nearfamily: false, nearstory: false, scheduler: false });
   assert.deepEqual(await runtime.read("oauth"), { issuer: "https://accounts.google.com", audience: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", clientId: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com", providerAcceptedRedirectUri: "https://nearyoustill.com/api/auth/callback/google", proof: "interaction_required" });
@@ -175,6 +172,14 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   assert.equal((await runtime.read("d1-schema")).objects.some((object) => object.name === "sqlite_autoindex_accounts_1" && object.sql === null), true);
   assert.equal(oauthCalls.every(([, init]) => init.redirect === "manual"), true);
   await assert.rejects(() => runtime.read("sites-version"), /evidence unavailable/);
+});
+
+test("temporary authenticated discovery returns only bounded provider migration metadata", async () => {
+  const diagnosticSchema = [{ type: "table", name: "d1_migrations", tbl_name: "d1_migrations", sql: "CREATE TABLE d1_migrations(version TEXT)" }];
+  const diagnosticRows = [{ version: "0000_foundation.sql", applied: 1787000000000 }];
+  const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("sqlite_schema") ? diagnosticSchema : diagnosticRows }) }) };
+  const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB, PRIVATE_TESTER_D1_DISCOVERY: "true" }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
+  assert.deepEqual(await runtime.read("d1-ledger"), { diagnosticSchema, diagnosticRows });
 });
 
 test("OAuth redirect proof rejects wrong origin, state, error, or an authorization code", async () => {

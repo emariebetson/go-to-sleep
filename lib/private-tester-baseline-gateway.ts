@@ -71,7 +71,6 @@ const D1_MIGRATIONS = Object.freeze([
   "0015_platform_release_foundation",
   "0016_marketing_waitlist",
 ]);
-const D1_LEDGER_DISCOVERY_ENABLED = true as const;
 
 function configurationError(): never { throw new Error("private tester gateway configuration invalid"); }
 function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
@@ -190,14 +189,21 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) { console.warn("private tester runtime rejected at environment-contract"); configurationError(); }
 
   const d1Ledger = async () => {
+    if (environment.PRIVATE_TESTER_D1_DISCOVERY === "true") {
+      const schema = await db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name='d1_migrations' OR tbl_name='d1_migrations' ORDER BY type,name").all();
+      const ledger = await db.prepare("SELECT * FROM d1_migrations ORDER BY 1").all();
+      if (!Array.isArray(schema.results) || schema.results.length < 1 || schema.results.length > 8 || !Array.isArray(ledger.results) || ledger.results.length < 1 || ledger.results.length > 26) throw new Error("private tester gateway evidence unavailable");
+      const clean = (rows: unknown[]) => rows.map((row) => { if (!object(row) || Reflect.ownKeys(row).length < 1 || Reflect.ownKeys(row).length > 8) throw new Error("private tester gateway evidence unavailable"); const output: Record<string, string | number | null> = {}; for (const key of Reflect.ownKeys(row)) { const value = row[key as string]; if (typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key) || (value !== null && typeof value !== "string" && !Number.isSafeInteger(value)) || (typeof value === "string" && (!/^[\x20-\x7e\n\r\t]*$/.test(value) || value.length > 2048))) throw new Error("private tester gateway evidence unavailable"); output[key] = value as string | number | null; } return output; });
+      return { diagnosticSchema: clean(schema.results), diagnosticRows: clean(ledger.results) };
+    }
     const result = await db.prepare("SELECT id,name,applied_at FROM d1_migrations ORDER BY id").all();
     const expected = D1_MIGRATIONS.map((id) => `${id}.sql`);
     const expectedWithoutExtension = [...D1_MIGRATIONS];
-    if (!Array.isArray(result.results) || result.results.length < 1 || result.results.length > 26) throw new Error("private tester gateway evidence unavailable");
+    if (!Array.isArray(result.results) || result.results.length !== expected.length) throw new Error("private tester gateway evidence unavailable");
     const names = result.results.map((row) => object(row) ? row.name : undefined);
-    if (!D1_LEDGER_DISCOVERY_ENABLED && JSON.stringify(names) !== JSON.stringify(expected) && JSON.stringify(names) !== JSON.stringify(expectedWithoutExtension)) throw new Error("private tester gateway evidence unavailable");
+    if (JSON.stringify(names) !== JSON.stringify(expected) && JSON.stringify(names) !== JSON.stringify(expectedWithoutExtension)) throw new Error("private tester gateway evidence unavailable");
     const appliedMigrations = result.results.map((row, index) => {
-      if (!object(row) || Reflect.ownKeys(row).length !== 3 || row.id !== index + 1 || typeof row.name !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(row.name) || (typeof row.applied_at !== "string" && !Number.isSafeInteger(row.applied_at)) || String(row.applied_at).length < 1 || String(row.applied_at).length > 64) throw new Error("private tester gateway evidence unavailable");
+      if (!object(row) || Reflect.ownKeys(row).length !== 3 || row.id !== index + 1 || typeof row.applied_at !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?$/.test(row.applied_at)) throw new Error("private tester gateway evidence unavailable");
       return { sequence: row.id, name: row.name, appliedAt: row.applied_at };
     });
     return { appliedMigrations };
