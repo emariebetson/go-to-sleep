@@ -97,9 +97,9 @@ test("does not accept caller-supplied version-affinity metadata as deployment ev
     load: async () => ({ release, read: async () => { clock += 1; return { appliedMigrations: [] }; } }),
     now: () => clock,
   });
-  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger", { headers: { "cloudflare-workers-version-key": workerRuntime.id } }));
+  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger", { headers: { "cloudflare-workers-version-key": workerRuntime.id,"cf-ray":"aaaaaaaaaaaaaaaa-ORD" } }));
   assert.equal(response.status, 200);
-  assert.equal(Object.hasOwn(await response.json(), "workerRuntime"), false);
+  const body=await response.json();assert.equal(Object.hasOwn(body, "workerRuntime"), false);assert.equal(Object.hasOwn(body,"rayId"),false);
   const routeSource = readFileSync(new URL("../app/api/internal/private-tester-baseline/[kind]/route.ts", import.meta.url), "utf8");
   assert.doesNotMatch(routeSource, /cloudflare-workers-version-key|workerRuntime|VERSION_METADATA/);
 });
