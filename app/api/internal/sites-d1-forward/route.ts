@@ -11,8 +11,11 @@ const digest = async (value: unknown) => [...new Uint8Array(await crypto.subtle.
 export async function POST(request: Request) {
   if (!ROUTE_ENABLED) return new Response("Not found", { status: 404 });
   const runtime = env as unknown as Runtime;
-  await createServiceOidcAuthenticator({ issuer: runtime.READINESS_OIDC_ISSUER, audience: runtime.READINESS_OIDC_AUDIENCE, subject: runtime.READINESS_OIDC_SUBJECT, jwksUrl: runtime.READINESS_OIDC_JWKS_URL, clock: { now: async () => Date.now() } })(request);
-  const body = await request.json() as Partial<SitesD1ForwardInput>;
+  try { await createServiceOidcAuthenticator({ issuer: runtime.READINESS_OIDC_ISSUER, audience: runtime.READINESS_OIDC_AUDIENCE, subject: runtime.READINESS_OIDC_SUBJECT, jwksUrl: runtime.READINESS_OIDC_JWKS_URL, clock: { now: async () => Date.now() } })(request); }
+  catch { return new Response("Unauthorized", { status: 401, headers: { "cache-control": "no-store" } }); }
+  let body: Partial<SitesD1ForwardInput>;
+  try { body = await request.json() as Partial<SitesD1ForwardInput>; }
+  catch { return new Response("Invalid", { status: 400, headers: { "cache-control": "no-store" } }); }
   const baseline = SITES_D1_FORWARD_ARTIFACT.schemaCheckpoints.find(value => value.head === "0016");
   if (!ID.test(body.operationId ?? "") || !ID.test(body.releaseId ?? "") || !Number.isSafeInteger(body.issuedAt) || !baseline || !HASH.test(runtime.D1_FORWARD_BASELINE_SCHEMA_SHA256) || baseline.definitionsSha256 !== runtime.D1_FORWARD_BASELINE_SCHEMA_SHA256) return new Response("Invalid", { status: 400 });
   const phase = body.phase;
