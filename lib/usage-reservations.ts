@@ -20,7 +20,7 @@ export function allowanceWeightForNarration(planId: string, generationMode: Gene
   if (![5, 10, 15, 20].includes(durationMinutes)) throw new Error("Narration duration is invalid.");
   if (generationMode === "preview") return 0;
   if (planId === "nearsleep_free") {
-    if (durationMinutes !== 5) throw new Error("NearSleep Free is limited to one five-minute saved creation.");
+    if (![5, 10].includes(durationMinutes)) throw new Error("NearSleep Free supports 5- or 10-minute bedtimes. Choose a paid plan to unlock longer sessions.");
     return 1_000;
   }
   if (planId === "nearsleep_plus_legacy") return 1_000;
@@ -29,18 +29,28 @@ export function allowanceWeightForNarration(planId: string, generationMode: Gene
 }
 
 export function narrationSavePolicy(entitlement: { planId: string; remainingMilliunits: number }, durationMinutes: number) {
-  const allowedDurations = entitlement.planId === "nearsleep_free" ? [5] : [5, 10, 15, 20];
+  const allowedDurations = entitlement.planId === "nearsleep_free" ? [5, 10] : [5, 10, 15, 20];
   let requiredMilliunits;
   try {
     requiredMilliunits = allowanceWeightForNarration(entitlement.planId, "save", durationMinutes);
   } catch (error) {
-    if (entitlement.planId === "nearsleep_free") throw new Error("allowance_exhausted: NearSleep Free is limited to one five-minute saved creation.");
+    if (entitlement.planId === "nearsleep_free") throw new Error("allowance_exhausted: Choose a paid plan to unlock longer sessions.");
     throw error;
   }
   if (!Number.isInteger(entitlement.remainingMilliunits) || entitlement.remainingMilliunits < requiredMilliunits) {
     throw new Error("allowance_exhausted");
   }
   return { allowedDurations, requiredMilliunits };
+}
+
+export function legacyAccountIsPaid(subscriptionStatus: string) {
+  return subscriptionStatus === "active" || subscriptionStatus === "trialing";
+}
+
+export function assertLegacyNarrationDuration(subscriptionStatus: string, durationMinutes: number) {
+  if (!legacyAccountIsPaid(subscriptionStatus) && ![5, 10].includes(durationMinutes)) {
+    throw new Error("NearSleep Free supports 5- or 10-minute bedtimes. Choose a paid plan to unlock longer sessions.");
+  }
 }
 
 export function nearSleepEntitlementIsCurrent(input: { planId: string; status: string; validFrom: Date | number; validUntil: Date | number | null }, now = new Date()) {

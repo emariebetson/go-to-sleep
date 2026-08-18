@@ -5,7 +5,8 @@ export type AccountBootstrapStage =
   | "hasEntitlement"
   | "createHousehold"
   | "createMembership"
-  | "createEntitlement";
+  | "createEntitlement"
+  | "grantFreeCredits";
 
 export interface AccountBootstrapOperations {
   upsertUser(): Promise<void>;
@@ -15,6 +16,7 @@ export interface AccountBootstrapOperations {
   createHousehold(): Promise<void>;
   createMembership(): Promise<void>;
   createEntitlement(): Promise<void>;
+  grantFreeCredits(): Promise<void>;
 }
 
 export class AccountBootstrapError extends Error {
@@ -56,8 +58,8 @@ export async function runAccountBootstrap(operations: AccountBootstrapOperations
   const hasMembership = await runAtStage("hasMembership", () => operations.hasMembership());
   const hasEntitlement = await runAtStage("hasEntitlement", () => operations.hasEntitlement());
 
-  if (hasHousehold && hasMembership && hasEntitlement) return;
   if (!hasHousehold) await runAtStage("createHousehold", () => operations.createHousehold());
   if (!hasMembership) await runAtStage("createMembership", () => operations.createMembership());
   if (!hasEntitlement) await runAtStage("createEntitlement", () => operations.createEntitlement());
+  await runAtStage("grantFreeCredits", () => operations.grantFreeCredits());
 }

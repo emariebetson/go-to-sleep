@@ -13,6 +13,7 @@ import { normalizeNickname } from "@/lib/pronunciation";
 import { prepareNarration } from "@/lib/session-narration";
 import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
 import { bedtimeVoiceSettings } from "@/lib/nearsleep-audio";
+import { assertLegacyNarrationDuration } from "@/lib/usage-reservations";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -64,6 +65,12 @@ export async function POST(request: Request) {
     if (!apiKey) return jsonNoStore({ error: "ElevenLabs is not connected yet. Add its API key to generate audio." }, { status: 503 });
     const { householdId } = await ensureUser(user);
     const db = getDb();
+    const account = await db.select({ subscriptionStatus: users.subscriptionStatus }).from(users).where(eq(users.id, user.userId)).get();
+    try {
+      assertLegacyNarrationDuration(account?.subscriptionStatus || "free", input.durationMinutes);
+    } catch (error) {
+      return jsonNoStore({ error: error instanceof Error ? error.message : "Choose a paid plan to unlock that duration.", code: "upgrade_required" }, { status: 402 });
+    }
     const isDemoNarrator = input.narrationKind === "demo_narrator";
     const requireVerifiedConsent = featureFlagsFromEnv(process.env).requireVerifiedVoiceConsent;
     if (isDemoNarrator && !demoNarratorEnabled()) return jsonNoStore({ error: "Demo narration is unavailable." }, { status: 403 });

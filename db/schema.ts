@@ -420,7 +420,7 @@ export const usageEvents = sqliteTable(
     householdId: text("household_id").references(() => households.id, { onDelete: "cascade" }),
     ledgerEntryId: text("ledger_entry_id").references((): AnySQLiteColumn => usageLedger.id, { onDelete: "set null" }),
     sessionId: text("session_id").references(() => sleepSessions.id, { onDelete: "set null" }),
-    type: text("type", { enum: ["script_generation", "audio_preview", "audio_generation", "playback", "pronunciation_guess"] }).notNull(),
+    type: text("type", { enum: ["script_generation", "audio_preview", "audio_generation", "playback", "pronunciation_guess", "free_generation_credit_grant"] }).notNull(),
     units: integer("units").notNull().default(1),
     metadata: text("metadata", { mode: "json" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

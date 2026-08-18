@@ -13,9 +13,11 @@ function scaffold(initial = {}) {
     ...initial,
   };
   const creates = [];
+  let grants = 0;
   return {
     state,
     creates,
+    get grants() { return grants; },
     operations: {
       async upsertUser() { state.user = true; },
       async hasHousehold() { return state.household; },
@@ -32,6 +34,7 @@ function scaffold(initial = {}) {
         creates.push("entitlement");
         state.entitlement = true;
       },
+      async grantFreeCredits() { grants += 1; },
     },
   };
 }
@@ -41,6 +44,7 @@ test("a complete account scaffold performs no redundant create operations", asyn
   await runAccountBootstrap(fixture.operations);
   assert.equal(fixture.state.user, true);
   assert.deepEqual(fixture.creates, []);
+  assert.equal(fixture.grants, 1);
 });
 
 test("a partial account scaffold creates only missing records in dependency order", async () => {
@@ -48,6 +52,7 @@ test("a partial account scaffold creates only missing records in dependency orde
   await runAccountBootstrap(fixture.operations);
   assert.deepEqual(fixture.creates, ["household", "membership", "entitlement"]);
   assert.deepEqual(fixture.state, { user: true, household: true, membership: true, entitlement: true });
+  assert.equal(fixture.grants, 1);
 });
 
 test("a bootstrap failure reports the failing stage without account data", async () => {
