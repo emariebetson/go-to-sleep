@@ -15,6 +15,7 @@ import { demoNarratorEnabled } from "@/lib/demo-narrator";
 import { classifySpeechGenerationError } from "@/lib/elevenlabs";
 import { assertTrustedMutationOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from "@/lib/http";
 import {
+  bedtimeVoiceSettings,
   parseProductionAudioRequest,
   previewAudioStorageKey,
   productionSessionId,
@@ -90,7 +91,7 @@ async function generateSpeech(apiKey: string, providerVoiceId: string, narration
     body: JSON.stringify({
       text: narration,
       model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
-      voice_settings: { stability: 0.78, similarity_boost: 0.75, style: 0.12, use_speaker_boost: true },
+      voice_settings: bedtimeVoiceSettings(),
     }),
   }, 90_000);
 }

@@ -37,6 +37,7 @@ type ScriptResult = {
   script: string;
   mode: ScriptInput["scriptMode"];
   source: ScriptInput["source"];
+  notice: string | null;
   rightsReceipt: null | { version: "linked-metadata-rights-v1"; attested: true; sourceUrl: string };
 };
 
@@ -45,6 +46,8 @@ function scriptResult(value: Record<string, unknown>): ScriptResult {
   const source = value.source;
   if (source !== null && source !== undefined && (typeof source !== "object" || Array.isArray(source))) throw new Error("invalid_generation_result");
   const receipt = value.rightsReceipt;
+  const notice = value.notice;
+  if (notice !== null && notice !== undefined && (typeof notice !== "string" || notice.length > 300)) throw new Error("invalid_generation_result");
   if (receipt !== null && (typeof receipt !== "object" || Array.isArray(receipt)
     || (receipt as Record<string, unknown>).version !== "linked-metadata-rights-v1"
     || (receipt as Record<string, unknown>).attested !== true
@@ -53,6 +56,7 @@ function scriptResult(value: Record<string, unknown>): ScriptResult {
     script: value.script,
     mode: value.mode as ScriptInput["scriptMode"],
     source: (source || null) as ScriptInput["source"],
+    notice: typeof notice === "string" ? notice : null,
     rightsReceipt: receipt as ScriptResult["rightsReceipt"],
   };
 }
@@ -183,13 +187,16 @@ export const postProductionScript = createDurableGenerationPostHandler<ParsedScr
     input.source = await resolveYouTubeSource(input.sourceUrl);
     const safeFallback = curatedScript(input);
     let script: string;
+    let notice: string | null = null;
     let providerOutput = false;
     if (input.scriptMode === "curated") {
       script = curatedScript(input);
     } else if (!process.env.OPENAI_API_KEY) {
-      script = (await personalizedScriptResult(input, false)).script;
+      const provider = await personalizedScriptResult(input, false);
+      script = provider.script;
+      notice = provider.notice;
     } else {
-      const estimate = providerSpendEstimateMicrocents("openai", "script", Number(input.duration) * 80);
+      const estimate = providerSpendEstimateMicrocents("openai", "script", Number(input.duration) * 115);
       const spend = await reserveProviderSpend({
         householdId,
         userId,
@@ -207,6 +214,7 @@ export const postProductionScript = createDurableGenerationPostHandler<ParsedScr
         await finalizeProviderSpend(spend.reservation.id, "settled", estimate).catch((error) => console.error("Script provider spend settlement failed", error));
         await (provider.providerFailed ? recordProviderFailure("openai") : recordProviderSuccess("openai")).catch((error) => console.error("Script provider circuit telemetry failed", error));
         script = provider.script;
+        notice = provider.notice;
         providerOutput = provider.providerUsed;
       } catch (error) {
         if (invoked) {
@@ -229,6 +237,7 @@ export const postProductionScript = createDurableGenerationPostHandler<ParsedScr
       script,
       mode: input.scriptMode,
       source: input.source || null,
+      notice,
       rightsReceipt: input.sourceUrl
         ? { version: "linked-metadata-rights-v1", attested: true, sourceUrl: input.sourceUrl }
         : null,

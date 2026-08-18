@@ -18,6 +18,10 @@ export type AudioGenerationResult = {
   previewId?: string;
 };
 
+export function bedtimeVoiceSettings() {
+  return { stability: 0.78, similarity_boost: 0.75, style: 0.12, use_speaker_boost: true, speed: 0.8 } as const;
+}
+
 function localId(value: unknown, label: string) {
   const id = String(value || "").trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{2,119}$/.test(id)) throw new Error(`Select a valid local ${label}.`);

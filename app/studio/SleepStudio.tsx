@@ -528,7 +528,7 @@ export function SleepStudio({ initialProductionMode }: { initialProductionMode: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...data, childId, requestId: scriptRequestRef.current }),
       });
-      const payload = await response.json() as { script?: string; source?: SourceMetadata | null; error?: string; code?: string };
+      const payload = await response.json() as { script?: string; source?: SourceMetadata | null; notice?: string | null; error?: string; code?: string };
       if (!response.ok || !payload.script) {
         if (!shouldPreserveGenerationRequest(response.status, payload.code)) scriptRequestRef.current = "";
         throw new Error(payload.error || "The bedtime could not be written.");
@@ -536,6 +536,7 @@ export function SleepStudio({ initialProductionMode }: { initialProductionMode: 
       scriptRequestRef.current = "";
       setScript(payload.script);
       setSource(payload.source || null);
+      setMessage(payload.notice || "");
       setStep(4);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The bedtime could not be written.");

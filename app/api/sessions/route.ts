@@ -12,6 +12,7 @@ import { classifySpeechGenerationError } from "@/lib/elevenlabs";
 import { normalizeNickname } from "@/lib/pronunciation";
 import { prepareNarration } from "@/lib/session-narration";
 import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
+import { bedtimeVoiceSettings } from "@/lib/nearsleep-audio";
 
 type AudioBucket = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
@@ -31,7 +32,7 @@ async function generateSpeech(apiKey: string, providerVoiceId: string, text: str
     body: JSON.stringify({
       text,
       model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
-      voice_settings: { stability: 0.78, similarity_boost: 0.75, style: 0.12, use_speaker_boost: true },
+      voice_settings: bedtimeVoiceSettings(),
     }),
   }, 90_000);
 }
