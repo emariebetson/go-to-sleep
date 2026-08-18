@@ -189,7 +189,6 @@ test("captures bounded raw Sites convergence schema and provider migration rows 
   } }) };
   const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
   assert.deepEqual(await runtime.read("d1-convergence-schema"), {
-    sqliteVersion: "3.49.1",
     objects: schemaRows.map((row) => ({ type: row.type, name: row.name, tableName: row.tbl_name, rootPage: row.rootpage, sql: row.sql })),
   });
   assert.deepEqual(await runtime.read("d1-convergence-ledger"), { providerMigrationRows: providerRows });

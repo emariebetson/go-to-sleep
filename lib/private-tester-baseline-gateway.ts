@@ -251,8 +251,6 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     return { objects: rows };
   };
   const d1ConvergenceSchema = async () => {
-    const versionResult = await db.prepare("SELECT sqlite_version() AS version").all();
-    if (!Array.isArray(versionResult.results) || versionResult.results.length !== 1 || !object(versionResult.results[0]) || Reflect.ownKeys(versionResult.results[0]).length !== 1 || typeof versionResult.results[0].version !== "string" || !/^3\.[0-9]{1,3}\.[0-9]{1,3}$/.test(versionResult.results[0].version)) throw new Error("private tester gateway evidence unavailable");
     const schemaResult = await db.prepare("SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all();
     if (!Array.isArray(schemaResult.results) || schemaResult.results.length < 1 || schemaResult.results.length > 1_000) throw new Error("private tester gateway evidence unavailable");
     let previous = "";
@@ -263,7 +261,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       previous = key;
       return { type: String(row.type), name: row.name, tableName: row.tbl_name, rootPage: Number(row.rootpage), sql: row.sql as string | null };
     });
-    return { sqliteVersion: versionResult.results[0].version, objects };
+    return { objects };
   };
   const d1ConvergenceLedger = async () => {
     const providerResult = await db.prepare("SELECT * FROM __appgarden_migrations ORDER BY 1").all();
