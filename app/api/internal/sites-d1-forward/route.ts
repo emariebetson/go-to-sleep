@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
-import { createServiceOidcAuthenticator } from "@/lib/service-oidc";
+import { createGoogleServiceIdentityAuthenticator } from "@/lib/private-tester-baseline-gateway";
 import { SITES_D1_FORWARD_ARTIFACT } from "@/lib/sites-d1-forward-artifact.generated";
 import { SitesD1ForwardOperation, type SitesD1ForwardInput } from "@/lib/sites-d1-forward-operation";
 
-const ROUTE_ENABLED = true as const;
+const ROUTE_ENABLED = false as const;
 type Runtime = { DB: D1Database; READINESS_OIDC_ISSUER: string; READINESS_OIDC_AUDIENCE: string; READINESS_OIDC_SUBJECT: string; READINESS_OIDC_JWKS_URL: string; D1_FORWARD_BASELINE_SCHEMA_SHA256: string; D1_0026_AUTHORIZATION_SHA256?: string };
 const HASH = /^[a-f0-9]{64}$/, ID = /^[A-Za-z0-9:_-]{8,128}$/;
 const digest = async (value: unknown) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value))))].map(v => v.toString(16).padStart(2, "0")).join("");
@@ -11,7 +11,10 @@ const digest = async (value: unknown) => [...new Uint8Array(await crypto.subtle.
 export async function POST(request: Request) {
   if (!ROUTE_ENABLED) return new Response("Not found", { status: 404 });
   const runtime = env as unknown as Runtime;
-  try { await createServiceOidcAuthenticator({ issuer: runtime.READINESS_OIDC_ISSUER, audience: runtime.READINESS_OIDC_AUDIENCE, subject: runtime.READINESS_OIDC_SUBJECT, jwksUrl: runtime.READINESS_OIDC_JWKS_URL, clock: { now: async () => Date.now() } })(request); }
+  try {
+    if (runtime.READINESS_OIDC_JWKS_URL !== "https://www.googleapis.com/oauth2/v3/certs") throw new Error();
+    await createGoogleServiceIdentityAuthenticator({ issuer: runtime.READINESS_OIDC_ISSUER, audience: runtime.READINESS_OIDC_AUDIENCE, subject: runtime.READINESS_OIDC_SUBJECT })(request);
+  }
   catch { return new Response("Unauthorized", { status: 401, headers: { "cache-control": "no-store" } }); }
   let body: Partial<SitesD1ForwardInput>;
   try { body = await request.json() as Partial<SitesD1ForwardInput>; }
