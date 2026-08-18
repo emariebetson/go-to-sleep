@@ -1,6 +1,10 @@
 import { nearFamilySourceActivated } from "./nearfamily-activation";
 import { parsePrivateTesterRelease, type PrivateTesterRelease } from "./private-tester-release";
 import d1SourceBaseline from "../infra/production/private-tester-d1-schema-baseline.json";
+import { SITES_D1_PHASE_A_ARTIFACT } from "./sites-d1-phase-a-artifact.generated";
+import { SITES_D1_PHASE_B_ARTIFACT } from "./sites-d1-phase-b-artifact.generated";
+import { SITES_D1_PHASE_C_ARTIFACT } from "./sites-d1-phase-c-artifact.generated";
+import { SITES_D1_FORWARD_ARTIFACT } from "./sites-d1-forward-artifact.generated";
 
 const ORIGIN = "https://nearyoustill.com";
 const PREFIX = "/api/internal/private-tester-baseline/";
@@ -216,8 +220,10 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
 
 export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironment, dependencies: { fetch?: typeof fetch; now?: () => number; expectedD1SchemaDefinitionHash?: string; expectedD1SchemaObjectCount?: number } = {}): LoadedEvidence {
   const fetcher = dependencies.fetch ?? fetch;
-  const expectedD1SchemaDefinitionHash = dependencies.expectedD1SchemaDefinitionHash ?? REVIEWED_D1_SCHEMA_DEFINITION_HASH;
-  const expectedD1SchemaObjectCount = dependencies.expectedD1SchemaObjectCount ?? REVIEWED_D1_SCHEMA_OBJECT_COUNT;
+  const liveCheckpoint = SITES_D1_FORWARD_ARTIFACT.schemaCheckpoints.find(({ head }) => head === "0026");
+  const liveState = dependencies.expectedD1SchemaDefinitionHash === undefined && dependencies.expectedD1SchemaObjectCount === undefined;
+  const expectedD1SchemaDefinitionHash = dependencies.expectedD1SchemaDefinitionHash ?? liveCheckpoint?.definitionsSha256 ?? REVIEWED_D1_SCHEMA_DEFINITION_HASH;
+  const expectedD1SchemaObjectCount = dependencies.expectedD1SchemaObjectCount ?? liveCheckpoint?.objectCount ?? REVIEWED_D1_SCHEMA_OBJECT_COUNT;
   let rawRelease: unknown;
   try { rawRelease = JSON.parse(String(environment.PRIVATE_TESTER_BASELINE_RELEASE_JSON ?? "")); } catch { console.warn("private tester runtime rejected at release-json"); configurationError(); }
   const startsAt = object(rawRelease) && typeof rawRelease.startsAt === "string" ? Date.parse(rawRelease.startsAt) : Number.NaN;
@@ -226,11 +232,37 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   const db = environment.DB;
   const manifestProviderObjects = EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
   if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX)) { console.warn("private tester runtime rejected at sites-version"); configurationError(); }
-  if (!HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects)) { console.warn("private tester runtime rejected at reviewed-baseline"); configurationError(); }
+  if (!HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 2_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects)) { console.warn("private tester runtime rejected at reviewed-baseline"); configurationError(); }
   if (!db || typeof db.prepare !== "function") { console.warn("private tester runtime rejected at d1-binding"); configurationError(); }
   if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) { console.warn("private tester runtime rejected at environment-contract"); configurationError(); }
 
   const d1Ledger = async () => {
+    if (liveState) {
+      const provider = await db.prepare("SELECT id,name,applied_at FROM d1_migrations ORDER BY id").all();
+      if (!Array.isArray(provider.results) || JSON.stringify(provider.results) !== JSON.stringify(SITES_D1_PHASE_A_ARTIFACT.providerMigrationRows)) throw new Error("private tester gateway evidence unavailable");
+      const groups = [
+        { table: "nearyou_d1_phase_a_migrations", operations: "nearyou_d1_phase_a_operations", expected: SITES_D1_PHASE_A_ARTIFACT.migrations },
+        { table: "nearyou_d1_phase_b_migrations", operations: "nearyou_d1_phase_b_operations", expected: SITES_D1_PHASE_B_ARTIFACT.migrations },
+        { table: "nearyou_d1_phase_c_migrations", operations: "nearyou_d1_phase_c_operations", expected: SITES_D1_PHASE_C_ARTIFACT.migrations },
+        { table: "nearyou_d1_forward_migrations", operations: "nearyou_d1_forward_operations", expected: SITES_D1_FORWARD_ARTIFACT.migrations },
+      ] as const;
+      const repaired: { migration_id: string; source_sha256: string; applied_at: number }[] = [];
+      for (const group of groups) {
+        const result = await db.prepare(`SELECT m.migration_id,m.source_sha256,m.applied_at,o.status FROM ${group.table} m JOIN ${group.operations} o ON o.operation_id=m.operation_id ORDER BY m.migration_id`).all();
+        if (!Array.isArray(result.results) || result.results.length !== group.expected.length) throw new Error("private tester gateway evidence unavailable");
+        for (const [index, row] of result.results.entries()) {
+          const expected = group.expected[index];
+          if (!object(row) || JSON.stringify(Reflect.ownKeys(row).sort()) !== JSON.stringify(["applied_at", "migration_id", "source_sha256", "status"]) || row.migration_id !== expected?.id || row.source_sha256 !== expected.sha256 || row.status !== "complete" || !Number.isSafeInteger(row.applied_at) || Number(row.applied_at) <= 0) throw new Error("private tester gateway evidence unavailable");
+          repaired.push({ migration_id: String(row.migration_id), source_sha256: String(row.source_sha256), applied_at: Number(row.applied_at) });
+        }
+      }
+      const appliedMigrations = [
+        ...SITES_D1_PHASE_A_ARTIFACT.providerMigrationRows.map((row, index) => ({ sequence: index + 1, name: row.name, appliedAt: row.applied_at })),
+        ...repaired.map((row, index) => ({ sequence: index + 8, name: `${row.migration_id}.sql`, appliedAt: new Date(row.applied_at).toISOString().replace("T", " ").replace("Z", "") })),
+      ];
+      if (appliedMigrations.length !== 27) throw new Error("private tester gateway evidence unavailable");
+      return { appliedMigrations };
+    }
     const result = await db.prepare("SELECT id,name,applied_at FROM d1_migrations ORDER BY id").all();
     const expected = D1_MIGRATIONS.map((id) => `${id}.sql`);
     const expectedWithoutExtension = [...D1_MIGRATIONS];
@@ -245,7 +277,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   };
   const d1Schema = async () => {
     const result = await db.prepare("SELECT type,name,tbl_name,rootpage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all();
-    if (!Array.isArray(result.results) || result.results.length < 1 || result.results.length > 1_000) throw new Error("private tester gateway evidence unavailable");
+    if (!Array.isArray(result.results) || result.results.length < 1 || result.results.length > 2_000) throw new Error("private tester gateway evidence unavailable");
     let previous = "";
     const objects = result.results.map((row) => {
       if (!object(row) || Reflect.ownKeys(row).length !== 5 || !["table", "index", "trigger", "view"].includes(String(row.type)) || typeof row.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.name) || typeof row.tbl_name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.tbl_name) || !Number.isSafeInteger(row.rootpage) || Number(row.rootpage) < 0 || (row.sql !== null && (typeof row.sql !== "string" || row.sql.length < 1 || row.sql.length > 1_048_576))) throw new Error("private tester gateway evidence unavailable");
@@ -254,8 +286,14 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       previous = key;
       return { type: row.type as string, name: row.name, tableName: row.tbl_name, rootPage: Number(row.rootpage), sql: row.sql };
     });
-    try { validateExactD1ProviderObjects(objects); } catch { throw new Error("private tester gateway evidence unavailable"); }
-    const sourceObjects = objects.filter(({ type, name, tableName }) => !D1_PROVIDER_INTERNAL_IDENTITIES.has(`${type}\u0000${name}\u0000${tableName}`));
+    const liveProviderIdentities = new Set((liveCheckpoint?.providerObjects ?? []).map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
+    const providerIdentities = liveState ? liveProviderIdentities : D1_PROVIDER_INTERNAL_IDENTITIES;
+    if (liveState) {
+      if (objects.filter(({ type, name, tableName }) => providerIdentities.has(`${type}\u0000${name}\u0000${tableName}`)).length > liveProviderIdentities.size) throw new Error("private tester gateway evidence unavailable");
+    } else {
+      try { validateExactD1ProviderObjects(objects); } catch { throw new Error("private tester gateway evidence unavailable"); }
+    }
+    const sourceObjects = objects.filter(({ type, name, tableName }) => !providerIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
     if (sourceObjects.length !== expectedD1SchemaObjectCount) throw new Error("private tester gateway evidence unavailable");
     const definitions = sourceObjects.map(({ type, name, tableName, sql }) => ({ type, name, tableName, sql }));
     if (await sha256(JSON.stringify(definitions)) !== expectedD1SchemaDefinitionHash) throw new Error("private tester gateway evidence unavailable");

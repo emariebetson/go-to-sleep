@@ -14,9 +14,10 @@ import {
 import { parsePrivateTesterRelease, type PrivateTesterRelease } from "../lib/private-tester-release";
 import { CloudKmsPublicKeyClient, PostgresPrivateTesterDeploymentManifestNonceStore } from "../lib/release-evidence-adapters";
 import { LIVE_CATALOG_QUERY } from "./postgres-catalog";
-import { verifyPrivateTesterD1SourceBaseline } from "./private-tester-d1-source";
+import { verifyPrivateTesterD1LiveState } from "./private-tester-d1-live-state";
 import { validatePrivateTesterBaselineCandidate } from "./promote-private-tester-baseline";
 import { parseSitesManagedResourceReceipt } from "../lib/sites-managed-resource-receipt";
+import { SITES_D1_FORWARD_ARTIFACT } from "../lib/sites-d1-forward-artifact.generated";
 
 const HASH = /^[a-f0-9]{64}$/, ID = /^[A-Za-z][A-Za-z0-9_.:/@-]{2,511}$/, NAME = /^[a-z][a-z0-9_-]{2,127}$/;
 const SECRET_VERSION = /^projects\/[a-z][a-z0-9-]{2,62}\/secrets\/[A-Za-z0-9_-]{1,255}\/versions\/[1-9][0-9]*$/;
@@ -93,7 +94,7 @@ function d1Applied(value: unknown, expected: LedgerEntry[]): AppliedMigration[] 
   });
 }
 function d1Schema(value: unknown, expectedDefinitionHash: string, expectedObjectCount: number): { objects: SchemaObject[]; sourceObjects: SchemaObject[]; providerInternalObjects: SchemaObject[]; definitionHash: string } {
-  if (!exactRecord(value, ["schema", "objects"]) || value.schema !== "sqlite_schema" || !exactArray(value.objects)) throw new Error("private tester baseline invalid");
+  if (!exactRecord(value, ["schema", "objects"]) || value.schema !== "sqlite_schema" || !exactArray(value.objects,2_000)) throw new Error("private tester baseline invalid");
   let previous = "";
   const objects = value.objects.map((item) => {
     if (!exactRecord(item, ["type", "name", "tableName", "rootPage", "sql"]) || !text(item.type, /^(?:table|index|trigger|view)$/) || !text(item.name, /^[A-Za-z_][A-Za-z0-9_]{0,127}$/) || !text(item.tableName, /^[A-Za-z_][A-Za-z0-9_]{0,127}$/) || !Number.isSafeInteger(item.rootPage) || Number(item.rootPage) < 0 || (item.sql !== null && (typeof item.sql !== "string" || item.sql.length < 1 || item.sql.length > 1_048_576))) throw new Error("private tester baseline invalid");
@@ -102,10 +103,12 @@ function d1Schema(value: unknown, expectedDefinitionHash: string, expectedObject
     previous = key;
     return { type: item.type, name: item.name, tableName: item.tableName, rootPage: Number(item.rootPage), sql: item.sql };
   });
-  try { validateExactD1ProviderObjects(objects); } catch { throw new Error("private tester baseline invalid"); }
-  const providerIdentities = new Set(EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
+  const liveCheckpoint=SITES_D1_FORWARD_ARTIFACT.schemaCheckpoints.find(({head})=>head==="0026"),liveReviewed=liveCheckpoint?.definitionsSha256===expectedDefinitionHash&&liveCheckpoint.objectCount===expectedObjectCount;
+  const providerDefinitions=liveReviewed?liveCheckpoint.providerObjects:EXACT_D1_PROVIDER_INTERNAL_OBJECTS;
+  const providerIdentities = new Set(providerDefinitions.map(({ type, name, tableName }) => `${type}\u0000${name}\u0000${tableName}`));
   const sourceObjects = objects.filter(({ type, name, tableName }) => !providerIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
   const providerInternalObjects = objects.filter(({ type, name, tableName }) => providerIdentities.has(`${type}\u0000${name}\u0000${tableName}`));
+  if(liveReviewed){if(providerInternalObjects.length>providerDefinitions.length)throw new Error("private tester baseline invalid")}else try{validateExactD1ProviderObjects(objects)}catch{throw new Error("private tester baseline invalid")}
   if (sourceObjects.length !== expectedObjectCount) throw new Error("private tester baseline invalid");
   const definitionHash = hash(sourceObjects.map(({ type, name, tableName, sql }) => ({ type, name, tableName, sql })));
   if (definitionHash !== expectedDefinitionHash) throw new Error("private tester baseline invalid");
@@ -194,14 +197,14 @@ async function readBoundedNoFollow(inputPath:string,maxBytes:number):Promise<str
 async function main(): Promise<void> {
   const [releasePath, manifestPath, receiptPath,resourceReceiptPath, outputPath] = process.argv.slice(2);
   if (!releasePath || !manifestPath || !receiptPath ||!resourceReceiptPath|| !outputPath || process.argv.slice(2).length !== 5) throw new Error("private tester baseline configuration missing");
-  const [releaseRaw, receiptRaw,sitesResourceReceiptRaw, deploymentManifest, reviewed] = await Promise.all([readFile(releasePath, "utf8"), readFile(receiptPath, "utf8"),readBoundedNoFollow(resourceReceiptPath,1_048_576), readDeploymentManifestFile(manifestPath), verifyPrivateTesterD1SourceBaseline()]);
+  const [releaseRaw, receiptRaw,sitesResourceReceiptRaw, deploymentManifest, reviewed] = await Promise.all([readFile(releasePath, "utf8"), readFile(receiptPath, "utf8"),readBoundedNoFollow(resourceReceiptPath,1_048_576), readDeploymentManifestFile(manifestPath), verifyPrivateTesterD1LiveState()]);
   const release = JSON.parse(releaseRaw), sitesDeploymentReceipt = JSON.parse(receiptRaw), expectedSitesDeploymentReceiptHash = envId(process.env, "SITES_DEPLOYMENT_RECEIPT_SHA256", HASH),expectedSitesResourceReceiptHash=envId(process.env,"SITES_RESOURCE_RECEIPT_SHA256",HASH), project = envId(process.env, "KMS_PROJECT", /^[a-z][a-z0-9-]{2,62}$/), location = envId(process.env, "KMS_LOCATION", /^[A-Za-z0-9_-]{1,255}$/), keyRing = envId(process.env, "KMS_KEY_RING", /^[A-Za-z0-9_-]{1,255}$/), key = envId(process.env, "KMS_KEY", /^[A-Za-z0-9_-]{1,255}$/), principal = envId(process.env, "EVIDENCE_PRINCIPAL", /^[A-Za-z0-9_:/.@-]{3,200}$/), keyId = envId(process.env, "EVIDENCE_KEY_ID", /^[A-Za-z0-9_:/.@-]{3,200}$/), trustRaw = process.env.EVIDENCE_TRUST_JSON;
   if (!trustRaw || new TextEncoder().encode(trustRaw).byteLength > 65_536) throw new Error("private tester baseline configuration missing");
   let trust: unknown; try { trust = JSON.parse(trustRaw); } catch { throw new Error("private tester baseline configuration missing"); }
   let accessTokenValue: string | undefined; const accessToken = async () => accessTokenValue ??= await token(fetch);
   const publicKeys = new CloudKmsPublicKeyClient({ project, location, keyRing, key, principal, keyId, accessToken }), name = "pg", { Pool } = await import(name) as typeof import("pg"), pool = new Pool({ connectionString: postgresConnection(process.env), ssl: { rejectUnauthorized: false } }), nonceStore = new PostgresPrivateTesterDeploymentManifestNonceStore(pool);
   try {
-    await capturePrivateTesterBaseline({ release, deploymentManifest, deploymentVerification: { trust, lookupKey: (lookupPrincipal, lookupKeyId, version) => publicKeys.lookup(lookupPrincipal, lookupKeyId, version), nonceStore: { consumeDeploymentManifestNonce: (nonce) => nonceStore.consumeDeploymentManifestNonce(nonce) } }, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, sitesResourceReceiptRaw, expectedSitesResourceReceiptHash, expectedD1Ledger: reviewed.sources.slice(1), expectedD1SourceHash: reviewed.sourceHash, expectedD1SchemaDefinitionHash: reviewed.schemaDefinitionHash, expectedD1SchemaObjectCount: reviewed.schemaObjectCount, outputPath, now: Date.now, readers: createAuthenticatedProductionReaders(process.env, { now: Date.now }, release) });
+    await capturePrivateTesterBaseline({ release, deploymentManifest, deploymentVerification: { trust, lookupKey: (lookupPrincipal, lookupKeyId, version) => publicKeys.lookup(lookupPrincipal, lookupKeyId, version), nonceStore: { consumeDeploymentManifestNonce: (nonce) => nonceStore.consumeDeploymentManifestNonce(nonce) } }, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, sitesResourceReceiptRaw, expectedSitesResourceReceiptHash, expectedD1Ledger: reviewed.sources, expectedD1SourceHash: reviewed.sourceHash, expectedD1SchemaDefinitionHash: reviewed.schemaDefinitionHash, expectedD1SchemaObjectCount: reviewed.schemaObjectCount, outputPath, now: Date.now, readers: createAuthenticatedProductionReaders(process.env, { now: Date.now }, release) });
   } finally { await pool.end(); }
 }
 if (import.meta.url === `file://${process.argv[1]}`) main().catch(() => { process.stderr.write("private tester baseline failed\n"); process.exitCode = 1; });
