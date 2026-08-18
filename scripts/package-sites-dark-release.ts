@@ -23,7 +23,7 @@ const FILES = Object.freeze([
   ["0012_nearsleep_library_privacy.sql", "91799e96d5cde8fe695bada23778f1877838144defe233674fc742d009817cf6"],
   ["0013_nearstory_parent_beta.sql", "232a7f19e08a3e769c2cf89ec7027313dfabb636e229a0499d209cc3c9a2ff5f"],
   ["0014_nearlegacy_archive.sql", "864b124ebf0c215f6ab4a56619e6f8c4af964ef942467d29a8974592c2dbb5e1"],
-  ["0015_platform_release_foundation.sql", "ae8dbe18672e424489b810217e3d1252fcc0880f960f1367ff2cd329c7f65f16"],
+  ["0015_platform_release_foundation.sql", "e0de08e54add3a4276f8b50f017a92a8fb6a9443bd400a40676f5f5a91219cef"],
   ["0016_marketing_waitlist.sql", "d559c5b5f760d974f071d1f64d481519fb25a78b209213bf90a77090c4b987d1"],
   ["0017_cutover_source_runtime.sql", "2161df74e3ee4ef4e4b5ac60e1750742ff4beb7ae168983e9585b5b2c966c5fb"],
   ["0018_cutover_inventory_fence.generated.sql", "f5309f824976f10487274a2742bcc930217908c9415b5b6ad929e4a422be102c"],
