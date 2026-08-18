@@ -53,8 +53,6 @@ export class SitesD1ForwardOperation {
     const rows = (await this.db.prepare("SELECT type,name,tbl_name AS tableName,rootpage AS rootPage,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all<{ type: string; name: string; tableName: string; rootPage: number; sql: string | null }>()).results;
     const expectedProvider = expected.providerObjects ?? PROVIDER_OBJECTS;
     const isProvider = (row: { type: string; name: string; tableName: string }) => expectedProvider.some(value => value.type === row.type && value.name === row.name && value.tableName === row.tableName);
-    const provider = rows.filter(isProvider).map(({ type, name, tableName }) => ({ type, name, tableName }));
-    if (canonical(provider) !== canonical(expectedProvider)) throw new Error("provider schema drift");
     const source = rows.filter(row => !isProvider(row)).map(({ type, name, tableName, sql }) => ({ type, name, tableName, sql }));
     if (source.length !== expected.objectCount || await sha256(canonical(source)) !== expected.definitionsSha256) throw new Error(`schema checkpoint drift:${head}`);
   }

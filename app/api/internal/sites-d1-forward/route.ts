@@ -3,7 +3,7 @@ import { createGoogleServiceIdentityAuthenticator } from "@/lib/private-tester-b
 import { SITES_D1_FORWARD_ARTIFACT } from "@/lib/sites-d1-forward-artifact.generated";
 import { SitesD1ForwardOperation, type SitesD1ForwardInput } from "@/lib/sites-d1-forward-operation";
 
-const ROUTE_ENABLED = true as const;
+const ROUTE_ENABLED = false as const;
 type Runtime = { DB: D1Database; READINESS_OIDC_ISSUER: string; READINESS_OIDC_AUDIENCE: string; READINESS_OIDC_SUBJECT: string; READINESS_OIDC_JWKS_URL: string; D1_FORWARD_BASELINE_SCHEMA_SHA256: string; D1_0026_AUTHORIZATION_SHA256?: string };
 const HASH = /^[a-f0-9]{64}$/, ID = /^[A-Za-z0-9:_-]{8,128}$/;
 const digest = async (value: unknown) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value))))].map(v => v.toString(16).padStart(2, "0")).join("");
