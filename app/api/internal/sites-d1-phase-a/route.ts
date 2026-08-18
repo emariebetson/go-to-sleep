@@ -3,8 +3,8 @@ import { createGoogleServiceIdentityAuthenticator } from "@/lib/private-tester-b
 import { SITES_D1_PHASE_A_ARTIFACT } from "@/lib/sites-d1-phase-a-artifact.generated";
 import { SitesD1PhaseAOperation } from "@/lib/sites-d1-phase-a-operation";
 
-const ROUTE_ENABLED=false as const;
-const TEMPORARY_ACTIVATION_ENABLED=false as const;
+const ROUTE_ENABLED=true as const;
+const TEMPORARY_ACTIVATION_ENABLED=true as const;
 const ID=/^[A-Za-z0-9:_-]{8,128}$/;
 type Runtime={DB:D1Database;READINESS_OIDC_ISSUER:string;READINESS_OIDC_AUDIENCE:string;READINESS_OIDC_SUBJECT:string;READINESS_OIDC_JWKS_URL:string};
 
