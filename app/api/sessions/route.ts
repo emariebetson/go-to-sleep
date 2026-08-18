@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gt, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { childProfiles, children, sleepSessions, usageEvents, users, voiceConsents, voices } from "@/db/schema";
+import { children, sleepSessions, usageEvents, users, voiceConsents, voices } from "@/db/schema";
 import { requireApiUser } from "@/lib/auth";
 import { AccountBootstrapError } from "@/lib/account-bootstrap";
 import { ensureUser } from "@/lib/data";
@@ -9,6 +9,7 @@ import { assertSameOrigin, fetchWithTimeout, jsonNoStore, readJsonObject } from 
 import { validateSessionInput } from "@/lib/sleep-session";
 import { demoNarratorEnabled } from "@/lib/demo-narrator";
 import { classifySpeechGenerationError } from "@/lib/elevenlabs";
+import { upsertLegacyChildProfile } from "@/lib/legacy-child-profile";
 import { normalizeNickname } from "@/lib/pronunciation";
 import { prepareNarration } from "@/lib/session-narration";
 import { featureFlagsFromEnv } from "@/lib/nearyou-foundation";
@@ -180,16 +181,6 @@ export async function POST(request: Request) {
     creditReserved = true;
     await db.update(sleepSessions).set({ status: "generating" }).where(eq(sleepSessions.id, sessionId));
 
-    const response = await generateSpeech(apiKey, providerVoiceId, narration.full);
-    if (!response.ok) {
-      const detail = await response.text();
-      const failure = classifySpeechGenerationError(response.status, detail);
-      console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));
-      await db.update(sleepSessions).set({ status: "failed", errorCode: `elevenlabs_${response.status}` }).where(eq(sleepSessions.id, sessionId));
-      await refundCredit();
-      return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
-    }
-    const audio = await response.arrayBuffer();
     const childSavedAt = new Date();
     const child = await db.insert(children).values({
       id: crypto.randomUUID(),
@@ -213,23 +204,28 @@ export async function POST(request: Request) {
       },
     }).returning({ id: children.id }).get();
     if (!child) throw new Error("The child settings could not be saved.");
-    const childProfileId = `child-profile:${child.id}`;
-    await db.insert(childProfiles).values({
-      id: childProfileId,
+    const childProfileId = await upsertLegacyChildProfile(env.DB, {
+      id: `child-profile:${child.id}`,
       householdId,
       legacyChildId: child.id,
       nickname: input.childName,
       normalizedNickname: normalizeNickname(input.childName),
-      pronunciation: input.pronunciation,
       ageMonths: input.ageMonths,
       bedtimeChallenge: input.challenge,
-      createdAt: childSavedAt,
-      updatedAt: childSavedAt,
-    }).onConflictDoUpdate({
-      target: [childProfiles.householdId, childProfiles.normalizedNickname],
-      set: { legacyChildId: child.id, nickname: input.childName, pronunciation: input.pronunciation, ageMonths: input.ageMonths, bedtimeChallenge: input.challenge, updatedAt: childSavedAt },
+      now: childSavedAt,
     });
     await db.update(children).set({ householdId, profileId: childProfileId }).where(eq(children.id, child.id));
+
+    const response = await generateSpeech(apiKey, providerVoiceId, narration.full);
+    if (!response.ok) {
+      const detail = await response.text();
+      const failure = classifySpeechGenerationError(response.status, detail);
+      console.error("ElevenLabs generation failed", response.status, detail.slice(0, 400));
+      await db.update(sleepSessions).set({ status: "failed", errorCode: `elevenlabs_${response.status}` }).where(eq(sleepSessions.id, sessionId));
+      await refundCredit();
+      return jsonNoStore({ error: failure.message, code: failure.code }, { status: failure.httpStatus });
+    }
+    const audio = await response.arrayBuffer();
     const runtime = env as unknown as RuntimeEnv;
     const audioKey = `audio/${user.userId}/${sessionId}.mp3`;
 

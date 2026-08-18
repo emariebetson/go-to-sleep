@@ -89,6 +89,25 @@ test("personalized provider failures carry a user-visible fallback notice", asyn
   }
 });
 
+test("personalized provider timeouts return the full-length safe fallback", async () => {
+  const originalKey = process.env.OPENAI_API_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.OPENAI_API_KEY = "test-key";
+  globalThis.fetch = async () => { throw new DOMException("The operation was aborted", "AbortError"); };
+  try {
+    const result = await personalizedScriptResult(validateScriptInput(base));
+    const words = result.script.trim().split(/\s+/u).length;
+    assert.equal(result.providerUsed, false);
+    assert.equal(result.providerFailed, true);
+    assert.ok(words >= 1_150, `10-minute timeout fallback had only ${words} words`);
+    assert.match(result.notice, /fallback.+requested length/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
+  }
+});
+
 test("personalized provider output cannot underfill the requested bedtime", async () => {
   const originalKey = process.env.OPENAI_API_KEY;
   const originalFetch = globalThis.fetch;

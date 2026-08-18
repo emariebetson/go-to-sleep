@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { decideHouseholdCapacity, capacityMutationAllowed } from "../lib/nearfamily-capacity.ts";
 import { createNearFamilySummaryService } from "../lib/nearfamily-service.ts";
+import { upsertLegacyChildProfile } from "../lib/legacy-child-profile.ts";
 
 const exactFamilyUsage = {
   members: 5,
@@ -75,6 +76,71 @@ function familyDatabase() {
   for (let index = 0; index < 5; index += 1) database.prepare("INSERT INTO child_profiles(id,household_id,nickname,normalized_nickname,pronunciation,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(`child_${index}`, "house_1", `Child ${index}`, `child-${index}`, "", now, now);
   return database;
 }
+
+class D1Fixture {
+  constructor(database) {
+    this.database = database;
+  }
+
+  prepare(query) {
+    return {
+      bind: (...parameters) => ({
+        first: async () => this.database.prepare(query).get(...parameters) || null,
+        run: async () => {
+          const result = this.database.prepare(query).run(...parameters);
+          return { success: true, meta: { changes: result.changes } };
+        },
+      }),
+    };
+  }
+}
+
+test("legacy child profile persistence updates an existing child at the current plan limit", async () => {
+  const database = familyDatabase();
+  const db = new D1Fixture(database);
+  const existing = database.prepare("SELECT id FROM child_profiles WHERE household_id='house_1' AND normalized_nickname='child-0'").get();
+  database.prepare(`INSERT INTO children
+    (id, user_id, household_id, nickname, normalized_nickname, pronunciation, age_months, bedtime_challenge, created_at, updated_at)
+    VALUES ('legacy-child-0', 'adult_1', 'house_1', 'Child Zero', 'child-0', '', 61, 'night waking', 1700000000000, 1700000000000)`).run();
+
+  const profileId = await upsertLegacyChildProfile(db, {
+    id: "replacement-id",
+    householdId: "house_1",
+    legacyChildId: "legacy-child-0",
+    nickname: "Child Zero",
+    normalizedNickname: "child-0",
+    ageMonths: 61,
+    bedtimeChallenge: "night waking",
+    now: new Date(1700000001000),
+  });
+
+  assert.equal(profileId, existing.id);
+  assert.deepEqual({ ...database.prepare("SELECT id, legacy_child_id, nickname, age_months, bedtime_challenge, updated_at FROM child_profiles WHERE id=?").get(existing.id) }, {
+    id: existing.id,
+    legacy_child_id: "legacy-child-0",
+    nickname: "Child Zero",
+    age_months: 61,
+    bedtime_challenge: "night waking",
+    updated_at: 1700000001000,
+  });
+  assert.equal(database.prepare("SELECT count(*) count FROM child_profiles WHERE household_id='house_1'").get().count, 5);
+});
+
+test("legacy child profile persistence still rejects a new child over the current plan limit", async () => {
+  const database = familyDatabase();
+  const db = new D1Fixture(database);
+
+  await assert.rejects(() => upsertLegacyChildProfile(db, {
+    id: "child-new",
+    householdId: "house_1",
+    legacyChildId: "legacy-child-new",
+    nickname: "New child",
+    normalizedNickname: "new-child",
+    ageMonths: 36,
+    bedtimeChallenge: null,
+    now: new Date(1700000001000),
+  }), /household_capacity_restricted|household_child_limit_reached/);
+});
 
 test("a downgrade restricts new capacity without deleting data and remediation clears the restriction", () => {
   const database = familyDatabase();
