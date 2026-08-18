@@ -5,12 +5,15 @@ import { SITES_D1_PHASE_A_ARTIFACT } from "./sites-d1-phase-a-artifact.generated
 import { SITES_D1_PHASE_B_ARTIFACT } from "./sites-d1-phase-b-artifact.generated";
 import { SITES_D1_PHASE_C_ARTIFACT } from "./sites-d1-phase-c-artifact.generated";
 import { SITES_D1_FORWARD_ARTIFACT } from "./sites-d1-forward-artifact.generated";
+import { createD1LedgerEvidenceReader, createD1SchemaEvidenceReader } from "./private-tester-sites-evidence";
 
 const ORIGIN = "https://nearyoustill.com";
 const PREFIX = "/api/internal/private-tester-baseline/";
 const KINDS = new Set([
   "d1-ledger",
   "d1-schema",
+  "d1-schema-page",
+  "d1-ledger-page",
   "d1-convergence-ledger",
   "d1-convergence-schema",
   "d1-convergence-shape",
@@ -40,12 +43,12 @@ export const D1_CONVERGENCE_PROBES=Object.freeze([
 type Trust = { issuer: string; audience: string; subject: string };
 type LoadedEvidence = {
   release: PrivateTesterRelease;
-  read(kind: string): Promise<unknown>;
+  read(kind: string, cursor?: string | null): Promise<unknown>;
 };
 
 type D1Result = { results?: unknown[] };
 type GatewayEnvironment = Record<string, unknown> & {
-  DB?: { prepare(sql: string): { all(): Promise<D1Result> } };
+  DB?: { prepare(sql: string): { bind(...values: unknown[]): { all(): Promise<D1Result> }; all(): Promise<D1Result> } };
 };
 
 const HASH = /^[a-f0-9]{64}$/;
@@ -218,7 +221,7 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
   };
 }
 
-export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironment, dependencies: { fetch?: typeof fetch; now?: () => number; expectedD1SchemaDefinitionHash?: string; expectedD1SchemaObjectCount?: number } = {}): LoadedEvidence {
+export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironment, dependencies: { fetch?: typeof fetch; now?: () => number; expectedD1SchemaDefinitionHash?: string; expectedD1SchemaObjectCount?: number; buildId?: string } = {}): LoadedEvidence {
   const fetcher = dependencies.fetch ?? fetch;
   const liveCheckpoint = SITES_D1_FORWARD_ARTIFACT.schemaCheckpoints.find(({ head }) => head === "0026");
   const liveState = dependencies.expectedD1SchemaDefinitionHash === undefined && dependencies.expectedD1SchemaObjectCount === undefined;
@@ -230,6 +233,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   let release: PrivateTesterRelease;
   try { release = parsePrivateTesterRelease(rawRelease, startsAt); } catch { console.warn("private tester runtime rejected at release-contract"); configurationError(); }
   const db = environment.DB;
+  const buildId = dependencies.buildId ?? process.env.__VINEXT_BUILD_ID ?? "";
   const manifestProviderObjects = EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
   if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX)) { console.warn("private tester runtime rejected at sites-version"); configurationError(); }
   if (!HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 2_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects)) { console.warn("private tester runtime rejected at reviewed-baseline"); configurationError(); }
@@ -392,9 +396,11 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   };
   return {
     release,
-    async read(kind: string) {
+    async read(kind: string, cursor: string | null = null) {
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
+      if (kind === "d1-schema-page") return createD1SchemaEvidenceReader(db, buildId)(cursor);
+      if (kind === "d1-ledger-page") return createD1LedgerEvidenceReader(db, buildId)(cursor);
       if (kind === "d1-convergence-ledger") return d1ConvergenceLedger();
       if (kind === "d1-convergence-schema") return d1ConvergenceSchema();
       if (kind === "d1-convergence-shape") return d1ConvergenceShape();
@@ -428,10 +434,13 @@ export function createPrivateTesterBaselineGateway(input: {
     try {
       const url = new URL(request.url);
       const kind = url.pathname.startsWith(PREFIX) ? url.pathname.slice(PREFIX.length) : "";
-      if (request.method !== "GET" || url.origin !== ORIGIN || url.search || url.hash || !KINDS.has(kind)) return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
+      const paginated = kind === "d1-schema-page" || kind === "d1-ledger-page";
+      const cursor = paginated ? url.searchParams.get("cursor") : null;
+      const validPaginationQuery = paginated && (url.search === "" || (url.searchParams.size === 1 && cursor !== null && /^[A-Za-z0-9_-]{1,4096}$/.test(cursor)));
+      if (request.method !== "GET" || url.origin !== ORIGIN || url.hash || !KINDS.has(kind) || (paginated ? !validPaginationQuery : url.search !== "")) return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
       const loaded = await input.load();
       evidenceFailureStage = "evidence-read";
-      const body = await loaded.read(kind);
+      const body = await loaded.read(kind, cursor);
       evidenceFailureStage = "observation";
       const observedAt = input.now();
       if (!Number.isSafeInteger(observedAt)) throw new Error("clock unavailable");
