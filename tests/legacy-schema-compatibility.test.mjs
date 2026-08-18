@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { upsertLegacyChildProfile } from "../lib/legacy-child-profile.ts";
 import * as legacyEntitlementBootstrap from "../lib/legacy-entitlement-bootstrap.ts";
 import { createLegacyVoice } from "../lib/legacy-voice-insert.ts";
 import { loadStudioBootstrap } from "../lib/studio-bootstrap.ts";
@@ -152,6 +153,49 @@ test("legacy voice insert writes only pre-0011 voice columns", async () => {
     consent_attested_at: 1700000000000,
     created_at: 1700000000000,
     deleted_at: null,
+  });
+});
+
+test("legacy session save upserts child profiles without the post-0006 pronunciation column", async () => {
+  const { database, db } = legacyFixture();
+  assert.equal(database.prepare("SELECT count(*) AS count FROM pragma_table_info('child_profiles') WHERE name = 'pronunciation'").get().count, 0);
+  database.prepare(`INSERT INTO children
+    (id, user_id, household_id, nickname, normalized_nickname, pronunciation, age_months, bedtime_challenge, created_at, updated_at)
+    VALUES ('child-1', 'new-user', 'household:new-user', 'Lachlan', 'lachlan', 'LOCK-lin', 48, 'settling', 1700000000000, 1700000000000)`).run();
+
+  await upsertLegacyChildProfile(db, {
+    id: "child-profile:child-1",
+    householdId: "household:new-user",
+    legacyChildId: "child-1",
+    nickname: "Lachlan",
+    normalizedNickname: "lachlan",
+    ageMonths: 48,
+    bedtimeChallenge: "settling",
+    now: new Date(1700000000000),
+  });
+  await upsertLegacyChildProfile(db, {
+    id: "child-profile:replacement-id",
+    householdId: "household:new-user",
+    legacyChildId: "child-1",
+    nickname: "Lachlan B.",
+    normalizedNickname: "lachlan",
+    ageMonths: 49,
+    bedtimeChallenge: "night waking",
+    now: new Date(1700000001000),
+  });
+
+  assert.deepEqual({ ...database.prepare(`SELECT id, household_id, legacy_child_id, nickname, normalized_nickname,
+      age_months, bedtime_challenge, created_at, updated_at
+    FROM child_profiles WHERE household_id = 'household:new-user' AND normalized_nickname = 'lachlan'`).get() }, {
+    id: "child-profile:child-1",
+    household_id: "household:new-user",
+    legacy_child_id: "child-1",
+    nickname: "Lachlan B.",
+    normalized_nickname: "lachlan",
+    age_months: 49,
+    bedtime_challenge: "night waking",
+    created_at: 1700000000000,
+    updated_at: 1700000001000,
   });
 });
 
