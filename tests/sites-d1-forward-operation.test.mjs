@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {DatabaseSync} from "node:sqlite";
 import {execFileSync} from "node:child_process";
-import {readFileSync,readdirSync} from "node:fs";
+import {readFileSync} from "node:fs";
 import {SITES_D1_FORWARD_ARTIFACT} from "../lib/sites-d1-forward-artifact.generated.ts";
 import {SITES_D1_OPERATION_BOOTSTRAP,SitesD1ForwardOperation,splitD1Migration} from "../lib/sites-d1-forward-operation.ts";
+import {SITES_D1_PHASE_A_BOOTSTRAP} from "../lib/sites-d1-phase-a-operation.ts";
+import {SITES_D1_PHASE_A_ARTIFACT} from "../lib/sites-d1-phase-a-artifact.generated.ts";
+import {SITES_D1_PHASE_B_ARTIFACT} from "../lib/sites-d1-phase-b-artifact.generated.ts";
+import {SITES_D1_PHASE_C_ARTIFACT} from "../lib/sites-d1-phase-c-artifact.generated.ts";
 
 class Bound{constructor(db,sql,args=[]){this.db=db;this.sql=sql;this.args=args}bind(...args){return new Bound(this.db,this.sql,args)}async all(){return{results:this.db.prepare(this.sql).all(...this.args)}}async first(){return this.db.prepare(this.sql).get(...this.args)??null}async run(){const r=this.db.prepare(this.sql).run(...this.args);return{meta:{changes:Number(r.changes)}}}}
 class D1{constructor(db,loseAt=-1){this.db=db;this.loseAt=loseAt;this.calls=0}prepare(sql){return new Bound(this.db,sql)}async batch(statements){this.db.exec("BEGIN");try{const out=[];for(const s of statements)out.push(await s.run());this.db.exec("COMMIT");this.calls++;if(this.calls===this.loseAt)throw new Error("lost response");return out}catch(e){if(this.db.isTransaction)this.db.exec("ROLLBACK");throw e}}}
@@ -24,13 +28,14 @@ test("uses exact schema truth and hashes same-name rogue schema objects without 
   await assert.rejects(()=>new SitesD1ForwardOperation(rogue.db).run(safeInput),/schema checkpoint drift/);
 });
 test("0017-0025 operation cannot include 0026 and 0026 requires a separate exact authorization",async()=>{const f=fixture(),sql="CREATE TABLE c(id TEXT)",sha256=await digest(sql),reviewedMigrations=[...SITES_D1_FORWARD_ARTIFACT.migrations];await assert.rejects(()=>new SitesD1ForwardOperation(f.db).run({...safeInput,reviewedMigrations,migrations:[...migrations,{id:"0026_canary",sha256,sql}]}),/phase boundary/);await assert.rejects(()=>new SitesD1ForwardOperation(f.db).run({...safeInput,reviewedMigrations,phase:"0026",migrations:[{id:"0026_canary",sha256,sql}]}),/authorization/)});
-test("generated production statements and every 0016-0026 schema checkpoint are reproducible",()=>{execFileSync(process.execPath,["--import","tsx","scripts/generate-sites-d1-forward-artifact.ts","--check"],{cwd:new URL("..",import.meta.url)});const artifact=readFileSync(new URL("../lib/sites-d1-forward-artifact.generated.ts",import.meta.url),"utf8");for(let head=16;head<=26;head++)assert.match(artifact,new RegExp(`\\"head\\":\\"00${head}[^\\"]*\\"`));assert.match(artifact,/canary_entitlement_audit_update_guard/);assert.match(artifact,/canary_entitlement_audit_delete_guard/)});
+test("generated production statements and every 0016-0026 schema checkpoint are reproducible",()=>{execFileSync(process.execPath,["--import","tsx","scripts/generate-sites-d1-forward-artifact.ts","--check"],{cwd:new URL("..",import.meta.url),env:{...process.env,D1_PHASE_A_SCHEMA_EVIDENCE:"/tmp/d1-convergence-schema-local.json"}});const artifact=readFileSync(new URL("../lib/sites-d1-forward-artifact.generated.ts",import.meta.url),"utf8");for(let head=16;head<=26;head++)assert.match(artifact,new RegExp(`\\"head\\":\\"00${head}[^\\"]*\\"`));assert.match(artifact,/canary_entitlement_audit_update_guard/);assert.match(artifact,/canary_entitlement_audit_delete_guard/)});
 test("production artifact applies the exact 0017-0025 and separately authorized 0026 phases",async()=>{
   const sqlite=new DatabaseSync(":memory:");
-  const prefix=readdirSync(new URL("../drizzle",import.meta.url)).filter(file=>/^00(?:0[0-9]|1[0-6])_.*\.sql$/.test(file)).sort();
-  for(const file of prefix)sqlite.exec(readFileSync(new URL(`../drizzle/${file}`,import.meta.url),"utf8"));
-  sqlite.exec("CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,applied_at TEXT NOT NULL);CREATE TABLE _cf_METADATA(key TEXT,value TEXT);CREATE TABLE seq_seed(id INTEGER PRIMARY KEY AUTOINCREMENT);DROP TABLE seq_seed;ANALYZE");
-  for(const [index,file] of prefix.entries())sqlite.prepare("INSERT INTO d1_migrations VALUES(?,?,CURRENT_TIMESTAMP)").run(index+1,file.replace(/\.sql$/, ""));
+  const provider=new Set(SITES_D1_FORWARD_ARTIFACT.schemaCheckpoints[0].providerObjects.map(x=>`${x.type}\0${x.name}\0${x.tableName}`)),raw=JSON.parse(readFileSync("/tmp/d1-convergence-schema-local.json","utf8"));
+  sqlite.exec("PRAGMA foreign_keys=OFF");for(const type of["table","index","trigger","view"])for(const x of raw.body.objects.filter(x=>x.type===type&&x.sql&&!provider.has(`${x.type}\0${x.name}\0${x.tableName}`)))sqlite.exec(x.sql);
+  for(const sql of SITES_D1_PHASE_A_BOOTSTRAP)sqlite.exec(sql);for(const m of SITES_D1_PHASE_A_ARTIFACT.migrations)for(const sql of m.statements)sqlite.exec(sql);
+  for(const sql of SITES_D1_PHASE_B_ARTIFACT.bootstrap)sqlite.exec(sql);for(const m of SITES_D1_PHASE_B_ARTIFACT.migrations)for(const sql of m.statements)sqlite.exec(sql);
+  for(const sql of SITES_D1_PHASE_C_ARTIFACT.bootstrap)sqlite.exec(sql);for(const m of SITES_D1_PHASE_C_ARTIFACT.migrations)for(const sql of m.statements)sqlite.exec(sql);
   const db=new D1(sqlite);
   const forward=SITES_D1_FORWARD_ARTIFACT.migrations.filter(value=>Number(value.id.slice(0,4))<=25).map(({id,sha256,sql})=>({id,sha256,sql}));
   const common={releaseId:"rel_prod_artifact_20260817",issuedAt:1787000000000,reviewedMigrations:[...SITES_D1_FORWARD_ARTIFACT.migrations],schemaCheckpoints:[...SITES_D1_FORWARD_ARTIFACT.schemaCheckpoints]};
@@ -39,7 +44,6 @@ test("production artifact applies the exact 0017-0025 and separately authorized 
   const authorization={purpose:"d1-0026-separate-authorization",releaseId:common.releaseId,operationId:"d1-forward:prod-0026",migrationSha256:migration0026.sha256};
   await new SitesD1ForwardOperation(db).run({...common,operationId:authorization.operationId,phase:"0026",migrations:[{id:migration0026.id,sha256:migration0026.sha256,sql:migration0026.sql}],authorization});
   assert.equal((await new SitesD1ForwardOperation(db).run({...common,operationId:authorization.operationId,phase:"0026",migrations:[{id:migration0026.id,sha256:migration0026.sha256,sql:migration0026.sql}],authorization})).status,"complete");
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM d1_migrations").get().n,17);
   assert.equal(sqlite.prepare("SELECT count(*) n FROM nearyou_sites_d1_operations WHERE status='complete'").get().n,2);
 });
 test("admin route is literal-dark and authenticates Google service tokens before parsing or constructing the operation",()=>{const route=readFileSync(new URL("../app/api/internal/sites-d1-forward/route.ts",import.meta.url),"utf8"),auth=route.indexOf("createGoogleServiceIdentityAuthenticator"),parse=route.indexOf("request.json()"),operation=route.indexOf("new SitesD1ForwardOperation");assert.match(route,/ROUTE_ENABLED = false as const/);assert.ok(auth<parse&&parse<operation);assert.match(route,/D1_FORWARD_BASELINE_SCHEMA_SHA256/);assert.match(route,/D1_0026_AUTHORIZATION_SHA256/);assert.doesNotMatch(route,/d1_migrations/);assert.doesNotMatch(route,/createServiceOidcAuthenticator/)});

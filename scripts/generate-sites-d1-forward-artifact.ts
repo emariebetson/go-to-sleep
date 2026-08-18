@@ -2,6 +2,10 @@ import {createHash} from "node:crypto";
 import {DatabaseSync} from "node:sqlite";
 import {readFileSync,readdirSync,writeFileSync} from "node:fs";
 import {SITES_D1_OPERATION_BOOTSTRAP,splitD1Migration} from "../lib/sites-d1-forward-operation";
+import {SITES_D1_PHASE_A_BOOTSTRAP} from "../lib/sites-d1-phase-a-operation";
+import {SITES_D1_PHASE_A_ARTIFACT} from "../lib/sites-d1-phase-a-artifact.generated";
+import {SITES_D1_PHASE_B_ARTIFACT} from "../lib/sites-d1-phase-b-artifact.generated";
+import {SITES_D1_PHASE_C_ARTIFACT} from "../lib/sites-d1-phase-c-artifact.generated";
 
 const root=new URL("../",import.meta.url);
 const hash=(value:string)=>createHash("sha256").update(value).digest("hex");
@@ -34,16 +38,19 @@ const pending=readFileSync(new URL("docs/pending/0026_canary_entitlements.sql.di
 const source0026=`${pending}\n--> statement-breakpoint\nCREATE TRIGGER canary_entitlement_audit_update_guard BEFORE UPDATE ON canary_entitlement_audit BEGIN SELECT RAISE(ABORT,'canary entitlement audit immutable'); END;\n--> statement-breakpoint\nCREATE TRIGGER canary_entitlement_audit_delete_guard BEFORE DELETE ON canary_entitlement_audit BEGIN SELECT RAISE(ABORT,'canary entitlement audit immutable'); END;`;
 const migrations=[...normalizedSources,{id:"0026_canary_entitlements",sql:source0026}].map(value=>({...value,sha256:hash(value.sql),statements:splitD1Migration(value.sql)}));
 
-const db=new DatabaseSync(":memory:");
-for(const file of prefixFiles)db.exec(readFileSync(new URL(`drizzle/${file}`,root),"utf8"));
-db.exec("CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,applied_at TEXT NOT NULL)");
-for(const [index,file] of prefixFiles.entries())db.prepare("INSERT INTO d1_migrations VALUES(?,?,CURRENT_TIMESTAMP)").run(index+1,file.replace(/\.sql$/, ""));
-const providerNames=new Set(["sqlite_autoindex_d1_migrations_1","_cf_METADATA","d1_migrations","sqlite_sequence","sqlite_stat1"]);
-const providerObjects=[{type:"index",name:"sqlite_autoindex_d1_migrations_1",tableName:"d1_migrations"},{type:"table",name:"_cf_METADATA",tableName:"_cf_METADATA"},{type:"table",name:"d1_migrations",tableName:"d1_migrations"},{type:"table",name:"sqlite_sequence",tableName:"sqlite_sequence"},{type:"table",name:"sqlite_stat1",tableName:"sqlite_stat1"}];
+const schemaPath=process.env.D1_PHASE_A_SCHEMA_EVIDENCE;if(!schemaPath)throw new Error("forward schema evidence missing");
+const raw=JSON.parse(readFileSync(schemaPath,"utf8")) as {body:{objects:{type:string;name:string;tableName:string;sql:string|null}[]}};
+const providerObjects=[{type:"index",name:"sqlite_autoindex___appgarden_migrations_1",tableName:"__appgarden_migrations"},{type:"table",name:"__appgarden_migrations",tableName:"__appgarden_migrations"},{type:"table",name:"_cf_KV",tableName:"_cf_KV"},{type:"table",name:"sqlite_sequence",tableName:"sqlite_sequence"},{type:"table",name:"sqlite_stat1",tableName:"sqlite_stat1"}];
+const providerIdentities=new Set(providerObjects.map(x=>`${x.type}\0${x.name}\0${x.tableName}`)),db=new DatabaseSync(":memory:");
+db.exec("PRAGMA foreign_keys=OFF");
+for(const type of["table","index","trigger","view"])for(const x of raw.body.objects.filter(x=>x.type===type&&x.sql&&!providerIdentities.has(`${x.type}\0${x.name}\0${x.tableName}`)))db.exec(x.sql!);
+for(const sql of SITES_D1_PHASE_A_BOOTSTRAP)db.exec(sql);for(const m of SITES_D1_PHASE_A_ARTIFACT.migrations)for(const sql of m.statements)db.exec(sql);
+for(const sql of SITES_D1_PHASE_B_ARTIFACT.bootstrap)db.exec(sql);for(const m of SITES_D1_PHASE_B_ARTIFACT.migrations)for(const sql of m.statements)db.exec(sql);
+for(const sql of SITES_D1_PHASE_C_ARTIFACT.bootstrap)db.exec(sql);for(const m of SITES_D1_PHASE_C_ARTIFACT.migrations)for(const sql of m.statements)db.exec(sql);
 const checkpoints:Array<{head:string;objectCount:number;definitionsSha256:string;providerObjects:typeof providerObjects}>=[];
-const capture=(head:string)=>{const rows=db.prepare("SELECT type,name,tbl_name AS tableName,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all().filter(row=>!providerNames.has(String(row.name)));checkpoints.push({head,objectCount:rows.length,definitionsSha256:hash(canonical(rows)),providerObjects})};
+const capture=(head:string)=>{const rows=db.prepare("SELECT type,name,tbl_name AS tableName,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') ORDER BY type,name,tbl_name").all().filter(row=>!providerIdentities.has(`${row.type}\0${row.name}\0${row.tableName}`));checkpoints.push({head,objectCount:rows.length,definitionsSha256:hash(canonical(rows)),providerObjects})};
 capture("0016");for(const sql of SITES_D1_OPERATION_BOOTSTRAP)db.exec(sql);capture("0016+operation");
-for(const migration of migrations){for(const statement of migration.statements)db.exec(statement);db.prepare("INSERT INTO d1_migrations(name,applied_at) VALUES(?,CURRENT_TIMESTAMP)").run(migration.id);capture(migration.id.slice(0,4))}
+for(const migration of migrations){for(const statement of migration.statements)db.exec(statement);capture(migration.id.slice(0,4))}
 const artifact={version:1,migrations:migrations.map(({id,sha256,sql,statements})=>({id,sha256,sql,statements})),schemaCheckpoints:checkpoints};
 const output=`// Generated by scripts/generate-sites-d1-forward-artifact.ts. Do not edit.\nexport const SITES_D1_FORWARD_ARTIFACT=${JSON.stringify(artifact)} as const;\n`;
 const target=new URL("lib/sites-d1-forward-artifact.generated.ts",root);
