@@ -16,7 +16,7 @@ const KINDS = new Set([
   "gates",
   "oauth",
 ]);
-const D1_CONVERGENCE_PROBES=Object.freeze([
+export const D1_CONVERGENCE_PROBES=Object.freeze([
   ["0010-pronunciation-backfill","/* convergence_probe:0010-pronunciation-backfill */ SELECT p.id AS identity,COALESCE(c.pronunciation,'') AS target FROM child_profiles p LEFT JOIN children c ON c.id=p.legacy_child_id AND c.household_id=p.household_id WHERE p.legacy_child_id IS NOT NULL ORDER BY p.id"],
   ["0011-live-voice-preflight","/* convergence_probe:0011-live-voice-preflight */ SELECT COUNT(*) AS rowCount,COALESCE(SUM(live_count-1),0) AS violationCount FROM (SELECT COUNT(*) AS live_count FROM voices WHERE household_id IS NOT NULL AND status IN ('processing','ready') GROUP BY household_id,user_id HAVING COUNT(*)>1)"],
   ["0011-entitlement-period-backfill","/* convergence_probe:0011-entitlement-period-backfill */ SELECT id AS identity,CAST(valid_from/1000 AS INTEGER) AS target FROM entitlements WHERE external_ref IS NOT NULL ORDER BY id"],
