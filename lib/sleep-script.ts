@@ -155,9 +155,15 @@ export async function personalizedScriptResult(input: ScriptInput, guardedProvid
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({ model, instructions: providerInput.instructions, input: providerInput.input, max_output_tokens: 3600 }),
   } satisfies RequestInit;
-  const response = guardedProviderRequest && input.requestId
-    ? await fetchProviderWithRetries("https://api.openai.com/v1/responses", requestInit, 45_000, `nearsleep-script:${input.requestId}`)
-    : await fetchWithTimeout("https://api.openai.com/v1/responses", requestInit, 45_000);
+  let response: Response;
+  try {
+    response = guardedProviderRequest && input.requestId
+      ? await fetchProviderWithRetries("https://api.openai.com/v1/responses", requestInit, 45_000, `nearsleep-script:${input.requestId}`)
+      : await fetchWithTimeout("https://api.openai.com/v1/responses", requestInit, 45_000);
+  } catch {
+    console.error("Personalized writing provider request failed; using safe fallback");
+    return { script: fallbackPersonalizedScript(input), providerUsed: false, providerFailed: true, providerRequestId: null, model, notice: PERSONALIZED_FALLBACK_NOTICE };
+  }
   if (!response.ok) {
     console.error("Personalized writing provider unavailable; using safe fallback", response.status);
     return { script: fallbackPersonalizedScript(input), providerUsed: false, providerFailed: true, providerRequestId: response.headers.get("request-id"), model, notice: PERSONALIZED_FALLBACK_NOTICE };
