@@ -10,11 +10,27 @@ const KINDS = new Set([
   "d1-convergence-ledger",
   "d1-convergence-schema",
   "d1-convergence-shape",
+  "d1-convergence-probes",
   "d1-source-fingerprint",
   "d1-source-manifest",
   "gates",
   "oauth",
 ]);
+const D1_CONVERGENCE_PROBES=Object.freeze([
+  ["0010-pronunciation-backfill","/* convergence_probe:0010-pronunciation-backfill */ SELECT p.id AS identity,COALESCE(c.pronunciation,'') AS target FROM child_profiles p LEFT JOIN children c ON c.id=p.legacy_child_id AND c.household_id=p.household_id WHERE p.legacy_child_id IS NOT NULL ORDER BY p.id"],
+  ["0011-live-voice-preflight","/* convergence_probe:0011-live-voice-preflight */ SELECT COUNT(*) AS rowCount,COALESCE(SUM(live_count-1),0) AS violationCount FROM (SELECT COUNT(*) AS live_count FROM voices WHERE household_id IS NOT NULL AND status IN ('processing','ready') GROUP BY household_id,user_id HAVING COUNT(*)>1)"],
+  ["0011-entitlement-period-backfill","/* convergence_probe:0011-entitlement-period-backfill */ SELECT id AS identity,CAST(valid_from/1000 AS INTEGER) AS target FROM entitlements WHERE external_ref IS NOT NULL ORDER BY id"],
+  ["0011-billing-account-insert","/* convergence_probe:0011-billing-account-insert */ SELECT h.id AS identity,u.stripe_customer_id,u.subscription_id,u.subscription_price_id,u.subscription_status,u.subscription_event_created_at,u.checkout_pending_at,u.last_credited_invoice_id,u.last_credited_period_start,h.created_at,h.updated_at FROM households h JOIN users u ON h.id='household:'||u.id ORDER BY h.id"],
+  ["0011-billing-subscription-insert","/* convergence_probe:0011-billing-subscription-insert */ SELECT h.id AS identity,u.subscription_id,u.stripe_customer_id,u.subscription_price_id,u.subscription_status,u.subscription_event_created_at,h.created_at,h.updated_at FROM households h JOIN users u ON h.id='household:'||u.id WHERE u.subscription_id IS NOT NULL AND u.stripe_customer_id IS NOT NULL ORDER BY h.id,u.subscription_id"],
+  ["0011-consent-revocation","/* convergence_probe:0011-consent-revocation */ SELECT c.id AS identity,c.revoked_at AS prior,'revoke' AS target FROM voice_consents c WHERE c.status='active_verified' AND c.voice_id IS NOT NULL AND c.id<>COALESCE((SELECT v.current_consent_id FROM voices v WHERE v.id=c.voice_id),'') ORDER BY c.id"],
+  ["0012-deletion-reconciliation-backfill","/* convergence_probe:0012-deletion-reconciliation-backfill */ SELECT d.id AS identity,COALESCE((SELECT s.household_id FROM sleep_sessions s WHERE s.id=d.scope_id),(SELECT v.household_id FROM voices v WHERE v.id=d.scope_id),(SELECT r.household_id FROM voice_replacements r WHERE r.id=d.scope_id),(SELECT h.id FROM households h WHERE h.id=d.scope_id AND d.scope='account')) AS target FROM deletion_reconciliations d WHERE d.household_id IS NULL ORDER BY d.id"],
+  ["0012-storage-reservation-insert","/* convergence_probe:0012-storage-reservation-insert */ SELECT 'storage:'||m.id AS identity,m.household_id,m.id AS media_asset_id,m.byte_size,'reserved' AS target,m.created_at,m.updated_at FROM media_assets m WHERE m.status='ready' AND m.byte_size IS NOT NULL AND m.byte_size>0 ORDER BY m.id"],
+  ["0012-storage-reservation-commit","/* convergence_probe:0012-storage-reservation-commit */ SELECT m.id AS identity,'committed' AS target FROM media_assets m WHERE m.status='ready' AND m.byte_size IS NOT NULL AND m.byte_size>0 ORDER BY m.id"],
+  ["0012-ready-media-preflight","/* convergence_probe:0012-ready-media-preflight */ SELECT COUNT(*) AS rowCount,COUNT(*) AS violationCount FROM media_assets m WHERE m.status='ready'"],
+  ["0012-owner-membership-preflight","/* convergence_probe:0012-owner-membership-preflight */ SELECT COUNT(*) AS rowCount,COUNT(*) AS violationCount FROM households h WHERE (SELECT COUNT(*) FROM household_members m WHERE m.household_id=h.id AND m.status='active' AND m.role='owner')<>1 OR NOT EXISTS(SELECT 1 FROM household_members m WHERE m.household_id=h.id AND m.user_id=h.owner_user_id AND m.status='active' AND m.role='owner')"],
+  ["0012-playing-queue-preflight","/* convergence_probe:0012-playing-queue-preflight */ SELECT COUNT(*) AS rowCount,COALESCE(SUM(playing_count-1),0) AS violationCount FROM (SELECT COUNT(*) AS playing_count FROM bedtime_queue_items WHERE status='playing' GROUP BY household_id HAVING COUNT(*)>1)"],
+  ["0012-foreign-key-preflight","/* convergence_probe:0012-foreign-key-preflight */ SELECT COUNT(*) AS rowCount,COUNT(*) AS violationCount FROM pragma_foreign_key_check"],
+] as const);
 
 type Trust = { issuer: string; audience: string; subject: string };
 type LoadedEvidence = {
@@ -322,6 +338,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     if (foreignKeyViolations.length > 100 || foreignKeyViolations.some((row) => !exact(row, ["tableName", "rowId", "parentTable", "fkId"]) || !identifier((row as Record<string, unknown>).tableName) || !Number.isSafeInteger((row as Record<string, unknown>).rowId) || !identifier((row as Record<string, unknown>).parentTable) || !integer((row as Record<string, unknown>).fkId))) return shapeFailure("foreign-key-check-validation");
     return { tables, foreignKeys, indexes, indexColumns, rowCounts, foreignKeyViolations };
   };
+  const d1ConvergenceProbes=async()=>{const stages=[];for(const[stage,sql]of D1_CONVERGENCE_PROBES){let result;try{result=await db.prepare(sql).all()}catch{console.warn(`private tester D1 convergence probe unavailable at ${stage}-query`);throw new Error("private tester gateway evidence unavailable")}if(!Array.isArray(result.results)||result.results.length>1_000)throw new Error("private tester gateway evidence unavailable");let rowCount=result.results.length,violationCount=0;for(const row of result.results){if(!object(row)){throw new Error("private tester gateway evidence unavailable")}const keys=Reflect.ownKeys(row);if(keys.length<1||keys.length>16||keys.some(key=>typeof key!=="string"||!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key)))throw new Error("private tester gateway evidence unavailable");for(const value of Object.values(row))if(value!==null&&!(typeof value==="number"&&Number.isSafeInteger(value))&&!diagnosticText(value))throw new Error("private tester gateway evidence unavailable")}if(stage.endsWith("preflight")){if(result.results.length!==1||!object(result.results[0])||JSON.stringify(Reflect.ownKeys(result.results[0]).sort())!==JSON.stringify(["rowCount","violationCount"])||!Number.isSafeInteger(result.results[0].rowCount)||Number(result.results[0].rowCount)<0||!Number.isSafeInteger(result.results[0].violationCount)||Number(result.results[0].violationCount)<0)throw new Error("private tester gateway evidence unavailable");rowCount=Number(result.results[0].rowCount);violationCount=Number(result.results[0].violationCount)}stages.push({stage,rowCount,violationCount,projectionSha256:await sha256(JSON.stringify(result.results))})}return{version:1,stages}};
   const oauth = async () => {
     const state = crypto.randomUUID();
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -341,6 +358,7 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
       if (kind === "d1-convergence-ledger") return d1ConvergenceLedger();
       if (kind === "d1-convergence-schema") return d1ConvergenceSchema();
       if (kind === "d1-convergence-shape") return d1ConvergenceShape();
+      if (kind === "d1-convergence-probes") return d1ConvergenceProbes();
       if (kind === "d1-source-fingerprint") return d1SourceFingerprint();
       if (kind === "d1-source-manifest") return d1SourceManifest();
       if (kind === "gates") return { nearfamily: false, nearstory: false, scheduler: false };
