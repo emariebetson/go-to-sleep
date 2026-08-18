@@ -189,14 +189,6 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) { console.warn("private tester runtime rejected at environment-contract"); configurationError(); }
 
   const d1Ledger = async () => {
-    if (environment.PRIVATE_TESTER_D1_DISCOVERY === "true") {
-      try { await db.prepare("SELECT count(*) AS count FROM households").all(); } catch { return { diagnosticStage: "user-query-unavailable" }; }
-      let schema: D1Result; try { schema = await db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name='d1_migrations' OR tbl_name='d1_migrations' ORDER BY type,name").all(); } catch { return { diagnosticStage: "schema-query-unavailable" }; }
-      let ledger: D1Result; try { ledger = await db.prepare("SELECT * FROM d1_migrations ORDER BY 1").all(); } catch { return { diagnosticStage: "ledger-query-unavailable" }; }
-      if (!Array.isArray(schema.results) || schema.results.length < 1 || schema.results.length > 8 || !Array.isArray(ledger.results) || ledger.results.length < 1 || ledger.results.length > 26) throw new Error("private tester gateway evidence unavailable");
-      const clean = (rows: unknown[]) => rows.map((row) => { if (!object(row) || Reflect.ownKeys(row).length < 1 || Reflect.ownKeys(row).length > 8) throw new Error("private tester gateway evidence unavailable"); const output: Record<string, string | number | null> = {}; for (const key of Reflect.ownKeys(row)) { const value = row[key as string]; if (typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key) || (value !== null && typeof value !== "string" && !Number.isSafeInteger(value)) || (typeof value === "string" && (!/^[\x20-\x7e\n\r\t]*$/.test(value) || value.length > 2048))) throw new Error("private tester gateway evidence unavailable"); output[key] = value as string | number | null; } return output; });
-      return { diagnosticSchema: clean(schema.results), diagnosticRows: clean(ledger.results) };
-    }
     const result = await db.prepare("SELECT id,name,applied_at FROM d1_migrations ORDER BY id").all();
     const expected = D1_MIGRATIONS.map((id) => `${id}.sql`);
     const expectedWithoutExtension = [...D1_MIGRATIONS];

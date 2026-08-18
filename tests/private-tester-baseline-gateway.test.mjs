@@ -174,14 +174,6 @@ test("reads and verifies exact live D1 ledger fields and every sqlite_schema obj
   await assert.rejects(() => runtime.read("sites-version"), /evidence unavailable/);
 });
 
-test("temporary authenticated discovery returns only bounded provider migration metadata", async () => {
-  const diagnosticSchema = [{ type: "table", name: "d1_migrations", tbl_name: "d1_migrations", sql: "CREATE TABLE d1_migrations(version TEXT)" }];
-  const diagnosticRows = [{ version: "0000_foundation.sql", applied: 1787000000000 }];
-  const DB = { prepare: (sql) => ({ all: async () => ({ results: sql.includes("sqlite_schema") ? diagnosticSchema : diagnosticRows }) }) };
-  const runtime = createPrivateTesterBaselineRuntime(runtimeEnvironment({ DB, PRIVATE_TESTER_D1_DISCOVERY: "true" }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaRows.length, fetch });
-  assert.deepEqual(await runtime.read("d1-ledger"), { diagnosticSchema, diagnosticRows });
-});
-
 test("OAuth redirect proof rejects wrong origin, state, error, or an authorization code", async () => {
   const locations = [
     (state) => `https://attacker.example/api/auth/callback/google?state=${state}&error=interaction_required`,
