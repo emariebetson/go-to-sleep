@@ -2,9 +2,9 @@
   "version": 1,
   "migration_range": "0000-0016",
   "wrangler_version": "4.92.0",
-  "migration_sources_sha256": "f97910ae92fa6307967d6f7c752a6c510fa3b1909559a314ebe599463ad2c542",
+  "migration_sources_sha256": "6077fdd12bf776779c9944d2eed672c389dfb2267bea507a1aa9fe735135b307",
   "sqlite_schema_source_object_count": 671,
-  "sqlite_schema_source_definitions_sha256": "606596444bdfa147e22113267269f156f468be114e79e6b4daec7c211b4138f9",
+  "sqlite_schema_source_definitions_sha256": "031c4f514a616123fb7cc32551e1c122156a6881742425227953d46d6f0b786d",
   "provider_internal_schema_objects": [
     { "type": "index", "name": "sqlite_autoindex_d1_migrations_1", "table_name": "d1_migrations" },
     { "type": "table", "name": "_cf_METADATA", "table_name": "_cf_METADATA" },
