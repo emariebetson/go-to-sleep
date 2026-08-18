@@ -12,10 +12,8 @@ const KINDS = new Set([
 ]);
 
 type Trust = { issuer: string; audience: string; subject: string };
-type WorkerRuntime = { id: string; commitSha: string; deployedAt: string };
 type LoadedEvidence = {
   release: PrivateTesterRelease;
-  workerRuntime: WorkerRuntime;
   read(kind: string): Promise<unknown>;
 };
 
@@ -26,15 +24,12 @@ type GatewayEnvironment = Record<string, unknown> & {
 
 const HASH = /^[a-f0-9]{64}$/;
 const SITES_PROJECT_PREFIX = "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const GOOGLE_CLIENT_ID = "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com";
 const GOOGLE_ISSUER = "https://accounts.google.com";
 const GOOGLE_ORIGIN = "https://nearyoustill.com";
 const GOOGLE_REDIRECT = `${GOOGLE_ORIGIN}/api/auth/callback/google`;
 const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
 const MAX_JWKS_BYTES = 65_536;
-const MAX_RUNTIME_AGE_MS = 300_000;
-const MAX_FUTURE_MS = 30_000;
 const REVIEWED_D1_SCHEMA_DEFINITION_HASH = d1SourceBaseline.sqlite_schema_source_definitions_sha256;
 const REVIEWED_D1_SCHEMA_OBJECT_COUNT = d1SourceBaseline.sqlite_schema_source_object_count;
 export const EXACT_D1_PROVIDER_INTERNAL_OBJECTS = Object.freeze([
@@ -55,7 +50,7 @@ const REQUIRED_GATEWAY_VARS = Object.freeze([
   "NEARYOU_ENABLE_STORY",
   "NEARYOU_ENABLE_LEGACY_ARCHIVE",
 ]);
-const RUNTIME_BINDINGS = Object.freeze(["DB", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"]);
+const RUNTIME_BINDINGS = Object.freeze(["DB", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"]);
 const DARK_BINDINGS = Object.freeze(["NEARYOU_ENABLE_STORY", "NEARYOU_ENABLE_LEGACY_ARCHIVE", "PRIVATE_TESTER_SCHEDULER_ENABLED"]);
 const D1_MIGRATIONS = Object.freeze([
   "0000_nearnight_foundation",
@@ -96,10 +91,10 @@ export function assertPrivateTesterDeploymentContract(bindings: unknown, hosting
     const required = bindings.required_worker_bindings;
     const contract = bindings.private_tester_baseline_gateway;
     const requiredVars = required.vars;
-    if (!Array.isArray(requiredVars) || requiredVars.some((name) => typeof name !== "string") || REQUIRED_GATEWAY_VARS.some((name) => !requiredVars.includes(name)) || !exactStrings(required.version_metadata, ["VERSION_METADATA"])) throw new Error();
+    if (!Array.isArray(requiredVars) || requiredVars.some((name) => typeof name !== "string") || REQUIRED_GATEWAY_VARS.some((name) => !requiredVars.includes(name)) || !exactStrings(required.version_metadata, [])) throw new Error();
     if (hosting.project_id !== "appgprj_6a79f8a66eb4819198bb42a2b26addea" || hosting.d1 !== "DB" || hosting.r2 !== "AUDIO" || contract.sites_project_id !== hosting.project_id || contract.d1_binding !== hosting.d1 || contract.r2_binding !== hosting.r2) throw new Error();
     if (!object(contract.route) || contract.route.origin !== ORIGIN || contract.route.path_prefix !== PREFIX || !object(contract.oidc) || contract.oidc.issuer !== GOOGLE_ISSUER || contract.oidc.audience !== ORIGIN || contract.oidc.subject_binding !== "PRIVATE_TESTER_BASELINE_OIDC_SUBJECT" || contract.oidc.jwks_url !== GOOGLE_JWKS) throw new Error();
-    if (!exactStrings(contract.runtime_bindings, RUNTIME_BINDINGS) || Object.hasOwn(contract, "live_bindings") || Object.hasOwn(contract, "rollback_binding") || contract.version_metadata_tag !== "release.commitSha" || !exactStrings(contract.default_dark_bindings, DARK_BINDINGS) || contract.release_binding !== "PRIVATE_TESTER_BASELINE_RELEASE_JSON") throw new Error();
+    if (!exactStrings(contract.runtime_bindings, RUNTIME_BINDINGS) || Object.hasOwn(contract, "live_bindings") || Object.hasOwn(contract, "rollback_binding") || Object.hasOwn(contract, "version_metadata_tag") || !exactStrings(contract.default_dark_bindings, DARK_BINDINGS) || contract.release_binding !== "PRIVATE_TESTER_BASELINE_RELEASE_JSON") throw new Error();
   } catch {
     throw new Error("private tester deployment contract invalid");
   }
@@ -177,14 +172,8 @@ export function createGoogleServiceIdentityAuthenticator(input: Trust & { fetch?
   };
 }
 
-function assertWorkerRuntime(value: WorkerRuntime, release: PrivateTesterRelease, observedAt: number): void {
-  const deployedAt = Date.parse(value.deployedAt);
-  if (!Number.isSafeInteger(observedAt) || !UUID.test(value.id) || value.commitSha !== release.commitSha || !Number.isFinite(deployedAt) || deployedAt < observedAt - MAX_RUNTIME_AGE_MS || deployedAt > observedAt + MAX_FUTURE_MS) configurationError();
-}
-
 export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironment, dependencies: { fetch?: typeof fetch; now?: () => number; expectedD1SchemaDefinitionHash?: string; expectedD1SchemaObjectCount?: number } = {}): LoadedEvidence {
   const fetcher = dependencies.fetch ?? fetch;
-  const now = dependencies.now ?? Date.now;
   const expectedD1SchemaDefinitionHash = dependencies.expectedD1SchemaDefinitionHash ?? REVIEWED_D1_SCHEMA_DEFINITION_HASH;
   const expectedD1SchemaObjectCount = dependencies.expectedD1SchemaObjectCount ?? REVIEWED_D1_SCHEMA_OBJECT_COUNT;
   let rawRelease: unknown;
@@ -192,17 +181,11 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   const startsAt = object(rawRelease) && typeof rawRelease.startsAt === "string" ? Date.parse(rawRelease.startsAt) : Number.NaN;
   let release: PrivateTesterRelease;
   try { release = parsePrivateTesterRelease(rawRelease, startsAt); } catch { console.warn("private tester runtime rejected at release-contract"); configurationError(); }
-  const metadata = environment.VERSION_METADATA;
   const db = environment.DB;
-  const runtimeNow = now();
   const manifestProviderObjects = EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
   if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX)) { console.warn("private tester runtime rejected at sites-version"); configurationError(); }
-  if (!object(metadata)) { console.warn("private tester runtime rejected at metadata-object"); configurationError(); }
-  if (Reflect.ownKeys(metadata).length !== 3 || typeof metadata.id !== "string" || typeof metadata.tag !== "string" || typeof metadata.timestamp !== "string") { console.warn(`private tester runtime rejected at metadata-shape:${Object.keys(metadata).sort().join(",")}`); configurationError(); }
   if (!HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 1_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects)) { console.warn("private tester runtime rejected at reviewed-baseline"); configurationError(); }
   if (!db || typeof db.prepare !== "function") { console.warn("private tester runtime rejected at d1-binding"); configurationError(); }
-  const workerRuntime = { id: metadata.id, commitSha: metadata.tag, deployedAt: metadata.timestamp };
-  try { assertWorkerRuntime(workerRuntime, release, runtimeNow); } catch { console.warn("private tester runtime rejected at worker-binding"); configurationError(); }
   if (environment.GOOGLE_CLIENT_ID !== GOOGLE_CLIENT_ID || environment.BETTER_AUTH_URL !== GOOGLE_ORIGIN || environment.PUBLIC_APP_URL !== GOOGLE_ORIGIN || environment.NEARYOU_ENABLE_STORY !== "false" || environment.NEARYOU_ENABLE_LEGACY_ARCHIVE !== "false" || environment.PRIVATE_TESTER_SCHEDULER_ENABLED !== "false" || nearFamilySourceActivated()) { console.warn("private tester runtime rejected at environment-contract"); configurationError(); }
 
   const d1Ledger = async () => {
@@ -246,7 +229,6 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   };
   return {
     release,
-    workerRuntime,
     async read(kind: string) {
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
@@ -283,7 +265,6 @@ export function createPrivateTesterBaselineGateway(input: {
       evidenceFailureStage = "observation";
       const observedAt = input.now();
       if (!Number.isSafeInteger(observedAt)) throw new Error("clock unavailable");
-      assertWorkerRuntime(loaded.workerRuntime, loaded.release, observedAt);
       return Response.json({
         issuer: claims.issuer,
         audience: claims.audience,
@@ -291,7 +272,6 @@ export function createPrivateTesterBaselineGateway(input: {
         principal: `service:${claims.subject}`,
         observedAt,
         release: loaded.release,
-        workerRuntime: loaded.workerRuntime,
         body,
       }, { headers: { "cache-control": "no-store" } });
     } catch {

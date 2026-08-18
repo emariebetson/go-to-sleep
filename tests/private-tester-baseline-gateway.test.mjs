@@ -40,7 +40,8 @@ test("deployment contract distinguishes configured runtime bindings from provide
   const bindings = JSON.parse(readFileSync(new URL("../.openai/worker-bindings.json", import.meta.url), "utf8"));
   const hosting = JSON.parse(readFileSync(new URL("../.openai/hosting.json", import.meta.url), "utf8"));
   assert.doesNotThrow(() => assertPrivateTesterDeploymentContract(bindings, hosting));
-  assert.deepEqual(bindings.private_tester_baseline_gateway.runtime_bindings, ["DB", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"]);
+  assert.deepEqual(bindings.private_tester_baseline_gateway.runtime_bindings, ["DB", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"]);
+  assert.deepEqual(bindings.required_worker_bindings.version_metadata, []);
   assert.equal(Object.hasOwn(bindings.private_tester_baseline_gateway, "live_bindings"), false);
   assert.equal(Object.hasOwn(bindings.private_tester_baseline_gateway, "rollback_binding"), false);
   const missingRuntimeBinding = structuredClone(bindings);
@@ -74,30 +75,33 @@ test("authenticates before parsing the route or loading server evidence", async 
   assert.equal(await response.text(), "Unauthorized");
 });
 
-test("timestamps the observation after the read and carries fresh worker metadata without equating it to appgver", async () => {
+test("timestamps the authenticated runtime observation after the read without self-attesting deployment metadata", async () => {
   let clock = now;
   const gateway = createPrivateTesterBaselineGateway({
     trust,
     authenticate: async () => ({ ...trust }),
-    load: async () => ({ release, workerRuntime, read: async () => { clock += 1_234; return { appliedMigrations: [] }; } }),
+    load: async () => ({ release, read: async () => { clock += 1_234; return { appliedMigrations: [] }; } }),
     now: () => clock,
   });
   const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger"));
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { issuer: trust.issuer, audience: trust.audience, subject: trust.subject, principal: `service:${trust.subject}`, observedAt: now + 1_234, release, workerRuntime, body: { appliedMigrations: [] } });
+  assert.deepEqual(await response.json(), { issuer: trust.issuer, audience: trust.audience, subject: trust.subject, principal: `service:${trust.subject}`, observedAt: now + 1_234, release, body: { appliedMigrations: [] } });
+  assert.equal(Object.hasOwn(await (await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger"))).json(), "workerRuntime"), false);
 });
 
-test("rechecks worker metadata freshness after a slow evidence read", async () => {
+test("does not accept caller-supplied version-affinity metadata as deployment evidence", async () => {
   let clock = now;
   const gateway = createPrivateTesterBaselineGateway({
     trust,
     authenticate: async () => ({ ...trust }),
-    load: async () => ({ release, workerRuntime, read: async () => { clock += 240_001; return { appliedMigrations: [] }; } }),
+    load: async () => ({ release, read: async () => { clock += 1; return { appliedMigrations: [] }; } }),
     now: () => clock,
   });
-  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger"));
-  assert.equal(response.status, 503);
-  assert.equal(await response.text(), "Unavailable");
+  const response = await gateway(new Request("https://nearyoustill.com/api/internal/private-tester-baseline/d1-ledger", { headers: { "cloudflare-workers-version-key": workerRuntime.id } }));
+  assert.equal(response.status, 200);
+  assert.equal(Object.hasOwn(await response.json(), "workerRuntime"), false);
+  const routeSource = readFileSync(new URL("../app/api/internal/private-tester-baseline/[kind]/route.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(routeSource, /cloudflare-workers-version-key|workerRuntime|VERSION_METADATA/);
 });
 
 test("rejects issuer, audience, or subject drift before any evidence read", async () => {
@@ -224,14 +228,8 @@ test("fails closed unless the exact five D1 provider-internal schema objects are
   }
 });
 
-test("rejects stale or future VERSION_METADATA before it can attest any runtime read", () => {
-  for (const timestamp of [new Date(now - 300_001).toISOString(), new Date(now + 30_001).toISOString()]) {
-    assert.throws(() => createPrivateTesterBaselineRuntime(runtimeEnvironment({ VERSION_METADATA: { id: workerRuntime.id, tag: workerRuntime.commitSha, timestamp } }), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, fetch }), /gateway configuration invalid/);
-  }
-});
-
-test("runtime fails closed without exact release, worker metadata, OAuth configuration, or dark gates", () => {
-  for (const patch of [{ PRIVATE_TESTER_BASELINE_RELEASE_JSON: "{}" }, { VERSION_METADATA: undefined }, { GOOGLE_CLIENT_ID: "invented.apps.googleusercontent.com" }, { NEARYOU_ENABLE_STORY: "true" }]) {
+test("runtime fails closed without exact release, OAuth configuration, or dark gates", () => {
+  for (const patch of [{ PRIVATE_TESTER_BASELINE_RELEASE_JSON: "{}" }, { GOOGLE_CLIENT_ID: "invented.apps.googleusercontent.com" }, { NEARYOU_ENABLE_STORY: "true" }]) {
     assert.throws(() => createPrivateTesterBaselineRuntime(runtimeEnvironment(patch), { now: () => now, expectedD1SchemaDefinitionHash: schemaDefinitionHash, fetch }), /gateway configuration invalid/);
   }
 });

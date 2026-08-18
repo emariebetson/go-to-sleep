@@ -18,7 +18,7 @@
       ,"NEARYOU_ENABLE_LEGACY_ARCHIVE"
     ],
     "services": ["OUTCOME_SUBJECT_TOKEN", "READINESS_PG"],
-    "version_metadata": ["VERSION_METADATA"]
+    "version_metadata": []
   },
   "private_tester_baseline_gateway": {
     "sites_project_id": "appgprj_6a79f8a66eb4819198bb42a2b26addea",
@@ -34,8 +34,7 @@
       "subject_binding": "PRIVATE_TESTER_BASELINE_OIDC_SUBJECT",
       "jwks_url": "https://www.googleapis.com/oauth2/v3/certs"
     },
-    "runtime_bindings": ["DB", "VERSION_METADATA", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"],
-    "version_metadata_tag": "release.commitSha",
+    "runtime_bindings": ["DB", "GOOGLE_CLIENT_ID", "BETTER_AUTH_URL", "PUBLIC_APP_URL"],
     "default_dark_bindings": ["NEARYOU_ENABLE_STORY", "NEARYOU_ENABLE_LEGACY_ARCHIVE", "PRIVATE_TESTER_SCHEDULER_ENABLED"],
     "release_binding": "PRIVATE_TESTER_BASELINE_RELEASE_JSON"
   }

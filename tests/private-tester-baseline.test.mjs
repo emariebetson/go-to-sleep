@@ -16,9 +16,10 @@ const postgresIdentity = "database:nearyou-pt-baseline@nearnight.iam";
 const signerPrincipal = "ci://github/nearyou/private-tester-deployment";
 const signerKeyId = "private-tester-deployment";
 const accountId = "1".repeat(32);
-const projectId = "appgprj_example1";
+const projectId = `appgprj_${"a".repeat(32)}`;
 const googleClientId = "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com";
 const workerRuntime = Object.freeze({ id: "11111111-1111-4111-8111-111111111111", commitSha: "a".repeat(40), deployedAt: "2026-08-14T17:59:00.000Z" });
+const workerDeployment = Object.freeze({ scriptName: "site---6a79f8a66eb4819198bb42a2b26addea", deploymentId: "11111111-1111-4111-8111-111111111111", versionId: "22222222-2222-4222-8222-222222222222", percentage: 100 });
 const release = () => ({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: `${projectId}~appgver_example`, startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
 const ledger = Object.freeze([{ id: "0015_platform_release_foundation", checksum: "b".repeat(64) }, { id: "0016_existing_head", checksum: "c".repeat(64) }]);
 const reviewedSourceHash = createHash("sha256").update(JSON.stringify([{ name: "0000_nearnight_foundation.sql", checksum: "a".repeat(64) }, ...ledger.map(({ id, checksum }) => ({ name: `${id}.sql`, checksum }))])).digest("hex");
@@ -56,10 +57,11 @@ const deploymentOperation = () => ({
   ],
 });
 const observed = (body, overrides = {}) => ({ provider: "test-reader", observedAt: now, identity, body, ...overrides });
-const runtimeObserved = (body, overrides = {}) => observed(body, { provider: "sites-runtime", workerRuntime, ...overrides });
+const runtimeObserved = (body, overrides = {}) => observed(body, { provider: "sites-runtime", ...overrides });
 const postgresObserved = (body, overrides = {}) => observed(body, { provider: "cloud-sql", identity: postgresIdentity, ...overrides });
 const providerObserved = (body, overrides = {}) => observed(body, { provider: "cloudflare-api", identity: `account:${accountId}`, ...overrides });
 const readers = (overrides = {}) => ({
+  sitesDeployment: { read: async () => providerObserved(workerDeployment) },
   d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }) },
   postgres: { readMigrations: async () => postgresObserved({ ledger }), readCatalog: async () => postgresObserved({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) },
   providerInventory: { read: async () => providerObserved({ resources: deploymentOperation().resources }) },
@@ -86,7 +88,9 @@ async function input(overrides = {}) {
   const signed = overrides.deployment ?? await deployment();
   const { deployment: _deployment, ...rest } = overrides;
   void _deployment;
-  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
+  const sitesDeploymentReceipt = { version: 1, provider: "openai-sites-control-plane", projectId, deploymentId: "appgdep_12345678", versionId: release().sitesVersion, commitSha: release().commitSha, deployedAt: workerRuntime.deployedAt, workerDeploymentId: workerDeployment.deploymentId, workerVersionId: workerDeployment.versionId };
+  const expectedSitesDeploymentReceiptHash = createHash("sha256").update(JSON.stringify(sitesDeploymentReceipt)).digest("hex");
+  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
 }
 function productionEnvironment() {
   const instance = "nearnight:us-central1:nearyou-production";
@@ -128,7 +132,7 @@ test("a valid signed one-time deployment manifest unblocks exact live baseline c
   assert.deepEqual(baseline.sites.current, deploymentOperation().live);
   assert.deepEqual(baseline.sites.rollback, deploymentOperation().rollback);
   assert.deepEqual(baseline.sites.resources, deploymentOperation().resources);
-  assert.deepEqual(baseline.sites.workerRuntime, workerRuntime);
+  assert.deepEqual(baseline.sites.deployment, options.sitesDeploymentReceipt);
   assert.deepEqual(baseline.d1.appliedMigrations, appliedMigrations);
   assert.match(baseline.d1.appliedLedgerHash, /^[a-f0-9]{64}$/);
   assert.match(baseline.d1.schemaHash, /^[a-f0-9]{64}$/);
@@ -142,6 +146,33 @@ test("a valid signed one-time deployment manifest unblocks exact live baseline c
   assert.equal(Object.hasOwn(baseline.oauth, "authorizedOrigins"), false);
   assert.equal(baseline.observations.postgresCatalog.identity, postgresIdentity);
   assert.equal(baseline.observations.providerInventory.identity, `account:${accountId}`);
+});
+
+test("requires an independently hashed exact Sites deployment receipt", async () => {
+  const substituted = await input();
+  substituted.sitesDeploymentReceipt = { ...substituted.sitesDeploymentReceipt, deploymentId: "appgdep_substituted" };
+  await assert.rejects(() => capturePrivateTesterBaseline(substituted), /baseline invalid/);
+
+  const selfConsistent = await input();
+  selfConsistent.sitesDeploymentReceipt = { ...selfConsistent.sitesDeploymentReceipt, versionId: `${projectId}~appgver_attacker`, commitSha: "e".repeat(40) };
+  selfConsistent.expectedSitesDeploymentReceiptHash = createHash("sha256").update(JSON.stringify(selfConsistent.sitesDeploymentReceipt)).digest("hex");
+  await assert.rejects(() => capturePrivateTesterBaseline(selfConsistent), /baseline invalid/);
+
+  const extra = await input();
+  extra.sitesDeploymentReceipt = { ...extra.sitesDeploymentReceipt, workerVersion: "caller" };
+  extra.expectedSitesDeploymentReceiptHash = createHash("sha256").update(JSON.stringify(extra.sitesDeploymentReceipt)).digest("hex");
+  await assert.rejects(() => capturePrivateTesterBaseline(extra), /baseline invalid/);
+});
+
+test("rejects a Worker deployment change during live observation capture", async () => {
+  let reads = 0;
+  const options = await input({ readers: readers({ sitesDeployment: { read: async () => {
+    reads += 1;
+    return providerObserved(reads === 1 ? workerDeployment : { ...workerDeployment, deploymentId: "33333333-3333-4333-8333-333333333333", versionId: "44444444-4444-4444-8444-444444444444" });
+  } } }) });
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+  assert.equal(reads, 2);
+  assert.equal(await readFile(options.outputPath).catch(() => ""), "");
 });
 
 test("unsigned and self-asserted Sites responses cannot replace manifest verification", async () => {
@@ -175,6 +206,29 @@ test("production readers exact-compare signed resources with authenticated Cloud
   await assert.rejects(() => wrong.providerInventory.read(deploymentOperation().resources), /reader unavailable/);
 });
 
+test("production reader observes the latest active Worker deployment at exactly 100 percent", async () => {
+  const urls = [];
+  const fetch = async (inputUrl, init = {}) => {
+    urls.push(String(inputUrl));
+    assert.equal(init.headers.authorization, "Bearer token_abcdefghijklmnopqrstuvwxyz");
+    return new Response(JSON.stringify({ success: true, errors: [], messages: [], result: { deployments: [{ id: workerDeployment.deploymentId, created_on: workerRuntime.deployedAt, source: "api", strategy: "percentage", versions: [{ percentage: 100, version_id: workerDeployment.versionId }] }] } }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const production = createAuthenticatedProductionReaders(productionEnvironment(), { now: () => now, fetch }, release());
+  assert.deepEqual((await production.sitesDeployment.read(accountId)).body, workerDeployment);
+  assert.equal(urls[0], `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerDeployment.scriptName}/deployments`);
+
+  const split = createAuthenticatedProductionReaders(productionEnvironment(), { now: () => now, fetch: async () => new Response(JSON.stringify({ success: true, errors: [], messages: [], result: { deployments: [{ id: workerDeployment.deploymentId, created_on: workerRuntime.deployedAt, source: "api", strategy: "percentage", versions: [{ percentage: 50, version_id: workerDeployment.versionId }, { percentage: 50, version_id: "33333333-3333-4333-8333-333333333333" }] }] } }), { status: 200, headers: { "content-type": "application/json" } }) }, release());
+  await assert.rejects(() => split.sitesDeployment.read(accountId), /reader unavailable/);
+});
+
+test("production CLI requires a separate Sites receipt file and authoritative hash", () => {
+  const source = readFileSync(new URL("../scripts/capture-private-tester-baseline.ts", import.meta.url), "utf8");
+  assert.match(source, /receiptPath/);
+  assert.match(source, /SITES_DEPLOYMENT_RECEIPT_SHA256/);
+  assert.match(source, /sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash/);
+  assert.doesNotMatch(source, /cloudflare-workers-version-key/);
+});
+
 test("production PostgreSQL reads and nonce consumption use only the mapped baseline verifier connection", async () => {
   const source = readFileSync(new URL("../scripts/capture-private-tester-baseline.ts", import.meta.url), "utf8");
   assert.match(source, /PRIVATE_TESTER_BASELINE_DATABASE_URL/);
@@ -191,7 +245,7 @@ test("rejects signed deployment facts that disagree with release, runtime, provi
     await input({ deployment: await deployment({ claims: (value) => ({ ...value, releaseId: "rel_20260814_private_02" }) }) }),
     await input({ deployment: await deployment({ claims: (value) => ({ ...value, live: { ...value.live, version: `${projectId}~appgver_other` } }) }) }),
     await input({ deployment: await deployment({ claims: (value) => ({ ...value, live: { ...value.live, commitSha: "e".repeat(40) } }) }) }),
-    await input({ readers: readers({ d1: { readLedger: async () => runtimeObserved({ appliedMigrations }, { workerRuntime: { ...workerRuntime, commitSha: "e".repeat(40) } }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }, { workerRuntime: { ...workerRuntime, commitSha: "e".repeat(40) } }) } }) }),
+    await input({ sitesDeploymentReceipt: { version: 1, provider: "openai-sites-control-plane", projectId, deploymentId: "appgdep_12345678", versionId: release().sitesVersion, commitSha: "e".repeat(40), deployedAt: workerRuntime.deployedAt } }),
     await input({ readers: readers({ providerInventory: { read: async () => providerObserved({ resources: [{ ...deploymentOperation().resources[0], resource: `accounts/${accountId}/r2/buckets/wrong-bucket` }, deploymentOperation().resources[1]] }) } }) }),
     await input({ readers: readers({ postgres: { readMigrations: async () => postgresObserved({ ledger }, { identity: "database:attacker@nearnight.iam.gserviceaccount.com" }), readCatalog: async () => postgresObserved({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) } }) }),
   ];
@@ -243,7 +297,7 @@ test("pins the runtime gateway audience and rejects a response with the wrong au
   const fetch = async (url, init = {}) => {
     seen.push([String(url), init]);
     if (String(url).includes("metadata.google.internal")) return new Response("a.b.c", { status: 200 });
-    return new Response(JSON.stringify({ issuer: "https://accounts.google.com", audience: "https://nearyoustill.com", subject: "999999999999999999999", principal: "service:999999999999999999999", observedAt: now, release: release(), workerRuntime, body: { appliedMigrations } }), { status: 200 });
+    return new Response(JSON.stringify({ issuer: "https://accounts.google.com", audience: "https://nearyoustill.com", subject: "999999999999999999999", principal: "service:999999999999999999999", observedAt: now, release: release(), body: { appliedMigrations } }), { status: 200 });
   };
   const production = createAuthenticatedProductionReaders(productionEnvironment(), { fetch, now: () => now }, release());
   await assert.rejects(() => production.d1.readLedger(), /reader unavailable/);
@@ -261,7 +315,7 @@ test("accepts the bounded complete sqlite_schema gateway response above the form
     rootPage: index + 2,
     sql: `CREATE TABLE table_${String(index).padStart(3, "0")}(value TEXT CHECK(value <> '${"x".repeat(420)}'))`,
   }));
-  const payload = JSON.stringify({ issuer: "https://accounts.google.com", audience: "https://nearyoustill.com", subject: "109876543210987654321", principal: "service:109876543210987654321", observedAt: now, release: release(), workerRuntime, body: { schema: "sqlite_schema", objects } });
+  const payload = JSON.stringify({ issuer: "https://accounts.google.com", audience: "https://nearyoustill.com", subject: "109876543210987654321", principal: "service:109876543210987654321", observedAt: now, release: release(), body: { schema: "sqlite_schema", objects } });
   assert.ok(payload.length > 262_144);
   assert.ok(payload.length < 1_048_576);
   const fetch = async (url) => String(url).includes("metadata.google.internal")
@@ -330,9 +384,8 @@ test("uses a post-read capture time and rejects observation windows stale or fut
 
   for (const { finalTime, observedAt } of [{ finalTime: now + 300_000, observedAt: now - 1 }, { finalTime: now, observedAt: now + 30_001 }]) {
     const clock = [now, finalTime];
-    const freshRuntime = { ...workerRuntime, deployedAt: new Date(finalTime - 60_000).toISOString() };
     const atFinal = (body, overrides = {}) => observed(body, { observedAt: finalTime, ...overrides });
-    const atFinalRuntime = (body) => atFinal(body, { provider: "sites-runtime", workerRuntime: freshRuntime });
+    const atFinalRuntime = (body) => atFinal(body, { provider: "sites-runtime" });
     const options = await input({ now: () => clock.shift() ?? finalTime, readers: readers({
       d1: { readLedger: async () => atFinalRuntime({ appliedMigrations }), readSchema: async () => atFinalRuntime({ schema: "sqlite_schema", objects: schemaObjects }) },
       postgres: { readMigrations: async () => atFinal({ ledger }, { provider: "cloud-sql", identity: postgresIdentity }), readCatalog: async () => atFinal({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }, { provider: "cloud-sql", identity: postgresIdentity }) },
