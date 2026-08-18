@@ -25,6 +25,22 @@ test("script generation validates a supplied stable idempotency key without brea
   assert.equal(validateScriptInput({ ...base, ageMonths: "999" }).ageMonths, "96");
 });
 
+test("script validation treats blank child profile IDs as omitted", () => {
+  assert.equal(validateScriptInput(base).childId, "child-profile:local_1");
+  assert.equal(validateScriptInput({ ...base, childId: "" }).childId, undefined);
+  assert.equal(validateScriptInput({ ...base, childId: " \t " }).childId, undefined);
+});
+
+test("script validation rejects malformed non-empty child profile IDs", () => {
+  assert.throws(() => validateScriptInput({ ...base, childId: "provider/secret" }), /valid local child profile/i);
+});
+
+test("script validation rejects non-string child profile IDs from JSON", () => {
+  for (const childId of [null, true, 123, ["child-profile:local_1"], { id: "child-profile:local_1" }]) {
+    assert.throws(() => validateScriptInput({ ...base, childId }), /valid local child profile/i);
+  }
+});
+
 test("YouTube metadata is labeled structured untrusted data rather than interpolated instructions", () => {
   const provider = buildPersonalizedProviderInput({
     ...validateScriptInput(base),

@@ -58,7 +58,9 @@ export function validateScriptInput(input: Partial<ScriptInput>): ScriptInput {
   }
   const sourceUrl = canonicalYouTubeUrl(input.sourceUrl);
   if (sourceUrl && input.scriptMode !== "personalized") throw new Error("YouTube inspiration requires personalized writing.");
-  const childId = input.childId === undefined ? undefined : String(input.childId).trim();
+  const submittedChildId = input.childId;
+  if (submittedChildId !== undefined && typeof submittedChildId !== "string") throw new Error("Select a valid local child profile.");
+  const childId = submittedChildId?.trim() || undefined;
   if (childId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9:_-]{2,119}$/.test(childId)) throw new Error("Select a valid local child profile.");
   return { requestId, childId, childName, ageMonths: String(age), challenge: input.challenge!, theme: input.theme!, duration: input.duration!, style: input.style!, scriptMode: input.scriptMode!, contentType: input.contentType!, sourceUrl, sourceRightsAttested: input.sourceRightsAttested === true };
 }
