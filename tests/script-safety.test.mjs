@@ -82,7 +82,7 @@ test("personalized fallback fills the requested bedtime window at the calibrated
   }
 });
 
-test("personalized provider failures carry a user-visible fallback notice", async () => {
+test("personalized provider failures stay silent when a safe fallback is ready", async () => {
   const originalKey = process.env.OPENAI_API_KEY;
   const originalFetch = globalThis.fetch;
   process.env.OPENAI_API_KEY = "test-key";
@@ -90,7 +90,7 @@ test("personalized provider failures carry a user-visible fallback notice", asyn
   try {
     const result = await personalizedScriptResult(validateScriptInput(base));
     assert.equal(result.providerFailed, true);
-    assert.match(result.notice, /fallback.+requested length/i);
+    assert.equal(result.notice, null);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -109,7 +109,7 @@ test("personalized provider timeouts return the full-length safe fallback", asyn
     assert.equal(result.providerUsed, false);
     assert.equal(result.providerFailed, true);
     assert.ok(words >= 1_320, `10-minute timeout fallback had only ${words} words`);
-    assert.match(result.notice, /fallback.+requested length/i);
+    assert.equal(result.notice, null);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -127,7 +127,7 @@ test("personalized provider output cannot underfill the requested bedtime", asyn
     const words = result.script.trim().split(/\s+/u).length;
     assert.equal(result.providerUsed, false);
     assert.ok(words >= 1_320, `10-minute recovery had only ${words} words`);
-    assert.match(result.notice, /fallback.+requested length/i);
+    assert.equal(result.notice, null);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
