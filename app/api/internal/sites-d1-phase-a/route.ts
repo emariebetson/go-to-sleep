@@ -1,0 +1,25 @@
+import { env } from "cloudflare:workers";
+import { createGoogleServiceIdentityAuthenticator } from "@/lib/private-tester-baseline-gateway";
+import { SITES_D1_PHASE_A_ARTIFACT } from "@/lib/sites-d1-phase-a-artifact.generated";
+import { SitesD1PhaseAOperation } from "@/lib/sites-d1-phase-a-operation";
+
+const ROUTE_ENABLED=false as const;
+const TEMPORARY_ACTIVATION_ENABLED=false as const;
+const ID=/^[A-Za-z0-9:_-]{8,128}$/;
+type Runtime={DB:D1Database;READINESS_OIDC_ISSUER:string;READINESS_OIDC_AUDIENCE:string;READINESS_OIDC_SUBJECT:string;READINESS_OIDC_JWKS_URL:string};
+
+export async function POST(request:Request){
+  if(!ROUTE_ENABLED||!TEMPORARY_ACTIVATION_ENABLED)return new Response("Not found",{status:404});
+  const runtime=env as unknown as Runtime;
+  try{
+    if(runtime.READINESS_OIDC_JWKS_URL!=="https://www.googleapis.com/oauth2/v3/certs")throw new Error();
+    await createGoogleServiceIdentityAuthenticator({issuer:runtime.READINESS_OIDC_ISSUER,audience:runtime.READINESS_OIDC_AUDIENCE,subject:runtime.READINESS_OIDC_SUBJECT})(request);
+  }catch{return new Response("Unauthorized",{status:401,headers:{"cache-control":"no-store"}})}
+  let body:Record<string,unknown>;
+  try{body=await request.json() as Record<string,unknown>}catch{return new Response("Invalid",{status:400,headers:{"cache-control":"no-store"}})}
+  if(Object.keys(body).sort().join(",")!=="issuedAt,operationId,releaseId"||!ID.test(String(body.operationId??""))||!ID.test(String(body.releaseId??""))||!Number.isSafeInteger(body.issuedAt))return new Response("Invalid",{status:400,headers:{"cache-control":"no-store"}});
+  try{
+    const result=await new SitesD1PhaseAOperation(runtime.DB).run({operationId:String(body.operationId),releaseId:String(body.releaseId),issuedAt:body.issuedAt as number,migrations:SITES_D1_PHASE_A_ARTIFACT.migrations.map(({id,sha256,sql})=>({id,sha256,sql})),expectedProviderLedger:[...SITES_D1_PHASE_A_ARTIFACT.providerMigrationRows],predecessorSchema:SITES_D1_PHASE_A_ARTIFACT.schemaCheckpoints[0],predecessorShapeSha256:SITES_D1_PHASE_A_ARTIFACT.predecessorShapeSha256,schemaCheckpoints:[...SITES_D1_PHASE_A_ARTIFACT.schemaCheckpoints]});
+    return Response.json(result,{headers:{"cache-control":"no-store"}});
+  }catch{return new Response("D1 Phase A operation failed",{status:409,headers:{"cache-control":"no-store"}})}
+}

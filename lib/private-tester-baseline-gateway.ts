@@ -92,14 +92,14 @@ const D1_MIGRATIONS = Object.freeze([
   "0015_platform_release_foundation",
   "0016_marketing_waitlist",
 ]);
-const D1_CONVERGENCE_TABLES = Object.freeze([
+export const D1_CONVERGENCE_TABLES = Object.freeze([
   "auth_sessions", "auth_verifications", "child_profiles", "children", "contributors", "entitlements",
   "household_invitations", "household_members", "households", "jobs", "marketing_waitlist_contacts",
   "marketing_waitlist_interests", "marketing_waitlist_sync", "media_assets", "oauth_accounts", "playlist_items",
   "playlists", "sleep_sessions", "stripe_events", "usage_events", "usage_ledger", "users", "voice_consents", "voices",
 ]);
 const D1_CONVERGENCE_TABLE_SQL = D1_CONVERGENCE_TABLES.map((name) => `'${name}'`).join(",");
-const D1_CONVERGENCE_SHAPE_QUERIES = Object.freeze({
+export const D1_CONVERGENCE_SHAPE_QUERIES = Object.freeze({
   table_xinfo: `/* table_xinfo */ SELECT m.name AS "tableName",p.cid AS cid,p.name AS name,p.type AS type,p."notnull" AS "notNull",p.dflt_value AS "defaultValue",p.pk AS "primaryKey",p.hidden AS hidden FROM sqlite_schema AS m JOIN pragma_table_xinfo(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.cid`,
   foreign_key_list: `/* foreign_key_list */ SELECT m.name AS "tableName",p.id AS id,p.seq AS seq,p."table" AS "parentTable",p."from" AS "fromColumn",p."to" AS "toColumn",p.on_update AS "onUpdate",p.on_delete AS "onDelete",p.match AS match FROM sqlite_schema AS m JOIN pragma_foreign_key_list(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.id,p.seq`,
   index_list: `/* index_list */ SELECT m.name AS "tableName",p.seq AS seq,p.name AS name,p."unique" AS "unique",p.origin AS origin,p.partial AS partial FROM sqlite_schema AS m JOIN pragma_index_list(m.name) AS p WHERE m.type='table' AND m.name IN (${D1_CONVERGENCE_TABLE_SQL}) ORDER BY m.name,p.seq,p.name`,
