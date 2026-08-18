@@ -43,8 +43,10 @@ const sourceSchemaObjects = schemaObjects.filter(({ type, name, tableName }) => 
 const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(sourceSchemaObjects.map(({ rootPage, ...object }) => { void rootPage; return object; }))).digest("hex");
 const managedTables = Object.freeze(["accounts", "d1_migrations"]);
 const managedTableHash = createHash("sha256").update(JSON.stringify(managedTables)).digest("hex");
+const buildReceipt = () => ({ version: 1, projectId, versionId: release().sitesVersion, deploymentId: "appgdep_12345678", commitSha: release().commitSha, archiveSha256: "c".repeat(64), runtimeSha256: "d".repeat(64), buildId: workerRuntime.id, providerScriptName: `site---${projectId.slice(8)}`, providerScriptVersion: workerDeployment.versionId, observedAt: now });
+const sitesEvidence = () => ({ buildReceipt: buildReceipt(), schemaCompletion: { version: 1, kind: "d1-schema", buildId: workerRuntime.id, count: 10, pageCount: 1, orderedDigest: "e".repeat(64) }, ledgerCompletion: { version: 1, kind: "d1-ledger", buildId: workerRuntime.id, count: 17, pageCount: 1, orderedDigest: "f".repeat(64) } });
 const deploymentOperation = () => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   principal: signerPrincipal,
   keyId: signerKeyId,
   keyVersion: 7,
@@ -53,13 +55,13 @@ const deploymentOperation = () => ({
   live: { version: `${projectId}~appgver_example`, commitSha: "a".repeat(40) },
   rollback: { version: `${projectId}~appgver_rollback`, commitSha: "f".repeat(40) },
   resources: [
-    { provider: "sites-managed", binding: "AUDIO", kind: "r2", physicalId: "unknown-managed" },
-    { provider: "sites-managed", binding: "DB", kind: "d1", physicalId: "unknown-managed", tableHash: managedTableHash },
+    { provider: "sites-managed", binding: "AUDIO", kind: "r2", physicalId: "unknown-managed", archiveSha256: "c".repeat(64), deploymentId: "appgdep_12345678", buildId: workerRuntime.id },
+    { provider: "sites-managed", binding: "DB", kind: "d1", physicalId: "unknown-managed", buildId: workerRuntime.id, schemaDigest: "e".repeat(64), schemaObjectCount: 10, migrationDigest: "f".repeat(64), migrationCount: 17 },
   ],
 });
 const sitesResourceReceipt = () => {
   const hostingMetadata = { project_id: projectId, d1: "DB", r2: "AUDIO" };
-  return { schema_version: 1, provider: "openai-sites-control-plane", captured_at: now, version: { id: release().sitesVersion, project_id: projectId, version_number: 7, source: { commit_sha: release().commitSha }, archive_storage: { archive_format: "tar", sediment_file_id: "sediment_12345678", content_hash: `sha256:${"c".repeat(64)}`, size_bytes: 1234, file_count: 42 } }, deployment: { id: "appgdep_12345678", project_id: projectId, version_id: release().sitesVersion, type: "publish", status: "succeeded", url: "https://nearnight.ebetson.chatgpt.site", provider_deployment_id: "provider_12345678", env_set_revision: 3, updated_at: workerRuntime.deployedAt }, database_overview: { project_id: projectId, bindings: ["DB"], selected_binding_name: "DB", tables: managedTables, model_projection: { truncated: false, omitted_project_id: false, omitted_selected_binding: false, omitted_bindings: 0, omitted_tables: 0 } }, hosting_metadata: hostingMetadata, hosting_metadata_sha256: createHash("sha256").update(JSON.stringify(hostingMetadata)).digest("hex") };
+  return { schema_version: 2, provider: "openai-sites-control-plane", captured_at: now, version: { id: release().sitesVersion, project_id: projectId, version_number: 7, source: { commit_sha: release().commitSha }, archive_storage: { archive_format: "tar", sediment_file_id: "sediment_12345678", content_hash: `sha256:${"c".repeat(64)}`, size_bytes: 1234, file_count: 42 } }, deployment: { id: "appgdep_12345678", project_id: projectId, version_id: release().sitesVersion, type: "publish", status: "succeeded", url: "https://nearnight.ebetson.chatgpt.site", provider_deployment_id: "provider_12345678", env_set_revision: 3, updated_at: workerRuntime.deployedAt }, hosting_metadata: hostingMetadata, hosting_metadata_sha256: createHash("sha256").update(JSON.stringify(hostingMetadata)).digest("hex") };
 };
 const observed = (body, overrides = {}) => ({ provider: "test-reader", observedAt: now, identity, body, ...overrides });
 const runtimeObserved = (body, overrides = {}) => {const key=Object.hasOwn(body,"appliedMigrations")?"1111111111111111-ORD":Object.hasOwn(body,"schema")?"2222222222222222-ORD":Object.hasOwn(body,"nearfamily")?"3333333333333333-ORD":"4444444444444444-ORD";return observed(body,{provider:"sites-runtime",rayId:key,...overrides})};
@@ -90,11 +92,12 @@ async function input(overrides = {}) {
   const signed = overrides.deployment ?? await deployment();
   const { deployment: _deployment, ...rest } = overrides;
   void _deployment;
-  const sitesDeploymentReceipt = { version: 1, provider: "openai-sites-control-plane", projectId, deploymentId: "appgdep_12345678", versionId: release().sitesVersion, commitSha: release().commitSha, deployedAt: workerRuntime.deployedAt, workerDeploymentId: workerDeployment.deploymentId, workerVersionId: workerDeployment.versionId };
+  const sitesDeploymentReceipt = { version: 1, provider: "openai-sites-control-plane", projectId, deploymentId: "appgdep_12345678", versionId: release().sitesVersion, commitSha: release().commitSha, deployedAt: workerRuntime.deployedAt };
   const expectedSitesDeploymentReceiptHash = createHash("sha256").update(JSON.stringify(sitesDeploymentReceipt)).digest("hex");
   const sitesResourceReceiptRaw = `${JSON.stringify(sitesResourceReceipt())}\n`;
   const expectedSitesResourceReceiptHash = createHash("sha256").update(sitesResourceReceiptRaw).digest("hex");
-  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, sitesResourceReceiptRaw, expectedSitesResourceReceiptHash, expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
+  const sitesEvidenceRaw = JSON.stringify(sitesEvidence());
+  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, sitesResourceReceiptRaw, expectedSitesResourceReceiptHash, sitesEvidence: sitesEvidence(), expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
 }
 function productionEnvironment() {
   const instance = "nearnight:us-central1:nearyou-production";
@@ -216,18 +219,18 @@ test("rejects signed deployment facts that disagree with release, Sites resource
     await input({ deployment: await deployment({ claims: (value) => ({ ...value, live: { ...value.live, version: `${projectId}~appgver_other` } }) }) }),
     await input({ deployment: await deployment({ claims: (value) => ({ ...value, live: { ...value.live, commitSha: "e".repeat(40) } }) }) }),
     await input({ sitesDeploymentReceipt: { version: 1, provider: "openai-sites-control-plane", projectId, deploymentId: "appgdep_12345678", versionId: release().sitesVersion, commitSha: "e".repeat(40), deployedAt: workerRuntime.deployedAt } }),
-    await input({ deployment: await deployment({ claims: (value) => ({ ...value, resources: [value.resources[0], { ...value.resources[1], tableHash: "e".repeat(64) }] }) }) }),
+    await input({ deployment: await deployment({ claims: (value) => ({ ...value, resources: [value.resources[0], { ...value.resources[1], schemaDigest: "0".repeat(64) }] }) }) }),
     await input({ readers: readers({ postgres: { readMigrations: async () => postgresObserved({ ledger }, { identity: "database:attacker@nearnight.iam.gserviceaccount.com" }), readCatalog: async () => postgresObserved({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) } }) }),
   ];
-  for (const options of cases) {
-    await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+  for (const [caseIndex, options] of cases.entries()) {
+    await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/, `case ${caseIndex}`);
     assert.equal(await readFile(options.outputPath).catch(() => ""), "");
   }
 });
 
 test("rejects a self-consistently rehashed Sites receipt that disagrees with the signed manifest", async () => {
   const receipt = sitesResourceReceipt();
-  receipt.database_overview.tables = ["accounts", "d1_migrations", "rogue_table"];
+  receipt.hosting_metadata.r2 = "ROGUE";
   const sitesResourceReceiptRaw = `${JSON.stringify(receipt)}\n`;
   const options = await input({ sitesResourceReceiptRaw, expectedSitesResourceReceiptHash: createHash("sha256").update(sitesResourceReceiptRaw).digest("hex") });
   await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
