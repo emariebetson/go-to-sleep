@@ -7,6 +7,8 @@ const VERSION_KEYS = ["version", "commitSha"];
 const RESOURCE_KEYS = ["binding", "kind", "resource"];
 const MANAGED_AUDIO_KEYS = ["provider", "binding", "kind", "physicalId"];
 const MANAGED_DB_KEYS = ["provider", "binding", "kind", "physicalId", "tableHash"];
+const MANAGED_V3_AUDIO_KEYS = ["provider", "binding", "kind", "physicalId", "archiveSha256", "deploymentId", "buildId"];
+const MANAGED_V3_DB_KEYS = ["provider", "binding", "kind", "physicalId", "buildId", "schemaDigest", "schemaObjectCount", "migrationDigest", "migrationCount"];
 const ENVELOPE_KEYS = ["claims", "signature"];
 const TRUST_KEYS = ["principal", "keyId", "version", "fingerprint", "status", "validFrom", "validUntil", "revokedAt", "usage"];
 const KEY_RECORD_KEYS = ["principal", "keyId", "version", "fingerprint", "key"];
@@ -19,6 +21,8 @@ const HASH = /^[a-f0-9]{64}$/;
 const ACCOUNT = /^[a-f0-9]{32}$/;
 const D1_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const R2_BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
+const BUILD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DEPLOYMENT_ID = /^appgdep_[A-Za-z0-9_-]{8,152}$/;
 const MAX_LIFETIME_MS = 15 * 60_000;
 const MAX_AGE_MS = 5 * 60_000;
 const MAX_FUTURE_MS = 30_000;
@@ -30,9 +34,11 @@ export type PrivateTesterDeploymentResource =
   | { binding: "AUDIO"; kind: "r2"; resource: string }
   | { binding: "DB"; kind: "d1"; resource: string }
   | { provider: "sites-managed"; binding: "AUDIO"; kind: "r2"; physicalId: "unknown-managed" }
-  | { provider: "sites-managed"; binding: "DB"; kind: "d1"; physicalId: "unknown-managed"; tableHash: string };
+  | { provider: "sites-managed"; binding: "DB"; kind: "d1"; physicalId: "unknown-managed"; tableHash: string }
+  | { provider: "sites-managed"; binding: "AUDIO"; kind: "r2"; physicalId: "unknown-managed"; archiveSha256: string; deploymentId: string; buildId: string }
+  | { provider: "sites-managed"; binding: "DB"; kind: "d1"; physicalId: "unknown-managed"; buildId: string; schemaDigest: string; schemaObjectCount: number; migrationDigest: string; migrationCount: number };
 export type ObservedPrivateTesterReleaseOperation = {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   principal: string;
   keyId: string;
   keyVersion: number;
@@ -80,8 +86,9 @@ function parseVersion(value: unknown, projectId: string): PrivateTesterDeploymen
   if (!exactRecord(value, VERSION_KEYS) || typeof value.version !== "string" || value.version.length > 300 || !value.version.startsWith(`${projectId}~appgver_`) || !/^appgprj_[A-Za-z0-9_-]+~appgver_[A-Za-z0-9_-]+$/.test(value.version) || typeof value.commitSha !== "string" || !COMMIT.test(value.commitSha)) invalid();
   return { version: value.version, commitSha: value.commitSha };
 }
-function parseResources(value: unknown, schemaVersion: 1 | 2): [PrivateTesterDeploymentResource, PrivateTesterDeploymentResource] {
+function parseResources(value: unknown, schemaVersion: 1 | 2 | 3): [PrivateTesterDeploymentResource, PrivateTesterDeploymentResource] {
   if (!exactArray(value, 2)) invalid();
+  if (schemaVersion === 3) { const audio=value[0],database=value[1]; if(!exactRecord(audio,MANAGED_V3_AUDIO_KEYS)||audio.provider!=="sites-managed"||audio.binding!=="AUDIO"||audio.kind!=="r2"||audio.physicalId!=="unknown-managed"||typeof audio.archiveSha256!=="string"||!HASH.test(audio.archiveSha256)||typeof audio.deploymentId!=="string"||!DEPLOYMENT_ID.test(audio.deploymentId)||typeof audio.buildId!=="string"||!BUILD_ID.test(audio.buildId)||!exactRecord(database,MANAGED_V3_DB_KEYS)||database.provider!=="sites-managed"||database.binding!=="DB"||database.kind!=="d1"||database.physicalId!=="unknown-managed"||database.buildId!==audio.buildId||typeof database.schemaDigest!=="string"||!HASH.test(database.schemaDigest)||!integer(database.schemaObjectCount,1)||Number(database.schemaObjectCount)>10_000_000||typeof database.migrationDigest!=="string"||!HASH.test(database.migrationDigest)||!integer(database.migrationCount,1)||Number(database.migrationCount)>10_000_000)invalid();return[audio as PrivateTesterDeploymentResource,database as PrivateTesterDeploymentResource]}
   if (schemaVersion === 2) { const audio=value[0],database=value[1]; if(!exactRecord(audio,MANAGED_AUDIO_KEYS)||audio.provider!=="sites-managed"||audio.binding!=="AUDIO"||audio.kind!=="r2"||audio.physicalId!=="unknown-managed"||!exactRecord(database,MANAGED_DB_KEYS)||database.provider!=="sites-managed"||database.binding!=="DB"||database.kind!=="d1"||database.physicalId!=="unknown-managed"||typeof database.tableHash!=="string"||!HASH.test(database.tableHash))invalid(); return [audio as PrivateTesterDeploymentResource,database as PrivateTesterDeploymentResource]; }
   const parsed = value.map((entry) => {
     if (!exactRecord(entry, RESOURCE_KEYS) || typeof entry.resource !== "string" || entry.resource.length > 512) invalid();
@@ -101,7 +108,7 @@ function parseResources(value: unknown, schemaVersion: 1 | 2): [PrivateTesterDep
   return parsed as [PrivateTesterDeploymentResource, PrivateTesterDeploymentResource];
 }
 function parseOperation(input: unknown, keys: string[]): ObservedPrivateTesterReleaseOperation {
-  if (!exactRecord(input, keys) || (input.schemaVersion !== 1 && input.schemaVersion !== 2) || typeof input.principal !== "string" || !CLAIM_ID.test(input.principal) || typeof input.keyId !== "string" || !CLAIM_ID.test(input.keyId) || !integer(input.keyVersion, 1) || typeof input.releaseId !== "string" || !RELEASE_ID.test(input.releaseId) || typeof input.projectId !== "string" || !PROJECT.test(input.projectId)) invalid();
+  if (!exactRecord(input, keys) || (input.schemaVersion !== 1 && input.schemaVersion !== 2 && input.schemaVersion !== 3) || typeof input.principal !== "string" || !CLAIM_ID.test(input.principal) || typeof input.keyId !== "string" || !CLAIM_ID.test(input.keyId) || !integer(input.keyVersion, 1) || typeof input.releaseId !== "string" || !RELEASE_ID.test(input.releaseId) || typeof input.projectId !== "string" || !PROJECT.test(input.projectId)) invalid();
   const live = parseVersion(input.live, input.projectId), rollback = parseVersion(input.rollback, input.projectId), resources = parseResources(input.resources,input.schemaVersion);
   if (live.version === rollback.version || live.commitSha === rollback.commitSha) invalid();
   return { schemaVersion: input.schemaVersion, principal: input.principal, keyId: input.keyId, keyVersion: input.keyVersion, releaseId: input.releaseId, projectId: input.projectId, live, rollback, resources };
