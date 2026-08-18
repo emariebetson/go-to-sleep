@@ -5,6 +5,8 @@ const CLAIM_KEYS = ["schemaVersion", "principal", "keyId", "keyVersion", "releas
 const OPERATION_KEYS = ["schemaVersion", "principal", "keyId", "keyVersion", "releaseId", "projectId", "live", "rollback", "resources"];
 const VERSION_KEYS = ["version", "commitSha"];
 const RESOURCE_KEYS = ["binding", "kind", "resource"];
+const MANAGED_AUDIO_KEYS = ["provider", "binding", "kind", "physicalId"];
+const MANAGED_DB_KEYS = ["provider", "binding", "kind", "physicalId", "tableHash"];
 const ENVELOPE_KEYS = ["claims", "signature"];
 const TRUST_KEYS = ["principal", "keyId", "version", "fingerprint", "status", "validFrom", "validUntil", "revokedAt", "usage"];
 const KEY_RECORD_KEYS = ["principal", "keyId", "version", "fingerprint", "key"];
@@ -26,9 +28,11 @@ export const PRIVATE_TESTER_DEPLOYMENT_MANIFEST_DOMAIN = "private-tester-deploym
 export type PrivateTesterDeploymentVersion = { version: string; commitSha: string };
 export type PrivateTesterDeploymentResource =
   | { binding: "AUDIO"; kind: "r2"; resource: string }
-  | { binding: "DB"; kind: "d1"; resource: string };
+  | { binding: "DB"; kind: "d1"; resource: string }
+  | { provider: "sites-managed"; binding: "AUDIO"; kind: "r2"; physicalId: "unknown-managed" }
+  | { provider: "sites-managed"; binding: "DB"; kind: "d1"; physicalId: "unknown-managed"; tableHash: string };
 export type ObservedPrivateTesterReleaseOperation = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   principal: string;
   keyId: string;
   keyVersion: number;
@@ -76,8 +80,9 @@ function parseVersion(value: unknown, projectId: string): PrivateTesterDeploymen
   if (!exactRecord(value, VERSION_KEYS) || typeof value.version !== "string" || value.version.length > 300 || !value.version.startsWith(`${projectId}~appgver_`) || !/^appgprj_[A-Za-z0-9_-]+~appgver_[A-Za-z0-9_-]+$/.test(value.version) || typeof value.commitSha !== "string" || !COMMIT.test(value.commitSha)) invalid();
   return { version: value.version, commitSha: value.commitSha };
 }
-function parseResources(value: unknown): [PrivateTesterDeploymentResource, PrivateTesterDeploymentResource] {
+function parseResources(value: unknown, schemaVersion: 1 | 2): [PrivateTesterDeploymentResource, PrivateTesterDeploymentResource] {
   if (!exactArray(value, 2)) invalid();
+  if (schemaVersion === 2) { const audio=value[0],database=value[1]; if(!exactRecord(audio,MANAGED_AUDIO_KEYS)||audio.provider!=="sites-managed"||audio.binding!=="AUDIO"||audio.kind!=="r2"||audio.physicalId!=="unknown-managed"||!exactRecord(database,MANAGED_DB_KEYS)||database.provider!=="sites-managed"||database.binding!=="DB"||database.kind!=="d1"||database.physicalId!=="unknown-managed"||typeof database.tableHash!=="string"||!HASH.test(database.tableHash))invalid(); return [audio as PrivateTesterDeploymentResource,database as PrivateTesterDeploymentResource]; }
   const parsed = value.map((entry) => {
     if (!exactRecord(entry, RESOURCE_KEYS) || typeof entry.resource !== "string" || entry.resource.length > 512) invalid();
     if (entry.binding === "AUDIO" && entry.kind === "r2") {
@@ -96,10 +101,10 @@ function parseResources(value: unknown): [PrivateTesterDeploymentResource, Priva
   return parsed as [PrivateTesterDeploymentResource, PrivateTesterDeploymentResource];
 }
 function parseOperation(input: unknown, keys: string[]): ObservedPrivateTesterReleaseOperation {
-  if (!exactRecord(input, keys) || input.schemaVersion !== 1 || typeof input.principal !== "string" || !CLAIM_ID.test(input.principal) || typeof input.keyId !== "string" || !CLAIM_ID.test(input.keyId) || !integer(input.keyVersion, 1) || typeof input.releaseId !== "string" || !RELEASE_ID.test(input.releaseId) || typeof input.projectId !== "string" || !PROJECT.test(input.projectId)) invalid();
-  const live = parseVersion(input.live, input.projectId), rollback = parseVersion(input.rollback, input.projectId), resources = parseResources(input.resources);
+  if (!exactRecord(input, keys) || (input.schemaVersion !== 1 && input.schemaVersion !== 2) || typeof input.principal !== "string" || !CLAIM_ID.test(input.principal) || typeof input.keyId !== "string" || !CLAIM_ID.test(input.keyId) || !integer(input.keyVersion, 1) || typeof input.releaseId !== "string" || !RELEASE_ID.test(input.releaseId) || typeof input.projectId !== "string" || !PROJECT.test(input.projectId)) invalid();
+  const live = parseVersion(input.live, input.projectId), rollback = parseVersion(input.rollback, input.projectId), resources = parseResources(input.resources,input.schemaVersion);
   if (live.version === rollback.version || live.commitSha === rollback.commitSha) invalid();
-  return { schemaVersion: 1, principal: input.principal, keyId: input.keyId, keyVersion: input.keyVersion, releaseId: input.releaseId, projectId: input.projectId, live, rollback, resources };
+  return { schemaVersion: input.schemaVersion, principal: input.principal, keyId: input.keyId, keyVersion: input.keyVersion, releaseId: input.releaseId, projectId: input.projectId, live, rollback, resources };
 }
 function parseClaims(input: unknown): PrivateTesterDeploymentClaims {
   const operation = parseOperation(input, CLAIM_KEYS);

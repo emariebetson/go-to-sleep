@@ -49,6 +49,8 @@ async function fixture(bits = 3072) {
 const verifyOptions = (value, overrides = {}) => ({ now, trust: value.trust, lookupKey: async () => value.record, nonceStore: { consumeDeploymentManifestNonce: async () => true }, ...overrides });
 const crc32c = (bytes) => { let crc = 0xffffffff; for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0x82f63b78 & -(crc & 1)); } return String((crc ^ 0xffffffff) >>> 0); };
 
+test("v2 signs exact Sites-managed logical resources without fabricating physical IDs",()=>{const value={...claims(),schemaVersion:2,resources:[{provider:"sites-managed",binding:"AUDIO",kind:"r2",physicalId:"unknown-managed"},{provider:"sites-managed",binding:"DB",kind:"d1",physicalId:"unknown-managed",tableHash:"c".repeat(64)}]};const parsed=parsePrivateTesterDeploymentManifest(value,now);assert.deepEqual(parsed.resources,value.resources);assert.match(canonicalPrivateTesterDeploymentClaims(parsed),/unknown-managed/);for(const invalid of[{...value,resources:[{...value.resources[0],physicalId:"bucket-guess"},value.resources[1]]},{...value,resources:[value.resources[0],{...value.resources[1],tableHash:"bad"}]},{...value,resources:[{...value.resources[0],extra:true},value.resources[1]]}])assert.throws(()=>parsePrivateTesterDeploymentManifest(invalid,now),/deployment manifest invalid/)});
+
 test("composes exact deployment facts and verifies an RSA-3072 KMS-compatible envelope", async () => {
   const fixtureValue = await fixture();
   let consumed;
