@@ -112,22 +112,10 @@ jobs:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.media-auth.outputs.access_token }}
           RELEASE_ID: ${{ vars.RELEASE_ID }}
         run: node --import tsx scripts/media-evidence-cli.ts evidence/media.json
-      - name: Mint fresh reconciliation identity
-        id: reconciliation-auth
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ vars.OUTCOME_RECONCILIATION_AUDIENCE }}
-      - name: finalize durable 24h canary operational-evidence
-        env:
-          READINESS_CONTROL_DATABASE_URL: ${{ secrets.READINESS_CONTROL_DATABASE_URL }}
-          RELEASE_ID: ${{ vars.RELEASE_ID }}
-          OUTCOME_RECONCILIATION_URL: ${{ vars.OUTCOME_RECONCILIATION_URL }}
-          OUTCOME_RECONCILIATION_AUDIENCE: ${{ vars.OUTCOME_RECONCILIATION_AUDIENCE }}
-          CANARY_METRICS_TOKEN: ${{ steps.reconciliation-auth.outputs.id_token }}
-        run: node --import tsx scripts/canary-evidence-cli.ts finalize > evidence/canary.json
+      - name: Reject unsupplied private-tester canary evidence
+        run: |
+          test ! -e evidence/canary.json
+          printf '%s\n' 'A signed 24-hour private-tester canary receipt must be independently reviewed before production evidence can consume it.'
       - name: Compose exact release claims from operational artifacts
         env:
           RELEASE_ID: ${{ vars.RELEASE_ID }}
