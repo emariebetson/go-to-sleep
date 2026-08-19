@@ -6,6 +6,7 @@ import { SITES_D1_PHASE_B_ARTIFACT } from "./sites-d1-phase-b-artifact.generated
 import { SITES_D1_PHASE_C_ARTIFACT } from "./sites-d1-phase-c-artifact.generated";
 import { SITES_D1_FORWARD_ARTIFACT } from "./sites-d1-forward-artifact.generated";
 import { createD1LedgerEvidenceReader, createD1SchemaEvidenceReader } from "./private-tester-sites-evidence";
+import { privateTesterPackagedBuildId } from "./private-tester-packaged-build-id";
 
 const ORIGIN = "https://nearyoustill.com";
 const PREFIX = "/api/internal/private-tester-baseline/";
@@ -233,7 +234,6 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
   let release: PrivateTesterRelease;
   try { release = parsePrivateTesterRelease(rawRelease, startsAt); } catch { console.warn("private tester runtime rejected at release-contract"); configurationError(); }
   const db = environment.DB;
-  const buildId = dependencies.buildId ?? process.env.__VINEXT_BUILD_ID ?? "";
   const manifestProviderObjects = EXACT_D1_PROVIDER_INTERNAL_OBJECTS.map(({ type, name, tableName }) => ({ type, name, table_name: tableName }));
   if (!release.sitesVersion.startsWith(SITES_PROJECT_PREFIX)) { console.warn("private tester runtime rejected at sites-version"); configurationError(); }
   if (!HASH.test(expectedD1SchemaDefinitionHash) || !Number.isSafeInteger(expectedD1SchemaObjectCount) || expectedD1SchemaObjectCount < 1 || expectedD1SchemaObjectCount > 2_000 || JSON.stringify(d1SourceBaseline.provider_internal_schema_objects) !== JSON.stringify(manifestProviderObjects)) { console.warn("private tester runtime rejected at reviewed-baseline"); configurationError(); }
@@ -399,8 +399,8 @@ export function createPrivateTesterBaselineRuntime(environment: GatewayEnvironme
     async read(kind: string, cursor: string | null = null) {
       if (kind === "d1-ledger") return d1Ledger();
       if (kind === "d1-schema") return d1Schema();
-      if (kind === "d1-schema-page") return createD1SchemaEvidenceReader(db, buildId)(cursor);
-      if (kind === "d1-ledger-page") return createD1LedgerEvidenceReader(db, buildId)(cursor);
+      if (kind === "d1-schema-page") return createD1SchemaEvidenceReader(db, dependencies.buildId ?? privateTesterPackagedBuildId())(cursor);
+      if (kind === "d1-ledger-page") return createD1LedgerEvidenceReader(db, dependencies.buildId ?? privateTesterPackagedBuildId())(cursor);
       if (kind === "d1-convergence-ledger") return d1ConvergenceLedger();
       if (kind === "d1-convergence-schema") return d1ConvergenceSchema();
       if (kind === "d1-convergence-shape") return d1ConvergenceShape();

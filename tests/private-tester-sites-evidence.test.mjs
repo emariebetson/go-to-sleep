@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { completeEvidence, createD1LedgerEvidenceReader, createD1SchemaEvidenceReader, readEvidencePage } from "../lib/private-tester-sites-evidence.ts";
-import { createPrivateTesterBaselineGateway } from "../lib/private-tester-baseline-gateway.ts";
+import { createPrivateTesterBaselineGateway, createPrivateTesterBaselineRuntime } from "../lib/private-tester-baseline-gateway.ts";
 
 const buildId = "12345678-1234-4123-8123-123456789abc";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -33,7 +33,7 @@ for (const count of [51, 500, 5_001]) test(`paginates ${count} canonical objects
   const pages = await collect(expected);
   assert.equal(pages.every((page) => page.rows.length <= 200), true);
   assert.deepEqual(pages.flatMap((page) => page.rows), expected);
-  const completion = completeEvidence({ kind: "d1-schema", buildId, pages });
+  const completion = completeEvidence("d1-schema", pages);
   assert.equal(completion.count, count);
   assert.equal(completion.pageCount, Math.ceil(count / 200));
   assert.match(completion.orderedDigest, /^[a-f0-9]{64}$/);
@@ -49,7 +49,7 @@ test("rejects reordered, repeated, missing, substituted, oversized, and mixed-bu
     [pages[0], { ...pages[1], buildId: "87654321-4321-4321-8321-cba987654321" }, pages[2]],
     [{ ...pages[0], rows: [...pages[0].rows, ...rows(201)] }, pages[1], pages[2]],
     [{ ...pages[0], unexpected: true }, pages[1], pages[2]],
-  ]) assert.throws(() => completeEvidence({ kind: "d1-schema", buildId, pages: mutated }), /Sites evidence invalid/);
+  ]) assert.throws(() => completeEvidence("d1-schema", mutated), /Sites evidence invalid/);
 });
 
 test("rejects malformed rows and cursor substitution before reading another page", async () => {
@@ -72,7 +72,7 @@ test("completion rejects a self-consistent forged cursor that skips rows", async
     kind: "d1-schema", buildId, cursor: forged,
     readAfter: async (identity, limit) => source.filter((row) => row.identity > identity).slice(0, limit),
   });
-  assert.throws(() => completeEvidence({ kind: "d1-schema", buildId, pages: [first, skipped] }), /Sites evidence invalid/);
+  assert.throws(() => completeEvidence("d1-schema", [first, skipped]), /Sites evidence invalid/);
 });
 
 test("uses only fixed cursor SQL and never accepts caller-selected SQL", async () => {
@@ -82,7 +82,7 @@ test("uses only fixed cursor SQL and never accepts caller-selected SQL", async (
   const reader = createD1SchemaEvidenceReader(db, buildId);
   const pages = []; let cursor = null;
   do { const page = await reader(cursor); pages.push(page); cursor = page.nextCursor; } while (cursor !== null);
-  assert.equal(completeEvidence({ kind: "d1-schema", buildId, pages }).count, 501);
+  assert.equal(completeEvidence("d1-schema", pages).count, 501);
   assert.equal(statements.length, 3);
   assert.equal(new Set(statements).size, 2);
   assert.equal(statements.every((sql) => sql.includes("FROM sqlite_schema") && sql.includes("LIMIT 201")), true);
@@ -110,5 +110,29 @@ test("paginates a fixed migration-ledger projection beyond provider viewer limit
   const reader = createD1LedgerEvidenceReader(db, buildId);
   const pages = []; let cursor = null;
   do { const page = await reader(cursor); pages.push(page); cursor = page.nextCursor; } while (cursor !== null);
-  assert.equal(completeEvidence({ kind: "d1-ledger", buildId, pages }).count, 501);
+  assert.equal(completeEvidence("d1-ledger", pages).count, 501);
+});
+
+test("delivers the packaged Vinext build ID to schema and ledger page reads", async () => {
+  const prior = globalThis.__PRIVATE_TESTER_PACKAGED_BUILD_ID__;
+  globalThis.__PRIVATE_TESTER_PACKAGED_BUILD_ID__ = buildId;
+  const schemaRows = [{ type: "table", name: "objects", tbl_name: "objects", sql: "CREATE TABLE objects(id TEXT)" }];
+  const ledgerRows = [{ identity: "repair:0001", applied_at: 1, source_sha256: hash("migration") }];
+  const runtime = createPrivateTesterBaselineRuntime({
+    DB: { prepare(sql) { let values = []; return { bind(...bound) { values = bound; return this; }, async all() { return { results: sql.includes("sqlite_schema") ? schemaRows.filter((row) => values[0] === undefined || `table\u0000${row.name}\u0000${row.tbl_name}` > values[0]) : ledgerRows.filter((row) => values[0] === undefined || row.identity > values[0]) }; } }; } },
+    PRIVATE_TESTER_BASELINE_RELEASE_JSON: JSON.stringify({ releaseId: "rel_20260818_private_03", commitSha: "a".repeat(40), sitesVersion: "appgprj_6a79f8a66eb4819198bb42a2b26addea~appgver_example", startsAt: "2026-08-18T00:00:00.000Z", expiresAt: "2026-08-25T00:00:00.000Z", products: ["nearfamily", "nearstory"] }),
+    GOOGLE_CLIENT_ID: "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com",
+    BETTER_AUTH_URL: "https://nearyoustill.com", PUBLIC_APP_URL: "https://nearyoustill.com",
+    NEARYOU_ENABLE_STORY: "false", NEARYOU_ENABLE_LEGACY_ARCHIVE: "false", PRIVATE_TESTER_SCHEDULER_ENABLED: "false",
+  }, { expectedD1SchemaDefinitionHash: hash("reviewed"), expectedD1SchemaObjectCount: 1 });
+  try {
+    for (const kind of ["d1-schema-page", "d1-ledger-page"]) {
+      const page = await runtime.read(kind);
+      assert.equal(page.buildId, buildId);
+      assert.equal(page.nextCursor, null);
+    }
+  } finally {
+    if (prior === undefined) delete globalThis.__PRIVATE_TESTER_PACKAGED_BUILD_ID__;
+    else globalThis.__PRIVATE_TESTER_PACKAGED_BUILD_ID__ = prior;
+  }
 });
