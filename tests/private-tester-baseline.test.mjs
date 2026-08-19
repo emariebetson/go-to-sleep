@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { createPrivateTesterBaselineRuntime } from "../lib/private-tester-baseline-gateway.ts";
 import { completeEvidence, readEvidencePage } from "../lib/private-tester-sites-evidence.ts";
 import { privateTesterDeploymentManifestSignedBytes } from "../lib/private-tester-deployment-manifest.ts";
@@ -17,10 +19,12 @@ const postgresIdentity = "database:nearyou-pt-baseline@nearnight.iam";
 const signerPrincipal = "ci://github/nearyou/private-tester-deployment";
 const signerKeyId = "private-tester-deployment";
 const projectId = `appgprj_${"a".repeat(32)}`;
-const archiveBytes = Buffer.from("reviewed Sites archive bytes");
-const archiveSha256 = createHash("sha256").update(archiveBytes).digest("hex");
 const googleClientId = "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com";
 const workerRuntime = Object.freeze({ id: "11111111-1111-4111-8111-111111111111", commitSha: "a".repeat(40), deployedAt: "2026-08-14T17:59:00.000Z" });
+const execFile = promisify(execFileCallback);
+async function archiveFor(buildId) { const root = await mkdtemp(join(tmpdir(), "private-tester-archive-")), archive = join(root, "site.tar.gz"); try { await mkdir(join(root, "dist/server"), { recursive: true }); await writeFile(join(root, "dist/server/BUILD_ID"), buildId); await writeFile(join(root, "dist/server/index.js"), `const runtime={buildId:${JSON.stringify(buildId)},deploymentVersion:${JSON.stringify(buildId)}};`); await execFile("tar", ["-czf", archive, "-C", root, "dist"]); return await readFile(archive); } finally { await rm(root, { recursive: true, force: true }); } }
+const archiveBytes = await archiveFor(workerRuntime.id);
+const archiveSha256 = createHash("sha256").update(archiveBytes).digest("hex");
 const workerDeployment = Object.freeze({ scriptName: `site---${projectId.slice(8)}`, deploymentId: "11111111-1111-4111-8111-111111111111", versionId: "22222222-2222-4222-8222-222222222222", percentage: 100 });
 const release = () => ({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: `${projectId}~appgver_example`, startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
 const ledger = Object.freeze([{ id: "0015_platform_release_foundation", checksum: "b".repeat(64) }, { id: "0016_existing_head", checksum: "c".repeat(64) }]);
@@ -179,6 +183,18 @@ test("derives the build receipt from exact archive bytes and bracketed runtime e
   const baseline = await capturePrivateTesterBaseline(options);
   assert.equal(baseline.sites.buildReceipt.buildId, workerRuntime.id);
   assert.equal(baseline.sites.buildReceipt.archiveSha256, createHash("sha256").update(options.sitesArchiveBytes).digest("hex"));
+});
+
+test("rejects arbitrary bytes in place of a Sites archive", async () => {
+  const options = await input();
+  options.sitesArchiveBytes = Buffer.from("not a tar archive");
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+});
+
+test("rejects an archive BUILD_ID that differs from Task 1 runtime evidence", async () => {
+  const options = await input();
+  options.sitesArchiveBytes = await archiveFor("33333333-3333-4333-8333-333333333333");
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
 });
 
 test("rejects a deployment swap during the capture bracket", async () => {
