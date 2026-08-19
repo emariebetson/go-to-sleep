@@ -200,8 +200,8 @@ function validateTrust(trust: unknown, nowMs: number): asserts trust is Trust[] 
     seen.add(tuple);
   }
 }
-export async function verifyPrivateTesterDeploymentManifest(envelope: unknown, options: { now: number; trust: unknown; lookupKey(principal: string, keyId: string, version: number): Promise<KeyRecord>; nonceStore: { consumeDeploymentManifestNonce(input: PrivateTesterDeploymentNonce): Promise<boolean> } }): Promise<PrivateTesterDeploymentClaims> {
-  if (!options || !integer(options.now) || typeof options.lookupKey !== "function" || !options.nonceStore || typeof options.nonceStore.consumeDeploymentManifestNonce !== "function") invalid();
+export async function verifyPrivateTesterDeploymentManifestTrustedSignature(envelope: unknown, options: { now: number; trust: unknown; lookupKey(principal: string, keyId: string, version: number): Promise<KeyRecord> }): Promise<PrivateTesterDeploymentClaims> {
+  if (!options || !integer(options.now) || typeof options.lookupKey !== "function") invalid();
   validateTrust(options.trust, options.now);
   if (!exactRecord(envelope, ENVELOPE_KEYS)) invalid();
   const claims = parsePrivateTesterDeploymentManifest(envelope.claims, options.now);
@@ -211,6 +211,11 @@ export async function verifyPrivateTesterDeploymentManifest(envelope: unknown, o
   try { record = await options.lookupKey(claims.principal, claims.keyId, claims.keyVersion); } catch { throw new Error("private tester deployment key lookup failed"); }
   const verified = await verifyPrivateTesterDeploymentManifestSignature(envelope, options.now, record);
   if (record.fingerprint !== trusted.fingerprint) throw new Error("private tester deployment key invalid");
+  return verified;
+}
+export async function verifyPrivateTesterDeploymentManifest(envelope: unknown, options: { now: number; trust: unknown; lookupKey(principal: string, keyId: string, version: number): Promise<KeyRecord>; nonceStore: { consumeDeploymentManifestNonce(input: PrivateTesterDeploymentNonce): Promise<boolean> } }): Promise<PrivateTesterDeploymentClaims> {
+  if (!options || !options.nonceStore || typeof options.nonceStore.consumeDeploymentManifestNonce !== "function") invalid();
+  const verified = await verifyPrivateTesterDeploymentManifestTrustedSignature(envelope, options);
   const canonicalClaims = canonicalPrivateTesterDeploymentClaims(verified), claimsDigest = hex(await crypto.subtle.digest("SHA-256", encoder.encode(privateTesterDeploymentManifestSignedBytes(verified))));
   let consumed = false;
   try { consumed = await options.nonceStore.consumeDeploymentManifestNonce(Object.freeze({ nonce: verified.nonce, claimsDigest, principal: verified.principal, keyId: verified.keyId, keyVersion: verified.keyVersion, releaseId: verified.releaseId, expiresAt: verified.expiresAt, canonicalClaims })); } catch { throw new Error("private tester deployment nonce store failed"); }

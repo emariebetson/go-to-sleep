@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
+import { verifyPrivateTesterDeploymentManifestTrustedSignature } from "../lib/private-tester-deployment-manifest";
+import type { KeyRecord } from "../lib/asymmetric-release-evidence";
+import { CloudKmsPublicKeyClient } from "../lib/release-evidence-adapters";
+import { validatePrivateTesterBaselineCandidate } from "./promote-private-tester-baseline";
 
 type RawArtifacts = {
   signedManifest: string;
@@ -40,6 +44,7 @@ function invalid(message = "private tester evidence artifact invalid"): never { 
 function digest(raw: string): string { return createHash("sha256").update(raw).digest("hex"); }
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
 function text(value: unknown, expression: RegExp): value is string { return typeof value === "string" && expression.test(value); }
+function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> { return record(value) && Object.keys(value).length === keys.length && Object.keys(value).every((key) => keys.includes(key)); }
 function objectAt(value: unknown, ...keys: string[]): Record<string, unknown> {
   let current: unknown = value;
   for (const key of keys) { if (!record(current)) invalid(); current = current[key]; }
@@ -56,23 +61,42 @@ function gateDigest(value: unknown): string {
 }
 
 type Facts = { releaseId: string; deploymentId: string; buildId: string; schemaDigest: string; migrationDigest: string; postgresCatalogHash: string; darkGatesSha256: string };
-function factsFromArtifacts(artifacts: RawArtifacts, startedAt: number): Facts {
-  const manifest = readRaw(artifacts.signedManifest), claims = objectAt(manifest, "claims");
+type ManifestVerification = { manifestTrust: unknown; lookupManifestKey(principal: string, keyId: string, version: number): Promise<KeyRecord> };
+function strictProviderReceipt(value: unknown, candidateRaw: string, baseline: Record<string, unknown>, startedAt: number): void {
+  const sites = objectAt(baseline, "sites"), build = objectAt(sites, "buildReceipt"), observations = objectAt(baseline, "observations");
+  if (!exact(value, ["version", "provider", "candidateSha256", "scriptName", "scriptVersionId", "capturedAt", "observations"]) || value.version !== 1 || value.provider !== "sites-worker-logs" || value.candidateSha256 !== digest(candidateRaw) || value.scriptName !== build.providerScriptName || value.scriptVersionId !== build.providerScriptVersion || !Number.isSafeInteger(value.capturedAt) || Number(value.capturedAt) < Number(baseline.capturedAt) || Number(value.capturedAt) > startedAt || !Array.isArray(value.observations) || value.observations.length !== 4) invalid("private tester evidence stale or inconsistent");
+  const kinds = ["d1Ledger", "d1Schema", "gates", "oauth"], seen = new Set<string>();
+  for (const [index, observation] of value.observations.entries()) {
+    if (!exact(observation, ["kind", "rayId", "scriptVersionId", "observedAt"]) || observation.kind !== kinds[index] || !text(observation.rayId, /^[a-f0-9]{16}-[A-Z]{3}$/) || seen.has(observation.rayId) || observation.scriptVersionId !== value.scriptVersionId || !Number.isSafeInteger(observation.observedAt) || Number(observation.observedAt) > Number(value.capturedAt) || Number(observation.observedAt) < Number(baseline.capturedAt) - MAX_AGE_MS) invalid("private tester evidence stale or inconsistent");
+    const source = observations[observation.kind];
+    if (!record(source) || observation.rayId !== source.rayId || Math.abs(Number(observation.observedAt) - Number(source.observedAt)) > 30_000) invalid("private tester evidence stale or inconsistent");
+    seen.add(observation.rayId);
+  }
+}
+async function factsFromArtifacts(artifacts: RawArtifacts, startedAt: number, verification: ManifestVerification): Promise<Facts> {
+  const manifest = readRaw(artifacts.signedManifest), claims = await verifyPrivateTesterDeploymentManifestTrustedSignature(manifest, { now: startedAt, trust: verification.manifestTrust, lookupKey: verification.lookupManifestKey });
   if (claims.schemaVersion !== 3 || !text(claims.releaseId, RELEASE) || !text(claims.projectId, /^appgprj_[a-z0-9]{32}$/) || !record(claims.live) || !record(claims.rollback) || !Array.isArray(claims.resources) || claims.resources.length !== 2) invalid();
-  const audio = claims.resources[0], database = claims.resources[1];
+  const audio = claims.resources[0] as Record<string, unknown>, database = claims.resources[1] as Record<string, unknown>;
   if (!record(audio) || !record(database) || audio.binding !== "AUDIO" || audio.kind !== "r2" || audio.provider !== "sites-managed" || audio.physicalId !== "unknown-managed" || !text(audio.deploymentId, DEPLOYMENT) || !text(audio.buildId, BUILD) || database.binding !== "DB" || database.kind !== "d1" || database.provider !== "sites-managed" || database.physicalId !== "unknown-managed" || database.buildId !== audio.buildId || !text(database.schemaDigest, HASH) || !text(database.migrationDigest, HASH)) invalid();
 
-  const review = readRaw(artifacts.reviewBaseline), reviewRelease = objectAt(review, "release"), reviewSites = objectAt(review, "sites"), deployment = objectAt(reviewSites, "deployment"), receipt = objectAt(reviewSites, "buildReceipt"), reviewD1 = objectAt(review, "d1"), reviewPostgres = objectAt(review, "postgres");
-  if (review.version !== 1 || review.reviewRequired !== true || !Number.isSafeInteger(review.capturedAt) || Number(review.capturedAt) < startedAt - MAX_AGE_MS || Number(review.capturedAt) > startedAt || reviewRelease.releaseId !== claims.releaseId || deployment.deploymentId !== audio.deploymentId || receipt.buildId !== audio.buildId || reviewD1.schemaHash !== database.schemaDigest || reviewD1.appliedLedgerHash !== database.migrationDigest || !text(reviewPostgres.catalogHash, HASH)) invalid("private tester evidence stale or inconsistent");
+  const review = readRaw(artifacts.reviewBaseline);
+  try { validatePrivateTesterBaselineCandidate(review, startedAt); } catch { invalid("private tester evidence stale or inconsistent"); }
+  const reviewRelease = objectAt(review, "release"), reviewSites = objectAt(review, "sites"), current = objectAt(reviewSites, "current"), rollback = objectAt(reviewSites, "rollback"), deployment = objectAt(reviewSites, "deployment"), receipt = objectAt(reviewSites, "buildReceipt"), reviewD1 = objectAt(review, "d1"), reviewPostgres = objectAt(review, "postgres");
+  if (reviewRelease.releaseId !== claims.releaseId || !sameVersion(current, claims.live) || !sameVersion(rollback, claims.rollback) || deployment.deploymentId !== audio.deploymentId || receipt.buildId !== audio.buildId || reviewD1.schemaHash !== database.schemaDigest || reviewD1.appliedLedgerHash !== database.migrationDigest || !text(reviewPostgres.catalogHash, HASH)) invalid("private tester evidence stale or inconsistent");
   const gates = gateDigest(review.gates);
 
   const provider = readRaw(artifacts.providerLogReceipt);
-  if (provider.version !== 1 || provider.provider !== "sites-worker-logs" || provider.candidateSha256 !== digest(artifacts.reviewBaseline) || !Number.isSafeInteger(provider.capturedAt) || Number(provider.capturedAt) < Number(review.capturedAt) || Number(provider.capturedAt) > startedAt || !Array.isArray(provider.observations)) invalid("private tester evidence stale or inconsistent");
+  strictProviderReceipt(provider, artifacts.reviewBaseline, review, startedAt);
 
-  const promoted = readRaw(artifacts.promotedBaseline), promotedRelease = objectAt(promoted, "release"), promotedSites = objectAt(promoted, "sites"), promotedDeployment = objectAt(promotedSites, "deployment"), promotedReceipt = objectAt(promotedSites, "buildReceipt"), promotedD1 = objectAt(promoted, "d1"), promotedPostgres = objectAt(promoted, "postgres");
-  if (promoted.version !== 1 || promoted.reviewRequired !== false || promotedRelease.releaseId !== reviewRelease.releaseId || promotedDeployment.deploymentId !== deployment.deploymentId || promotedReceipt.buildId !== receipt.buildId || promotedD1.schemaHash !== reviewD1.schemaHash || promotedD1.appliedLedgerHash !== reviewD1.appliedLedgerHash || promotedPostgres.catalogHash !== reviewPostgres.catalogHash || promotedSites.logReceiptSha256 !== digest(artifacts.providerLogReceipt) || gateDigest(promoted.gates) !== gates) invalid("private tester evidence stale or inconsistent");
-  return { releaseId: claims.releaseId, deploymentId: audio.deploymentId, buildId: audio.buildId, schemaDigest: database.schemaDigest, migrationDigest: database.migrationDigest, postgresCatalogHash: reviewPostgres.catalogHash, darkGatesSha256: gates };
+  const promoted = readRaw(artifacts.promotedBaseline), promotedSites = objectAt(promoted, "sites");
+  if (!exact(promoted, ["version", "reviewRequired", "capturedAt", "release", "sites", "d1", "postgres", "dns", "oauth", "bindings", "secretVersions", "gates", "observations"]) || promoted.reviewRequired !== false || !exact(promotedSites, ["projectId", "current", "rollback", "resources", "deployment", "buildReceipt", "logReceiptSha256"]) || promotedSites.logReceiptSha256 !== digest(artifacts.providerLogReceipt)) invalid("private tester evidence stale or inconsistent");
+  const candidate = { ...promoted, reviewRequired: true, sites: Object.fromEntries(Object.entries(promotedSites).filter(([key]) => key !== "logReceiptSha256")) };
+  try { validatePrivateTesterBaselineCandidate(candidate, startedAt); } catch { invalid("private tester evidence stale or inconsistent"); }
+  if (JSON.stringify(candidate) !== JSON.stringify(review) || gateDigest(promoted.gates) !== gates) invalid("private tester evidence stale or inconsistent");
+  return { releaseId: claims.releaseId, deploymentId: audio.deploymentId as string, buildId: audio.buildId as string, schemaDigest: database.schemaDigest as string, migrationDigest: database.migrationDigest as string, postgresCatalogHash: reviewPostgres.catalogHash, darkGatesSha256: gates };
 }
+
+function sameVersion(value: Record<string, unknown>, expected: { version: string; commitSha: string }): boolean { return value.version === expected.version && value.commitSha === expected.commitSha; }
 
 async function converge(store: GenerationZeroStore, key: string, raw: string): Promise<void> {
   const expected = digest(raw);
@@ -129,12 +153,12 @@ export function createGoogleStorageGenerationZeroStore(input: { bucket: string; 
   };
 }
 
-export async function runPrivateTesterEvidence(input: { operationId: string; startedAt: number; artifactPrefix: string; artifacts: RawArtifacts }, dependencies: { store: GenerationZeroStore; now?: () => number }): Promise<EvidenceIndex & { artifacts: ArtifactReference[] }> {
-  if (!record(input) || !text(input.operationId, OPERATION) || !Number.isSafeInteger(input.startedAt) || !text(input.artifactPrefix, /^[a-z][a-z0-9-]{2,127}$/) || !record(input.artifacts) || !dependencies || !dependencies.store || typeof dependencies.store.get !== "function" || typeof dependencies.store.putIfAbsent !== "function") invalid();
+export async function runPrivateTesterEvidence(input: { operationId: string; startedAt: number; artifactPrefix: string; artifacts: RawArtifacts }, dependencies: { store: GenerationZeroStore; now?: () => number } & ManifestVerification): Promise<EvidenceIndex & { artifacts: ArtifactReference[] }> {
+  if (!record(input) || !text(input.operationId, OPERATION) || !Number.isSafeInteger(input.startedAt) || !text(input.artifactPrefix, /^[a-z][a-z0-9-]{2,127}$/) || !record(input.artifacts) || !dependencies || !dependencies.store || typeof dependencies.store.get !== "function" || typeof dependencies.store.putIfAbsent !== "function" || typeof dependencies.lookupManifestKey !== "function") invalid();
   const now = (dependencies.now ?? Date.now)();
-  if (!Number.isSafeInteger(now) || input.startedAt > now || now - input.startedAt > MAX_AGE_MS) invalid("private tester evidence immutable operation invalid");
+  if (!Number.isSafeInteger(now) || input.startedAt > now) invalid("private tester evidence immutable operation invalid");
   const artifacts = input.artifacts as RawArtifacts;
-  const facts = factsFromArtifacts(artifacts, input.startedAt), prefix = `${input.artifactPrefix}/${input.operationId}`;
+  const facts = await factsFromArtifacts(artifacts, input.startedAt, dependencies), prefix = `${input.artifactPrefix}/${input.operationId}`;
   const sources: Array<[string, string, string]> = [
     ["signed-manifest", `${prefix}/signed-manifest.json`, artifacts.signedManifest],
     ["review-baseline", `${prefix}/review-baseline.json`, artifacts.reviewBaseline],
@@ -165,6 +189,11 @@ async function metadataAccessToken(fetcher: typeof fetch): Promise<string> {
   try { const value = JSON.parse(raw) as { access_token?: unknown; expires_in?: unknown }; if (!response.ok || !text(value.access_token, /^[A-Za-z0-9._~-]{20,4096}$/) || !Number.isSafeInteger(value.expires_in) || Number(value.expires_in) < 60 || Number(value.expires_in) > 3_600) throw new Error(); return value.access_token; }
   catch { throw new Error("private tester evidence metadata identity unavailable"); }
 }
+function environmentValue(name: string, expression: RegExp): string {
+  const value = process.env[name];
+  if (!text(value, expression)) invalid("private tester evidence configuration missing");
+  return value;
+}
 async function main(): Promise<void> {
   const [operationPath, signedManifestPath, reviewBaselinePath, providerLogReceiptPath, promotedBaselinePath] = process.argv.slice(2);
   if (process.argv.slice(2).length !== 5) invalid("private tester evidence configuration missing");
@@ -172,9 +201,15 @@ async function main(): Promise<void> {
   const [operationRaw, signedManifest, reviewBaseline, providerLogReceipt, promotedBaseline] = await Promise.all([readLocalArtifact(operationPath, 16_384), readLocalArtifact(signedManifestPath), readLocalArtifact(reviewBaselinePath), readLocalArtifact(providerLogReceiptPath), readLocalArtifact(promotedBaselinePath)]);
   let operation: unknown;
   try { operation = JSON.parse(operationRaw); } catch { invalid("private tester evidence input invalid"); }
+  const trustRaw = process.env.EVIDENCE_TRUST_JSON ?? "";
+  if (Buffer.byteLength(trustRaw) < 2 || Buffer.byteLength(trustRaw) > 65_536) invalid("private tester evidence configuration missing");
+  let manifestTrust: unknown;
+  try { manifestTrust = JSON.parse(trustRaw); } catch { invalid("private tester evidence configuration missing"); }
+  const project = environmentValue("KMS_PROJECT", /^[a-z][a-z0-9-]{2,62}$/), location = environmentValue("KMS_LOCATION", /^[A-Za-z0-9_-]{1,255}$/), keyRing = environmentValue("KMS_KEY_RING", /^[A-Za-z0-9_-]{1,255}$/), key = environmentValue("KMS_KEY", /^[A-Za-z0-9_-]{1,255}$/), principal = environmentValue("EVIDENCE_PRINCIPAL", /^[A-Za-z0-9_:/.@-]{3,200}$/), keyId = environmentValue("EVIDENCE_KEY_ID", /^[A-Za-z0-9_:/.@-]{3,200}$/);
   let token: string | undefined;
   const store = createGoogleStorageGenerationZeroStore({ bucket, accessToken: async () => token ??= await metadataAccessToken(fetch) });
-  const index = await runPrivateTesterEvidence({ ...(operation as Record<string, unknown>), artifacts: { signedManifest, reviewBaseline, providerLogReceipt, promotedBaseline } } as { operationId: string; startedAt: number; artifactPrefix: string; artifacts: RawArtifacts }, { store });
+  const publicKeys = new CloudKmsPublicKeyClient({ project, location, keyRing, key, principal, keyId, accessToken: async () => token ??= await metadataAccessToken(fetch) });
+  const index = await runPrivateTesterEvidence({ ...(operation as Record<string, unknown>), artifacts: { signedManifest, reviewBaseline, providerLogReceipt, promotedBaseline } } as { operationId: string; startedAt: number; artifactPrefix: string; artifacts: RawArtifacts }, { store, manifestTrust, lookupManifestKey: (lookupPrincipal, lookupKeyId, version) => publicKeys.lookup(lookupPrincipal, lookupKeyId, version) });
   process.stdout.write(`${JSON.stringify(index)}\n`);
 }
 
