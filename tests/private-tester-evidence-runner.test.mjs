@@ -168,6 +168,9 @@ test("the disposable Cloud Build path invokes the runner behind a digest-pinned 
   assert.match(build, /--auto-iam-authn/);
   assert.match(build, /nearyou-pt-baseline@nearnight\.iam/);
   assert.match(build, /node --import tsx scripts\/run-private-tester-evidence\.ts/);
+  assert.match(build, /test "\$\{PROJECT_ID\}" = "nearyou-private-tester-disposable"/);
+  assert.match(build, /PRIVATE_TESTER_EVIDENCE_BUCKET="nearyou-private-tester-evidence-disposable"/);
+  assert.doesNotMatch(build, /_DISPOSABLE_EVIDENCE_PROJECT|_PRIVATE_TESTER_EVIDENCE_BUCKET/);
   assert.doesNotMatch(build, /POSTGRES_PASSWORD|postgres:\/\/[^\n]*:[^\n]*@/);
 });
 
