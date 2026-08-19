@@ -1,4 +1,5 @@
 --auto-iam-authn
+--structured-logs
 --address=127.0.0.1
 --port=5432
 ${CLOUD_SQL_INSTANCE_CONNECTION_NAME}
