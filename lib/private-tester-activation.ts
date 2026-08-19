@@ -249,7 +249,7 @@ export function createPostgresPrivateTesterActivationAuthority(pg: Pick<Pg, "que
   if (!pg || typeof pg.query !== "function") invalid("authority unavailable");
   return Object.freeze({
     authenticatedController: async () => {
-      const rows = (await pg.query<{ principal: string }>("SELECT principal FROM nearyou.rollout_controller_identities WHERE database_user=session_user ORDER BY principal", [])).rows;
+      const rows = (await pg.query<{ principal: string }>("SELECT nearyou.private_tester_activation_controller_principal() AS principal", [])).rows;
       if (rows.length !== 1 || !PRINCIPAL.test(rows[0]!.principal)) invalid("authority invalid");
       return Object.freeze({ principal: rows[0]!.principal });
     },
@@ -261,7 +261,7 @@ export function createPostgresPrivateTesterActivationAuthority(pg: Pick<Pg, "que
     },
     trustedReleaseEvidence: async (digest) => {
       if (!HASH.test(digest)) return null;
-      const row = (await pg.query<{ claims_projection: Claims }>("SELECT claims_projection FROM nearyou.release_evidence_audit WHERE claims_digest=$1", [digest])).rows[0];
+      const row = (await pg.query<{ claims_projection: Claims }>("SELECT nearyou.load_private_tester_activation_evidence($1) AS claims_projection", [digest])).rows[0];
       return row?.claims_projection ?? null;
     },
   });
@@ -293,4 +293,8 @@ export function createDurablePrivateTesterActivationController(input: { authorit
     if (await sha256Text(canonicalClaims) !== raw.releaseEvidenceDigest || claims.releaseId !== raw.releaseId || claims.expiresAt <= now || !claims.productReadiness.some((item) => item.product === raw.product && item.releaseId === raw.releaseId && item.expiresAt > now && item.controllerMapping.verified === true)) invalid("evidence invalid");
     return input.store.apply({ ...raw, principal: principal.principal, canonicalClaims });
   };
+}
+
+export function createPostgresPrivateTesterActivationController(pg: Pg, now: () => number = Date.now) {
+  return createDurablePrivateTesterActivationController({ authority: createPostgresPrivateTesterActivationAuthority(pg), store: createPostgresPrivateTesterActivationStore(pg), now });
 }

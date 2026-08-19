@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- runtime pg module is optional */
 import { writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { collectLiveCatalog, verifyLiveCatalogSecurity } from "./postgres-catalog";
+import { collectLiveCatalog, PRIVATE_TESTER_ACTIVATION_FORCED_RLS, verifyLiveCatalogSecurity } from "./postgres-catalog";
 import { currentPostgresMigrationHead, REQUIRED_CATALOG_KINDS } from "./check-catalog-manifest";
 
 export async function generateCatalogCandidate(input: { databaseUrl: string; output: string; connect?: (url: string) => Promise<any> }) {
   if (!/^postgres(?:ql)?:\/\//.test(input.databaseUrl) || !input.output.endsWith("catalog-manifest.candidate.json")) throw new Error("catalog candidate invalid");
   const connect = input.connect ?? (async url => { const name = "pg", { Pool } = await import(name) as any, pool = new Pool({ connectionString: url }); return { query: (sql: string, args?: unknown[]) => pool.query(sql, args), close: () => pool.end() }; }), pg = await connect(input.databaseUrl);
   try {
-    const rows = await collectLiveCatalog(pg), security = await verifyLiveCatalogSecurity(pg), canonical = JSON.stringify(rows), catalogChecksum = createHash("sha256").update(canonical).digest("hex"), kinds = new Set(rows.map((row: { kind: string }) => row.kind));
+    const rows = await collectLiveCatalog(pg), security = await verifyLiveCatalogSecurity(pg, PRIVATE_TESTER_ACTIVATION_FORCED_RLS), canonical = JSON.stringify(rows), catalogChecksum = createHash("sha256").update(canonical).digest("hex"), kinds = new Set(rows.map((row: { kind: string }) => row.kind));
     if (REQUIRED_CATALOG_KINDS.some(kind => !kinds.has(kind))) throw new Error("catalog candidate incomplete");
     const artifact = { version: 1, reviewRequired: true, generatedFrom: "supported-postgresql-16", migrationHead: await currentPostgresMigrationHead(), schema: "nearyou", catalogChecksum, requiredKinds: REQUIRED_CATALOG_KINDS, requireForcedRls: security.forcedRls, forbidPublicExecute: security.publicExecuteCount === 0, security, rows };
     await writeFile(input.output, JSON.stringify(artifact, null, 2) + "\n", { flag: "wx" }); return artifact;

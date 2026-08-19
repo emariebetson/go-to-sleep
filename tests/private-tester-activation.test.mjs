@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   createPrivateTesterActivationTestController,
   createPrivateTesterActivationTestStore,
+  createPostgresPrivateTesterActivationAuthority,
   createPostgresPrivateTesterActivationStore,
 } from "../lib/private-tester-activation.ts";
 import { createPostgresHouseholdProductAccess, createPostgresPrivateTesterInvitationEvaluator } from "../lib/product-release-readiness-service.ts";
 import { inspectPrivateTesterActivationCli } from "../scripts/private-tester-activation-cli.ts";
+import { readFileSync } from "node:fs";
 
 const now = 1_787_000_000_000;
 const hash = (character) => character.repeat(64);
@@ -182,9 +184,51 @@ test("the production store delegates one activation to the durable PostgreSQL tr
   assert.equal(calls[0].args[0], "service:readiness");
 });
 
+test("the durable authority uses only narrow PostgreSQL evidence functions", async () => {
+  const calls = [];
+  const authority = createPostgresPrivateTesterActivationAuthority({ query: async (sql, args) => {
+    calls.push({ sql, args });
+    if (sql.includes("controller_principal")) return { rows: [{ principal: "service:readiness" }] };
+    if (sql.includes("activation_baseline")) return { rows: [{ sha256: hash("c"), release_id: releaseId, dark_gates: { nearfamily: false, nearstory: false, scheduler: false } }] };
+    return { rows: [{ claims_projection: { releaseId } }] };
+  } });
+  assert.equal((await authority.authenticatedController()).principal, "service:readiness");
+  assert.equal((await authority.promotedBaseline(hash("c")))?.releaseId, releaseId);
+  assert.deepEqual(await authority.trustedReleaseEvidence(hash("d")), { releaseId });
+  assert.match(calls.map(call => call.sql).join("\n"), /private_tester_activation_controller_principal/);
+  assert.match(calls.map(call => call.sql).join("\n"), /load_private_tester_activation_evidence/);
+  assert.doesNotMatch(calls.map(call => call.sql).join("\n"), /FROM nearyou\.release_evidence_audit/);
+});
+
 test("the activation CLI only emits a controller-only validation receipt", async () => {
   const receipt = await inspectPrivateTesterActivationCli(JSON.stringify(durableRequest()));
   assert.equal(receipt.mode, "controller-only");
   assert.match(receipt.requestSha256, /^[a-f0-9]{64}$/);
   await assert.rejects(() => inspectPrivateTesterActivationCli(JSON.stringify(durableRequest({ action: "kill" }))), /activation CLI invalid/);
+});
+
+test("the PostgreSQL controller contract is transactional, terminal, and private", () => {
+  const sql = readFileSync(new URL("../postgres/migrations/0011_private_tester_activation_controller.sql", import.meta.url), "utf8");
+  assert.match(sql, /private_tester_activation_state/);
+  assert.match(sql, /terminal_kill boolean NOT NULL DEFAULT false/);
+  assert.doesNotMatch(sql, /private_tester_activation_state[^;]*\bmode\b/i);
+  assert.doesNotMatch(sql, /private_tester_activation_state[^;]*\bpercent\b/i);
+  assert.match(sql, /FOR UPDATE/);
+  assert.match(sql, /private tester activation version conflict/);
+  assert.match(sql, /private tester activation terminal kill/);
+  assert.match(sql, /rollout_controller_identities WHERE database_user=session_user/);
+  assert.match(sql, /p_principal IS DISTINCT FROM actor/);
+  assert.match(sql, /CREATE TRIGGER private_tester_activation_audit_immutable/);
+  assert.match(sql, /request_payload jsonb NOT NULL/);
+  assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(sql, /FORCE ROW LEVEL SECURITY/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.apply_private_tester_activation[\s\S]* FROM PUBLIC/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.authorize_private_tester_household[\s\S]* FROM PUBLIC/);
+});
+
+test("the dark production controller route constructs the durable PostgreSQL authority only behind its literal gate", () => {
+  const source = readFileSync(new URL("../app/api/internal/product-readiness/route.ts", import.meta.url), "utf8");
+  assert.match(source, /ROUTE_ENABLED=false as const/);
+  assert.match(source, /createPostgresPrivateTesterActivationController\(r\.READINESS_PG\)/);
+  assert.match(source, /body\.privateTesterActivation===true/);
 });

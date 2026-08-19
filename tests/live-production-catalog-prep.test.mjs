@@ -35,7 +35,7 @@ async function fixture(overrides = {}) {
     if (sql.includes("current_database()")) return { rows: [overrides.target ?? { database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin", allowed: true, pristine: false, vector_available: true }] };
     if (sql.startsWith("SELECT id,checksum FROM nearyou.schema_migrations")){ledgerReads+=1;if(overrides.failFinalLedger&&ledgerReads>1)throw new Error("secret final ledger provider detail");return { rows: ledger };}
     if (sql.startsWith("SELECT kind::text,identity::text,definition::text")) return { rows: catalogRows };
-    if (sql.includes("public_execute_count")) return { rows: [{ forced_rls: ["household_members", "tenant_records"], public_execute_count: "0" }] };
+    if (sql.includes("public_execute_count")) return { rows: [{ forced_rls: ledger.length >= 11 ? ["household_members", "tenant_records", "private_tester_activation_baselines", "private_tester_activation_state", "private_tester_activation_invites", "private_tester_activation_audit"] : ["household_members", "tenant_records"], public_execute_count: "0" }] };
     if (sql.startsWith("SELECT checksum FROM nearyou.schema_migrations")) return { rows: ledger.find((row) => row.id === args[0]) ? [{ checksum: ledger.find((row) => row.id === args[0]).checksum }] : [] };
     if (sql.startsWith("INSERT INTO nearyou.schema_migrations")) { events.push(`insert:${args[0]}`); ledger.push({ id: args[0], checksum: args[1] }); return { rows: [] }; }
     if (sql.includes("r.rolname='nearyou_migration'")) return { rows: [{ admin_option:false,inherit_option:true,set_option: true }] };
@@ -104,14 +104,14 @@ test("prepares a review-required catalog from exact live PostgreSQL 16 state and
   const { result, writes, events, migrations } = await fixture();
   assert.equal(result.candidate.generatedFrom, "live-production-postgresql-16");
   assert.equal(result.candidate.reviewRequired, true);
-  assert.equal(result.candidate.migrationHead, "0010_migration_schema_usage");
+  assert.equal(result.candidate.migrationHead, "0011_private_tester_activation_controller");
   assert.deepEqual(result.candidate.provenance.migrationLedger, migrations.map(({ id, checksum }) => ({ id, checksum })));
   assert.deepEqual(result.candidate.provenance.source, { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` });
   assert.equal(result.candidate.provenance.baseline.migrationHead,"0006_private_canary_observation");assert.equal(result.candidate.provenance.baseline.catalogChecksum,catalogChecksum);
   assert.deepEqual(result.candidate.provenance.identities, { controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal });
   assert.equal(Object.hasOwn(result.candidate, "ready"), false);
   assert.equal(Object.hasOwn(result.candidate, "gate"), false);
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage","insert:0011_private_tester_activation_controller"]);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].contentSha256, sha256(writes[0].body));
   assert.equal(result.receipt.contentSha256, writes[0].contentSha256);
@@ -207,7 +207,7 @@ test("legacy 0001-0004 ledger is remediated through 0010 and preserved exactly i
   const migrations = await loadPostgresMigrations();
   const legacyLedger = migrations.slice(0, 6).map(({ id, checksum }, index) => ({ id, checksum: retiredChecksums[index] ?? checksum }));
   const { result, events } = await fixture({ ledger: legacyLedger });
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage","insert:0011_private_tester_activation_controller"]);
   assert.deepEqual(result.candidate.provenance.migrationLedger, [...legacyLedger, ...migrations.slice(6).map(({id,checksum})=>({id,checksum}))]);
   assert.equal(result.candidate.provenance.migrationLedgerChecksum, sha256(result.candidate.provenance.migrationLedger.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")));
 });
