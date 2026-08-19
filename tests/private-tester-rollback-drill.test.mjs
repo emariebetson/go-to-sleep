@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runSyntheticPrivateTesterSmoke } from "../scripts/private-canary-smoke.ts";
+import { createSyntheticPrivateTesterAuthorizationSession, createSyntheticPrivateTesterFixture, runSyntheticPrivateTesterSmoke, syntheticPrivateTesterHouseholdHash } from "../scripts/private-canary-smoke.ts";
 import { runSyntheticPrivateTesterRollbackDrill } from "../scripts/private-tester-rollback-drill.ts";
 
 const releaseId = "rel_20260819_smoke_01";
-const invitedHouseholdHash = "a".repeat(64);
-const deniedHouseholdHash = "b".repeat(64);
+const invitedHouseholdHash = syntheticPrivateTesterHouseholdHash(releaseId, "invited");
+const deniedHouseholdHash = syntheticPrivateTesterHouseholdHash(releaseId, "denied");
 const priorSitesVersion = "sites_20260818_01";
 
 function smokeInput(overrides = {}) {
-  return { releaseId, invitedHouseholdHash, deniedHouseholdHash, priorSitesVersion, ...overrides };
+  return { releaseId, invitedHouseholdHash, deniedHouseholdHash, priorSitesVersion, fixtureNamespace: "task6-private-tester", fixtureMarker: `synthetic:${releaseId}`, ...overrides };
 }
 
 function smokeDeps(overrides = {}) {
   const calls = [];
-  const controller = { authorize: async ({ householdHash }) => householdHash === invitedHouseholdHash };
   const story = {
     create: async (fixture) => { calls.push("create"); return { jobId: fixture.jobId, householdHash: fixture.invitedHouseholdHash, releaseId: fixture.releaseId, requestHash: fixture.requestHash }; },
     process: async (job) => { calls.push("process"); return { processed: true, jobId: job.jobId }; },
@@ -25,7 +24,6 @@ function smokeDeps(overrides = {}) {
   };
   return {
     calls,
-    controller,
     darkGates: async () => ({ nearstory: false, nearfamily: false, scheduler: false }),
     story,
     family: {
@@ -42,8 +40,6 @@ function smokeDeps(overrides = {}) {
 
 test("synthetic private tester smoke creates, processes, persists, plays, delivers, and cleans up a non-personal fixture", async () => {
   const deps = smokeDeps();
-  const authorizationCalls = [];
-  deps.controller = { authorize: async (input) => { authorizationCalls.push(input); return input.householdHash === invitedHouseholdHash; } };
   const first = await runSyntheticPrivateTesterSmoke(smokeInput(), deps);
   const second = await runSyntheticPrivateTesterSmoke(smokeInput(), smokeDeps());
 
@@ -51,18 +47,12 @@ test("synthetic private tester smoke creates, processes, persists, plays, delive
   assert.match(first.resultHash, /^[a-f0-9]{64}$/);
   assert.equal(first.resultHash, second.resultHash);
   assert.deepEqual(deps.calls, ["create", "process", "persist", "play", "outcome", "delete"]);
-  assert.deepEqual(authorizationCalls, [
-    { product: "nearstory", householdHash: invitedHouseholdHash },
-    { product: "nearstory", householdHash: deniedHouseholdHash },
-    { product: "nearfamily", householdHash: invitedHouseholdHash },
-    { product: "nearfamily", householdHash: deniedHouseholdHash },
-  ]);
+  assert.deepEqual(first.observations.authorization, { gates: { nearstory: false, nearfamily: false, scheduler: false }, nearStoryInvited: true, nearStoryDenied: false, nearFamilyInvited: true, nearFamilyDenied: false });
   assert.equal(first.gatesRemainOff, true);
 });
 
 test("synthetic smoke fails closed for authorization, dark-gate, privacy, dead-letter, and R2-scope leaks", async () => {
   for (const override of [
-    { controller: { authorize: async () => false } },
     { darkGates: async () => ({ nearstory: true, nearfamily: false, scheduler: false }) },
     { family: { ...smokeDeps().family, crossHouseholdRead: async () => true } },
     { integrity: async (fixture) => ({ d1AuditTriggers: 2, deadLetters: 1, r2ScopePrefix: fixture.r2ScopePrefix, noCrossHouseholdReads: true }) },
@@ -79,16 +69,38 @@ test("synthetic smoke deterministically deletes a persisted object when a later 
   assert.ok(deps.calls.includes("delete"));
 });
 
+test("synthetic fixtures reject arbitrary household hashes without the private tester namespace marker", async () => {
+  await assert.rejects(
+    () => createSyntheticPrivateTesterFixture({ ...smokeInput(), invitedHouseholdHash: "a".repeat(64) }),
+    /synthetic private tester fixture invalid/,
+  );
+});
+
+test("synthetic smoke hashes the observed authorization, storage, outcome, cleanup, and integrity evidence", async () => {
+  const first = await runSyntheticPrivateTesterSmoke(smokeInput(), smokeDeps());
+  const changed = smokeDeps();
+  changed.story = { ...changed.story, persist: async (job, fixture) => ({ persisted: true, jobId: job.jobId, objectKey: `${fixture.r2ScopePrefix}audio.mp3`, digest: "e".repeat(64) }) };
+  const second = await runSyntheticPrivateTesterSmoke(smokeInput(), changed);
+  assert.notEqual(first.resultHash, second.resultHash);
+});
+
+test("the synthetic authorization session revokes NearFamily through the Task 5 controller before denying it", async () => {
+  const fixture = await createSyntheticPrivateTesterFixture(smokeInput());
+  const session = await createSyntheticPrivateTesterAuthorizationSession(fixture);
+  assert.equal(await session.productAccess("nearfamily", fixture.invitedHouseholdId), true);
+  const revocation = await session.revokeNearFamily();
+  assert.equal(revocation.status, "revoked");
+  assert.equal(await session.productAccess("nearfamily", fixture.invitedHouseholdId), false);
+});
+
 function rollbackDeps(overrides = {}) {
   const calls = [];
-  let killed = false;
   return {
     calls,
-    controller: { authorize: async ({ householdHash }) => !killed && householdHash === invitedHouseholdHash },
     darkGates: async () => ({ nearstory: false, nearfamily: false, scheduler: false }),
     queue: {
       enqueueBeforeKill: async (fixture) => ({ queueId: fixture.jobId, householdHash: fixture.invitedHouseholdHash }),
-      kill: async () => { killed = true; calls.push("kill"); return { killed: true }; },
+      kill: async () => { calls.push("kill"); return { killed: true }; },
       enqueueAfterKill: async () => false,
       processQueued: async () => "fenced",
     },

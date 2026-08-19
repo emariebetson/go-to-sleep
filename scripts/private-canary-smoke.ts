@@ -1,3 +1,7 @@
+import { createPrivateTesterActivationTestController, createPrivateTesterActivationTestStore, type PrivateTesterActivationResult } from "../lib/private-tester-activation";
+import { createPostgresHouseholdProductAccess } from "../lib/product-release-readiness-service";
+import { createHash } from "node:crypto";
+
 type Input={mode?:"preflight"|"post-issue";releaseId:string;invitedHouseholdHash:string;deniedHouseholdHash:string;maxHeartbeatAgeMs:number};
 type BoundInput=Readonly<Input>;
 type Deps={now():Promise<number>;sourceGates(input:BoundInput):Promise<{family:boolean;canaryRoute:boolean;story:boolean}>;d1(input:BoundInput):Promise<{migration:string;migrationCount:number;immutableTriggers:number;preOperationRows:number;activeCanaryRows?:number;releaseIssueRows?:number;releaseRevokeRows?:number;outboxPending:number;outboxDeadLetters:number}>;pg(input:BoundInput):Promise<{releaseId:string;mode:string;killSwitch:boolean;invitedAllowed:boolean;deniedAllowed:boolean;inviteExpiresAt:number}>;story(input:BoundInput):Promise<{activationStatus:string;migrationVersion:string;heartbeatAt:number;providerPrerequisites:boolean}>;rollback(input:BoundInput):Promise<{killSwitchDenied:boolean;newStoryPaused:boolean;deletionAvailable:boolean;remediationAvailable:boolean;priorVersionRetained:boolean;artifact:string}>};
@@ -10,6 +14,8 @@ export type SyntheticPrivateTesterInput = {
   invitedHouseholdHash: string;
   deniedHouseholdHash: string;
   priorSitesVersion: string;
+  fixtureNamespace: "task6-private-tester";
+  fixtureMarker: string;
 };
 
 export type SyntheticPrivateTesterFixture = Readonly<{
@@ -18,20 +24,19 @@ export type SyntheticPrivateTesterFixture = Readonly<{
   invitedHouseholdHash: string;
   deniedHouseholdHash: string;
   priorSitesVersion: string;
+  fixtureNamespace: "task6-private-tester";
+  fixtureMarker: string;
+  invitedHouseholdId: string;
+  deniedHouseholdId: string;
   jobId: string;
   requestHash: string;
   r2ScopePrefix: string;
 }>;
 
-type SyntheticController = {
-  authorize(input: { product: "nearstory" | "nearfamily"; householdHash: string }): Promise<boolean>;
-};
-
 type SyntheticDarkGates = { nearstory: false; nearfamily: false; scheduler: false };
 type SyntheticStoryRecord = { persisted: boolean; jobId: string; objectKey: string; digest: string };
 
 export type SyntheticPrivateTesterSmokeDependencies = {
-  controller: SyntheticController;
   darkGates(): Promise<SyntheticDarkGates>;
   story: {
     create(fixture: SyntheticPrivateTesterFixture): Promise<{ jobId: string; householdHash: string; releaseId: string; requestHash: string }>;
@@ -54,6 +59,10 @@ export type SyntheticPrivateTesterSmokeDependencies = {
 const SITES_VERSION = /^sites_[A-Za-z0-9_-]{8,100}$/;
 const encoder = new TextEncoder();
 
+export function syntheticPrivateTesterHouseholdHash(releaseId: string, subject: "invited" | "denied"): string {
+  return createHash("sha256").update(`task6-private-tester/synthetic:${releaseId}/${subject}`).digest("hex");
+}
+
 function stableSyntheticValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableSyntheticValue);
   if (!value || typeof value !== "object") return value;
@@ -66,14 +75,42 @@ async function syntheticHash(value: unknown): Promise<string> {
 }
 
 function validSyntheticInput(input: SyntheticPrivateTesterInput): boolean {
-  return RELEASE.test(input.releaseId) && HASH.test(input.invitedHouseholdHash) && HASH.test(input.deniedHouseholdHash) && input.invitedHouseholdHash !== input.deniedHouseholdHash && SITES_VERSION.test(input.priorSitesVersion);
+  return RELEASE.test(input.releaseId) && HASH.test(input.invitedHouseholdHash) && HASH.test(input.deniedHouseholdHash) && input.invitedHouseholdHash === syntheticPrivateTesterHouseholdHash(input.releaseId, "invited") && input.deniedHouseholdHash === syntheticPrivateTesterHouseholdHash(input.releaseId, "denied") && SITES_VERSION.test(input.priorSitesVersion) && input.fixtureNamespace === "task6-private-tester" && input.fixtureMarker === `synthetic:${input.releaseId}`;
 }
 
 export async function createSyntheticPrivateTesterFixture(input: SyntheticPrivateTesterInput): Promise<SyntheticPrivateTesterFixture> {
   if (!validSyntheticInput(input)) throw new Error("synthetic private tester fixture invalid");
   const jobId = `synthetic-${input.releaseId}-${input.invitedHouseholdHash.slice(0, 12)}`;
   const requestHash = await syntheticHash({ version: 1, releaseId: input.releaseId, householdHash: input.invitedHouseholdHash, jobId });
-  return Object.freeze({ version: 1, ...input, jobId, requestHash, r2ScopePrefix: `private-tester/${input.releaseId}/${input.invitedHouseholdHash}/` });
+  return Object.freeze({ version: 1, ...input, invitedHouseholdId: `${input.fixtureNamespace}/${input.fixtureMarker}/invited`, deniedHouseholdId: `${input.fixtureNamespace}/${input.fixtureMarker}/denied`, jobId, requestHash, r2ScopePrefix: `private-tester/${input.releaseId}/${input.invitedHouseholdHash}/` });
+}
+
+export async function createSyntheticPrivateTesterAuthorizationSession(fixture: SyntheticPrivateTesterFixture) {
+  const now = 1_800_000_000_000;
+  const baselineHash = await syntheticHash({ fixture, kind: "promoted-baseline" });
+  const evidenceDigest = await syntheticHash({ fixture, kind: "release-evidence" });
+  const mappingArtifact = await syntheticHash({ fixture, kind: "controller-mapping" });
+  const store = createPrivateTesterActivationTestStore({ promotedBaselines: [{ sha256: baselineHash, releaseId: fixture.releaseId, darkGates: { nearfamily: false, nearstory: false, scheduler: false } }], products: ["nearstory", "nearfamily"] });
+  const controller = createPrivateTesterActivationTestController({ store, now: () => now, verifyReleaseEvidence: async (evidence) => evidence.digest === evidenceDigest });
+  const request = (product: "nearstory" | "nearfamily", action: "activate" | "revoke" | "kill", invites: { householdHash: string; expiresAt: number }[]) => ({
+    action,
+    operationId: `synthetic-${action}-${product}-0001`,
+    principal: "service:readiness",
+    product,
+    expectedVersion: store.state(product).version,
+    promotedBaselineSha256: baselineHash,
+    releaseEvidence: { digest: evidenceDigest, releaseId: fixture.releaseId, product, expiresAt: now + 60_000, controllerMapping: { verified: true as const, principal: "service:readiness", artifact: mappingArtifact } },
+    invites,
+  });
+  const invited = { householdHash: fixture.invitedHouseholdHash, expiresAt: now + 30_000 };
+  await controller(request("nearstory", "activate", [invited]));
+  await controller(request("nearfamily", "activate", [invited]));
+  const productAccess = createPostgresHouseholdProductAccess({ query: async () => { throw new Error("synthetic authorization must not query rollout infrastructure"); } }, controller);
+  return Object.freeze({
+    productAccess,
+    revokeNearFamily: async (): Promise<PrivateTesterActivationResult> => controller(request("nearfamily", "revoke", [invited])),
+    killNearStory: async (): Promise<PrivateTesterActivationResult> => controller(request("nearstory", "kill", [])),
+  });
 }
 
 function collectSyntheticFailure(failures: string[], condition: boolean, name: string): void {
@@ -82,27 +119,36 @@ function collectSyntheticFailure(failures: string[], condition: boolean, name: s
 
 export async function runSyntheticPrivateTesterSmoke(input: SyntheticPrivateTesterInput, deps: SyntheticPrivateTesterSmokeDependencies) {
   const fixture = await createSyntheticPrivateTesterFixture(input);
+  const authorization = await createSyntheticPrivateTesterAuthorizationSession(fixture);
   const failures: string[] = [];
   let record: SyntheticStoryRecord | undefined;
+  let cleanup: { deleted: boolean; objectKey: string } | undefined;
+  const observed: Record<string, unknown> = {};
   try {
     const [gates, nearStoryInvited, nearStoryDenied, nearFamilyInvited, nearFamilyDenied] = await Promise.all([
       deps.darkGates(),
-      deps.controller.authorize({ product: "nearstory", householdHash: fixture.invitedHouseholdHash }),
-      deps.controller.authorize({ product: "nearstory", householdHash: fixture.deniedHouseholdHash }),
-      deps.controller.authorize({ product: "nearfamily", householdHash: fixture.invitedHouseholdHash }),
-      deps.controller.authorize({ product: "nearfamily", householdHash: fixture.deniedHouseholdHash }),
+      authorization.productAccess("nearstory", fixture.invitedHouseholdId),
+      authorization.productAccess("nearstory", fixture.deniedHouseholdId),
+      authorization.productAccess("nearfamily", fixture.invitedHouseholdId),
+      authorization.productAccess("nearfamily", fixture.deniedHouseholdId),
     ]);
+    observed.authorization = { gates, nearStoryInvited, nearStoryDenied, nearFamilyInvited, nearFamilyDenied };
     collectSyntheticFailure(failures, gates.nearstory === false && gates.nearfamily === false && gates.scheduler === false, "dark_gates");
     collectSyntheticFailure(failures, nearStoryInvited && !nearStoryDenied && nearFamilyInvited && !nearFamilyDenied, "controller");
     const job = await deps.story.create(fixture);
+    observed.create = job;
     collectSyntheticFailure(failures, job.jobId === fixture.jobId && job.householdHash === fixture.invitedHouseholdHash && job.releaseId === fixture.releaseId && job.requestHash === fixture.requestHash, "create");
     const processed = await deps.story.process({ jobId: job.jobId });
+    observed.process = processed;
     collectSyntheticFailure(failures, processed.processed && processed.jobId === fixture.jobId, "process");
     record = await deps.story.persist({ jobId: job.jobId }, fixture);
+    observed.persist = record;
     collectSyntheticFailure(failures, record.persisted && record.jobId === fixture.jobId && record.objectKey.startsWith(fixture.r2ScopePrefix) && HASH.test(record.digest), "persist");
     const played = await deps.story.play(record);
+    observed.play = played;
     collectSyntheticFailure(failures, played.played && played.objectKey === record.objectKey, "play");
     const outcome = await deps.story.deliverOutcome({ jobId: job.jobId });
+    observed.outcome = outcome;
     collectSyntheticFailure(failures, outcome.delivered && outcome.jobId === fixture.jobId && HASH.test(outcome.digest), "outcome");
     const [identity, memberAccess, entitlement, crossHouseholdRead, remediation, integrity] = await Promise.all([
       deps.family.identity(fixture),
@@ -112,6 +158,8 @@ export async function runSyntheticPrivateTesterSmoke(input: SyntheticPrivateTest
       deps.family.capacityRemediation(fixture),
       deps.integrity(fixture),
     ]);
+    observed.family = { identity, memberAccess, entitlement, crossHouseholdRead, remediation };
+    observed.integrity = integrity;
     collectSyntheticFailure(failures, identity.synthetic && identity.householdHash === fixture.invitedHouseholdHash && memberAccess && entitlement, "family_access");
     collectSyntheticFailure(failures, !crossHouseholdRead && integrity.noCrossHouseholdReads, "privacy");
     collectSyntheticFailure(failures, remediation, "capacity_remediation");
@@ -121,14 +169,16 @@ export async function runSyntheticPrivateTesterSmoke(input: SyntheticPrivateTest
   } finally {
     if (record) {
       try {
-        const deleted = await deps.story.delete(record);
-        collectSyntheticFailure(failures, deleted.deleted && deleted.objectKey === record.objectKey, "delete");
+        cleanup = await deps.story.delete(record);
+        observed.cleanup = cleanup;
+        collectSyntheticFailure(failures, cleanup.deleted && cleanup.objectKey === record.objectKey, "delete");
       } catch {
         failures.push("delete");
       }
     }
   }
   if (failures.length) throw new Error(`synthetic private tester smoke failed: ${Array.from(new Set(failures)).join(",")}`);
-  const result = Object.freeze({ version: 1, passed: true as const, releaseId: fixture.releaseId, gatesRemainOff: true as const, fixture, resultHash: await syntheticHash({ fixture, proof: "create-process-persist-play-outcome-delete-family" }) });
+  const observations = Object.freeze({ ...observed });
+  const result = Object.freeze({ version: 1, passed: true as const, releaseId: fixture.releaseId, gatesRemainOff: true as const, fixture, observations, resultHash: await syntheticHash({ fixture, observations }) });
   return result;
 }
