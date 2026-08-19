@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,9 +18,11 @@ const startedAt = 1_800_000_000_000;
 const identity = Object.freeze({ releaseId: "rel_20260819_window_01", buildId: "build_20260819_window_01", deploymentId: "deploy_20260819_window_01", startedAt });
 let rollback;
 let signReceipt, verifier;
+function stable(value) { return Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)])) : value; }
 before(async () => {
   const fixture = await createSyntheticPrivateTesterFixture({ releaseId: identity.releaseId, invitedHouseholdHash: syntheticPrivateTesterHouseholdHash(identity.releaseId, "invited"), deniedHouseholdHash: syntheticPrivateTesterHouseholdHash(identity.releaseId, "denied"), priorSitesVersion: "sites_20260818_01", fixtureNamespace: "task6-private-tester", fixtureMarker: `synthetic:${identity.releaseId}` });
-  rollback = Object.freeze({ version: 1, passed: true, releaseId: identity.releaseId, gatesRemainOff: true, fixture, observations: { before: {}, transitions: {}, after: {} }, resultHash: "a".repeat(64) });
+  const observations = { before: {}, transitions: {}, after: {} };
+  rollback = Object.freeze({ version: 1, passed: true, releaseId: identity.releaseId, gatesRemainOff: true, fixture, observations, resultHash: createHash("sha256").update(JSON.stringify(stable({ fixture, observations }))).digest("hex") });
   const pair = await crypto.subtle.generateKey({ name: "RSA-PSS", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
   verifier = createTrustedCanaryReceiptVerifier({ keyId: "local-test-key", keyVersion: 1, key: pair.publicKey });
   signReceipt = async (body) => ({ algorithm: "RSA-PSS-SHA256", keyId: "local-test-key", keyVersion: 1, value: Buffer.from(await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, pair.privateKey, new TextEncoder().encode(body))).toString("base64url") });
@@ -146,7 +149,7 @@ test("rejects actual observation gaps over fifteen minutes and reuses a verified
 });
 
 test("rejects a Task 6 rollback proof whose deterministic result hash or fixture binding is forged", async () => {
-  for (const forged of [{ ...rollback, fixture: { ...rollback.fixture, jobId: "forged" } }]) {
+  for (const forged of [{ ...rollback, resultHash: "f".repeat(64) }, { ...rollback, fixture: { ...rollback.fixture, jobId: "forged" } }]) {
     await withStore(async (store) => {
       await completeWindow(store);
       await assert.rejects(() => finalizePrivateTesterCanaryWindow(identity, { store, rollbackRecheck: async () => forged, signReceipt, verifier, requestKill: async () => {} }), /private tester canary failed: rollback/);
