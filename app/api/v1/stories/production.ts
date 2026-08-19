@@ -11,7 +11,7 @@ import { loadEffectiveHouseholdEntitlement } from "@/lib/household-entitlements"
 import { featureFlagsFromEnv, nearStoryParentBetaFlagsEnabled } from "@/lib/nearyou-foundation";
 import type { NearStoryEnqueueInput, NearStoryPostDependencies } from "@/lib/nearstory-route";
 import { nearStoryInternalId, storySpeechCostCeilingMicrocents } from "@/lib/nearstory";
-import { createPostgresHouseholdProductAccess } from "@/lib/product-release-readiness-service";
+import { createPostgresHouseholdProductAccess, createPostgresPrivateTesterInvitationEvaluator } from "@/lib/product-release-readiness-service";
 import {
   finalizeProviderSpend, markProviderSpendChargeCommitted, providerSpendEstimateMicrocents,
   recordProviderFailure, recordProviderSuccess, reserveProviderSpend,
@@ -178,7 +178,7 @@ export const nearStoryProductionDependencies: NearStoryPostDependencies = {
   },
   authorizeProduct: async (householdId) => {
     const pg=(env as unknown as {READINESS_PG?:{query<T>(sql:string,args:unknown[]):Promise<{rows:T[]}>}}).READINESS_PG;
-    return pg ? createPostgresHouseholdProductAccess(pg)("nearstory",householdId) : false;
+    return pg ? createPostgresHouseholdProductAccess(pg, createPostgresPrivateTesterInvitationEvaluator(pg))("nearstory",householdId) : false;
   },
   entitlement: loadEffectiveHouseholdEntitlement,
   selectors: async (householdId, input) => {
