@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessPrivateCanaryObservations as runPrivateCanarySmoke, createSyntheticPrivateTesterFixture } from "../scripts/private-canary-smoke.ts";
+import { assessPrivateCanaryObservations as runPrivateCanarySmoke, createSyntheticPrivateTesterFixture, syntheticPrivateTesterHouseholdHash } from "../scripts/private-canary-smoke.ts";
 
 const releaseId="rel_12345678",hash="a".repeat(64),now=1_800_000_000_000;
 function deps(overrides={}){return{now:async()=>now,sourceGates:async()=>({family:false,canaryRoute:false,story:false}),d1:async()=>({migration:"0026_canary_entitlements",migrationCount:1,immutableTriggers:2,preOperationRows:0,outboxPending:0,outboxDeadLetters:0}),pg:async()=>({releaseId,mode:"canary",killSwitch:false,invitedAllowed:true,deniedAllowed:false,inviteExpiresAt:now+60_000}),story:async()=>({activationStatus:"ready",migrationVersion:"0013",heartbeatAt:now-1_000,providerPrerequisites:true}),rollback:async()=>({killSwitchDenied:true,newStoryPaused:true,deletionAvailable:true,remediationAvailable:true,priorVersionRetained:true,artifact:hash}),...overrides}}
@@ -11,9 +11,9 @@ test("private smoke fails closed without every live adapter",async()=>{await ass
 test("private smoke rejects enabled literals, stale heartbeat, D1 drift, rollout leaks, DLQ and weak rollback",async()=>{for(const override of [{sourceGates:async()=>({family:true,canaryRoute:false,story:false})},{story:async()=>({activationStatus:"ready",migrationVersion:"0013",heartbeatAt:now-300_001,providerPrerequisites:true})},{d1:async()=>({migration:"0026_canary_entitlements",migrationCount:2,immutableTriggers:2,preOperationRows:0,outboxPending:0,outboxDeadLetters:0})},{pg:async()=>({releaseId,mode:"canary",killSwitch:false,invitedAllowed:true,deniedAllowed:true,inviteExpiresAt:now+60_000})},{d1:async()=>({migration:"0026_canary_entitlements",migrationCount:1,immutableTriggers:2,preOperationRows:0,outboxPending:0,outboxDeadLetters:1})},{rollback:async()=>({killSwitchDenied:true,newStoryPaused:false,deletionAvailable:true,remediationAvailable:true,priorVersionRetained:true,artifact:hash})}])await assert.rejects(()=>runPrivateCanarySmoke({releaseId,invitedHouseholdHash:hash,deniedHouseholdHash:"b".repeat(64),maxHeartbeatAgeMs:300_000},deps(override)),/private canary smoke failed/)});
 
 test("synthetic fixture is deterministic, non-personal, and confined to its invited household R2 prefix", async () => {
-  const input = { releaseId, invitedHouseholdHash: hash, deniedHouseholdHash: "b".repeat(64), priorSitesVersion: "sites_20260818_01" };
+  const input = { releaseId, invitedHouseholdHash: syntheticPrivateTesterHouseholdHash(releaseId, "invited"), deniedHouseholdHash: syntheticPrivateTesterHouseholdHash(releaseId, "denied"), priorSitesVersion: "sites_20260818_01", fixtureNamespace: "task6-private-tester", fixtureMarker: `synthetic:${releaseId}` };
   const [first, second] = await Promise.all([createSyntheticPrivateTesterFixture(input), createSyntheticPrivateTesterFixture(input)]);
   assert.deepEqual(first, second);
-  assert.equal(first.r2ScopePrefix, `private-tester/${releaseId}/${hash}/`);
+  assert.equal(first.r2ScopePrefix, `private-tester/${releaseId}/${input.invitedHouseholdHash}/`);
   assert.match(first.requestHash, /^[a-f0-9]{64}$/);
 });

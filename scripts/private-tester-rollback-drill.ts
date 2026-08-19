@@ -1,17 +1,13 @@
 import {
+  createSyntheticPrivateTesterAuthorizationSession,
   createSyntheticPrivateTesterFixture,
   type SyntheticPrivateTesterFixture,
   type SyntheticPrivateTesterInput,
 } from "./private-canary-smoke";
 
-type SyntheticController = {
-  authorize(input: { product: "nearstory" | "nearfamily"; householdHash: string }): Promise<boolean>;
-};
-
 type SyntheticDarkGates = { nearstory: false; nearfamily: false; scheduler: false };
 
 export type SyntheticPrivateTesterRollbackDependencies = {
-  controller: SyntheticController;
   darkGates(): Promise<SyntheticDarkGates>;
   queue: {
     enqueueBeforeKill(fixture: SyntheticPrivateTesterFixture): Promise<{ queueId: string; householdHash: string }>;
@@ -42,17 +38,22 @@ async function immutableHash(value: unknown): Promise<string> {
 
 export async function runSyntheticPrivateTesterRollbackDrill(input: SyntheticPrivateTesterInput, deps: SyntheticPrivateTesterRollbackDependencies) {
   const fixture = await createSyntheticPrivateTesterFixture(input);
+  const authorization = await createSyntheticPrivateTesterAuthorizationSession(fixture);
   const failures: string[] = [];
+  const observed: Record<string, unknown> = {};
   try {
-    const beforeKill = await deps.controller.authorize({ product: "nearstory", householdHash: fixture.invitedHouseholdHash });
-    if (!beforeKill) failures.push("initial_authorization");
-    const [gates, queued] = await Promise.all([deps.darkGates(), deps.queue.enqueueBeforeKill(fixture)]);
+    const [nearStoryBeforeKill, nearFamilyBeforeRevoke, gates, queued] = await Promise.all([authorization.productAccess("nearstory", fixture.invitedHouseholdId), authorization.productAccess("nearfamily", fixture.invitedHouseholdId), deps.darkGates(), deps.queue.enqueueBeforeKill(fixture)]);
+    observed.before = { nearStoryBeforeKill, nearFamilyBeforeRevoke, gates, queued };
+    if (!nearStoryBeforeKill || !nearFamilyBeforeRevoke) failures.push("initial_authorization");
     if (gates.nearstory !== false || gates.nearfamily !== false || gates.scheduler !== false) failures.push("dark_gates");
     if (queued.queueId !== fixture.jobId || queued.householdHash !== fixture.invitedHouseholdHash) failures.push("queue");
-    const kill = await deps.queue.kill(fixture);
-    if (!kill.killed) failures.push("kill");
-    const [authorizedAfterKill, newWorkAllowed, queuedDisposition, deleted, remediated, redeployed, integrity] = await Promise.all([
-      deps.controller.authorize({ product: "nearstory", householdHash: fixture.invitedHouseholdHash }),
+    const [controllerKill, queueKill, nearFamilyRevocation] = await Promise.all([authorization.killNearStory(), deps.queue.kill(fixture), authorization.revokeNearFamily()]);
+    observed.transitions = { controllerKill, queueKill, nearFamilyRevocation };
+    if (controllerKill.status !== "killed" || !queueKill.killed) failures.push("kill");
+    if (nearFamilyRevocation.status !== "revoked") failures.push("family_revoke");
+    const [nearStoryAuthorizedAfterKill, nearFamilyAuthorizedAfterRevoke, newWorkAllowed, queuedDisposition, deleted, remediated, redeployed, integrity] = await Promise.all([
+      authorization.productAccess("nearstory", fixture.invitedHouseholdId),
+      authorization.productAccess("nearfamily", fixture.invitedHouseholdId),
       deps.queue.enqueueAfterKill(fixture),
       deps.queue.processQueued(queued, fixture),
       deps.recovery.delete(fixture),
@@ -60,7 +61,8 @@ export async function runSyntheticPrivateTesterRollbackDrill(input: SyntheticPri
       deps.sites.redeployPriorVersion(fixture.priorSitesVersion, fixture),
       deps.integrity(fixture),
     ]);
-    if (authorizedAfterKill || newWorkAllowed) failures.push("new_work");
+    observed.after = { nearStoryAuthorizedAfterKill, nearFamilyAuthorizedAfterRevoke, newWorkAllowed, queuedDisposition, deleted, remediated, redeployed, integrity };
+    if (nearStoryAuthorizedAfterKill || nearFamilyAuthorizedAfterRevoke || newWorkAllowed) failures.push("new_work");
     if (queuedDisposition !== "fenced") failures.push("queued_work");
     if (!deleted || !remediated) failures.push("recovery");
     if (!redeployed) failures.push("prior_sites_version");
@@ -69,5 +71,6 @@ export async function runSyntheticPrivateTesterRollbackDrill(input: SyntheticPri
     failures.push("execution");
   }
   if (failures.length) throw new Error(`synthetic private tester rollback failed: ${Array.from(new Set(failures)).join(",")}`);
-  return Object.freeze({ version: 1, passed: true as const, releaseId: fixture.releaseId, gatesRemainOff: true as const, fixture, resultHash: await immutableHash({ fixture, proof: "kill-fence-recovery-prior-sites" }) });
+  const observations = Object.freeze({ ...observed });
+  return Object.freeze({ version: 1, passed: true as const, releaseId: fixture.releaseId, gatesRemainOff: true as const, fixture, observations, resultHash: await immutableHash({ fixture, observations }) });
 }

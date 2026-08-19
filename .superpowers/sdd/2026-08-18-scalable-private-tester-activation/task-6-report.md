@@ -22,3 +22,16 @@ The existing `private-canary-live.ts` wrapper was intentionally not invoked or c
 - `npm run typecheck`: passed.
 - Scoped ESLint for the changed TypeScript and test files: passed.
 - `git diff --check`: passed.
+
+## Fix round 1
+
+- Replaced the permissive injected authorization stub with a synthetic session built from the actual Task 5 activation controller and the product-access adapter. The PostgreSQL fallback is deliberately an unreachable test guard: invitation authorization must resolve before any rollout query.
+- The rollback drill now invokes the Task 5 NearStory kill and NearFamily revoke operations, then proves both products deny the synthetic invited household through the product-access seam.
+- Synthetic fixture hashes must now be derived from the exact Task 6 namespace and release marker; arbitrary household hashes are rejected.
+- Proof hashes now cover captured authorization, story creation/processing/persistence/play/outcome/cleanup, family and D1/DLQ/R2 observations, queue disposition, Task 5 state transitions, recovery, and prior-Sites redeploy result.
+- The live wrapper now evaluates invited and denied NearStory/NearFamily authorization through the Task 5 PostgreSQL invitation evaluator before accepting the combined canary observation. It was not run in this task.
+
+### Fix-round verification
+
+- Bundled Node focused suites: 39 passed, 0 failed (`private-canary-smoke`, `private-tester-rollback-drill`, `private-tester-activation`, and `private-canary-live-cli`).
+- `npm run typecheck`, scoped ESLint, and `git diff --check`: passed.
