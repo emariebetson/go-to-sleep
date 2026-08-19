@@ -1,32 +1,40 @@
-name: local-private-tester-canary-contract
+name: private-tester-canary-evidence
 
-# Intentionally manual and local-only. This is a disposable contract check, not
-# a scheduler, rollout controller, production sampler, or kill-switch caller.
+# No schedule: an approved operator starts each resumable, durable sample.
 on:
   workflow_dispatch:
     inputs:
-      local_identity_json:
-        description: Disposable release/build/deployment identity JSON
+      identity_json:
+        description: Exact release/build/deployment/start identity JSON
         required: true
         type: string
-      local_proof_json:
-        description: Disposable Task 5/6 proof JSON
+      proof_json:
+        description: Reviewed Task 5 authorization and health proof JSON
         required: true
         type: string
 
-permissions: { contents: read }
+permissions: { contents: read, id-token: write }
 
 jobs:
-  local-contract:
+  sample:
     runs-on: ubuntu-latest
+    environment: production-evidence
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - name: Record one disposable generation-zero sample
+      - id: evidence-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 900s
+      - name: Record one durable generation-zero sample
         env:
-          LOCAL_CANARY_EVIDENCE: "true"
-          LOCAL_IDENTITY: ${{ inputs.local_identity_json }}
-          LOCAL_PROOF: ${{ inputs.local_proof_json }}
-        run: node --import tsx scripts/canary-evidence-cli.ts sample-local "$RUNNER_TEMP" "$LOCAL_IDENTITY" "$LOCAL_PROOF"
+          PRIVATE_TESTER_EVIDENCE_BUCKET: ${{ vars.PRIVATE_TESTER_EVIDENCE_BUCKET }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.evidence-auth.outputs.access_token }}
+          CANARY_IDENTITY_JSON: ${{ inputs.identity_json }}
+          CANARY_PROOF_JSON: ${{ inputs.proof_json }}
+        run: node --import tsx scripts/canary-evidence-cli.ts sample

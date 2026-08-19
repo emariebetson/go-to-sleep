@@ -112,10 +112,14 @@ jobs:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.media-auth.outputs.access_token }}
           RELEASE_ID: ${{ vars.RELEASE_ID }}
         run: node --import tsx scripts/media-evidence-cli.ts evidence/media.json
-      - name: Reject unsupplied private-tester canary evidence
+      - name: Retrieve the reviewed signed private-tester canary receipt
+        env:
+          PRIVATE_TESTER_CANARY_RECEIPT_URI: ${{ vars.PRIVATE_TESTER_CANARY_RECEIPT_URI }}
         run: |
-          test ! -e evidence/canary.json
-          printf '%s\n' 'A signed 24-hour private-tester canary receipt must be independently reviewed before production evidence can consume it.'
+          set -euo pipefail
+          printf '%s' "$PRIVATE_TESTER_CANARY_RECEIPT_URI" | grep -Eq '^gs://[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]/private-tester-canary/[a-f0-9]{64}/final\.json$'
+          gcloud storage cp "$PRIVATE_TESTER_CANARY_RECEIPT_URI" evidence/canary.json
+          test -s evidence/canary.json
       - name: Compose exact release claims from operational artifacts
         env:
           RELEASE_ID: ${{ vars.RELEASE_ID }}

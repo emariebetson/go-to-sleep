@@ -1,138 +1,60 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { SyntheticPrivateTesterFixture } from "./private-canary-smoke";
 
-const RELEASE = /^rel_[A-Za-z0-9_-]{8,100}$/;
-const BUILD = /^build_[A-Za-z0-9_-]{8,100}$/;
-const DEPLOYMENT = /^deploy_[A-Za-z0-9_-]{8,100}$/;
-const HASH = /^[a-f0-9]{64}$/;
-const INTERVAL_MS = 15 * 60_000;
-const WINDOW_SAMPLES = 96;
-const MAX_HEARTBEAT_AGE_MS = 5 * 60_000;
-const MAX_ERROR_RATE_BPS = 100;
+const RELEASE = /^rel_[A-Za-z0-9_-]{8,100}$/, BUILD = /^build_[A-Za-z0-9_-]{8,100}$/, DEPLOYMENT = /^deploy_[A-Za-z0-9_-]{8,100}$/, HASH = /^[a-f0-9]{64}$/;
+const INTERVAL = 900_000, SLOTS = 96, MAX_HEARTBEAT_AGE = 300_000, MAX_ERROR_BPS = 100;
+const proofKeys = ["buildId","dataIntegrity","deadLetters","deploymentId","errorRateBps","heartbeatAt","nearFamilyDenied","nearFamilyInvited","nearStoryDenied","nearStoryInvited","observedAt","releaseId","scheduledAt","workerFailures"];
+const sampleKeys = ["buildId","dataIntegrity","deadLetters","deploymentId","errorRateBps","heartbeatAt","nearFamilyDenied","nearFamilyInvited","nearStoryDenied","nearStoryInvited","observedAt","releaseId","scheduledAt","slot","version","windowKey","workerFailures"];
+const receiptKeys = ["coveredUntil","identity","kind","passed","receiptSha256","rollback","sampleCount","samplesSha256","signature","version","windowKey"];
 
-export type PrivateTesterCanaryIdentity = Readonly<{ releaseId: string; buildId: string; deploymentId: string; startedAt: number }>;
-export type PrivateTesterCanaryProof = Readonly<{
-  releaseId: string; buildId: string; deploymentId: string; scheduledAt: number; observedAt: number;
-  nearStoryInvited: boolean; nearStoryDenied: boolean; nearFamilyInvited: boolean; nearFamilyDenied: boolean;
-  dataIntegrity: boolean; deadLetters: number; workerFailures: number; errorRateBps: number; heartbeatAt: number;
-}>;
-export type PrivateTesterCanarySample = Readonly<PrivateTesterCanaryProof & { version: 1; slot: number; windowKey: string }>;
-export type Task6RollbackProof = Readonly<{ version: 1; passed: true; releaseId: string; gatesRemainOff: true; resultHash: string }>;
-export type PrivateTesterCanaryStore = {
-  insert(windowKey: string, sample: PrivateTesterCanarySample): Promise<{ created: boolean; existing?: PrivateTesterCanarySample }>;
-  list(windowKey: string): Promise<PrivateTesterCanarySample[]>;
-  writeReceipt(windowKey: string, raw: string): Promise<{ created: boolean; existing?: string }>;
-};
+export type PrivateTesterCanaryIdentity = Readonly<{releaseId:string;buildId:string;deploymentId:string;startedAt:number}>;
+export type PrivateTesterCanaryProof = Readonly<{releaseId:string;buildId:string;deploymentId:string;scheduledAt:number;observedAt:number;nearStoryInvited:boolean;nearStoryDenied:boolean;nearFamilyInvited:boolean;nearFamilyDenied:boolean;dataIntegrity:boolean;deadLetters:number;workerFailures:number;errorRateBps:number;heartbeatAt:number}>;
+export type PrivateTesterCanarySample = Readonly<PrivateTesterCanaryProof&{version:1;slot:number;windowKey:string}>;
+export type Task6RollbackProof=Readonly<{version:1;passed:true;releaseId:string;gatesRemainOff:true;fixture:SyntheticPrivateTesterFixture;observations:Record<string,unknown>;resultHash:string}>;
+export type Signature=Readonly<{algorithm:"RSA-PSS-SHA256";keyId:string;keyVersion:number;value:string}>;
+export type PrivateTesterCanaryReceipt=Readonly<{version:1;kind:"private-tester-canary-window";identity:PrivateTesterCanaryIdentity;windowKey:string;passed:true;sampleCount:96;coveredUntil:number;samplesSha256:string;rollback:Task6RollbackProof;signature:Signature;receiptSha256:string}>;
+export type PrivateTesterCanaryStore={insert(key:string,sample:PrivateTesterCanarySample):Promise<{created:boolean;existing?:PrivateTesterCanarySample}>;list(key:string):Promise<PrivateTesterCanarySample[]>;readReceipt(key:string):Promise<string|undefined>;writeReceipt(key:string,raw:string):Promise<{created:boolean;existing?:string}>};
 
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, stable(item)]));
+const exact=(value:unknown, keys:string[]):Record<string,unknown>|undefined=>value&&typeof value==="object"&&!Array.isArray(value)&&Object.getPrototypeOf(value)===Object.prototype&&Object.keys(value).sort().join()===keys.slice().sort().join()?value as Record<string,unknown>:undefined;
+function stable(value:unknown):unknown{return Array.isArray(value)?value.map(stable):value&&typeof value==="object"?Object.fromEntries(Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,stable(v)])):value}
+function canonical(value:unknown){return JSON.stringify(stable(value))+"\n"}
+function hash(value:string){return createHash("sha256").update(value).digest("hex")}
+function same(a:Pick<PrivateTesterCanaryIdentity,"releaseId"|"buildId"|"deploymentId">,b:Pick<PrivateTesterCanaryIdentity,"releaseId"|"buildId"|"deploymentId">){return a.releaseId===b.releaseId&&a.buildId===b.buildId&&a.deploymentId===b.deploymentId}
+function validIdentity(value:unknown):value is PrivateTesterCanaryIdentity{const o=exact(value,["buildId","deploymentId","releaseId","startedAt"]);return !!o&&RELEASE.test(String(o.releaseId))&&BUILD.test(String(o.buildId))&&DEPLOYMENT.test(String(o.deploymentId))&&Number.isSafeInteger(o.startedAt)}
+/** The durable object namespace is intentionally release/build/deployment only. */
+export function privateTesterCanaryWindowKey(value:PrivateTesterCanaryIdentity){if(!validIdentity(value))throw new Error("private tester canary input invalid");return hash(canonical({releaseId:value.releaseId,buildId:value.buildId,deploymentId:value.deploymentId}))}
+async function fail(kill:unknown,reason:string):Promise<never>{try{if(typeof kill==="function")await kill(reason)}catch{}throw new Error("private tester canary failed: "+reason)}
+function validProof(value:unknown,identity:PrivateTesterCanaryIdentity):PrivateTesterCanarySample|undefined{const o=exact(value,proofKeys);if(!o||!same(identity,o as PrivateTesterCanaryIdentity)||![o.nearStoryInvited,o.nearStoryDenied,o.nearFamilyInvited,o.nearFamilyDenied,o.dataIntegrity].every(v=>typeof v==="boolean")||![o.scheduledAt,o.observedAt,o.heartbeatAt,o.deadLetters,o.workerFailures,o.errorRateBps].every(Number.isSafeInteger))return;const slot=(Number(o.scheduledAt)-identity.startedAt)/INTERVAL;if(!Number.isSafeInteger(slot)||slot<0||slot>=SLOTS)return;return Object.freeze({version:1,slot,windowKey:privateTesterCanaryWindowKey(identity),...o as PrivateTesterCanaryProof})}
+function reason(sample:PrivateTesterCanarySample):string|undefined{if(sample.observedAt<sample.scheduledAt||sample.observedAt-sample.scheduledAt>INTERVAL)return"late";if(sample.nearStoryInvited!==true||sample.nearStoryDenied!==false||sample.nearFamilyInvited!==true||sample.nearFamilyDenied!==false)return"authorization";if(sample.dataIntegrity!==true)return"integrity";if(sample.deadLetters!==0)return"dead_letters";if(sample.workerFailures!==0)return"worker";if(sample.errorRateBps<0||sample.errorRateBps>MAX_ERROR_BPS)return"errors";if(sample.heartbeatAt>sample.observedAt||sample.observedAt-sample.heartbeatAt>MAX_HEARTBEAT_AGE)return"heartbeat"}
+function validSample(value:unknown,identity:PrivateTesterCanaryIdentity,slot:number,key:string):value is PrivateTesterCanarySample{const o=exact(value,sampleKeys);if(!o||o.version!==1||o.slot!==slot||o.windowKey!==key||!validProof(Object.fromEntries(proofKeys.map(k=>[k,o[k]])),identity))return false;const s=o as PrivateTesterCanarySample;return s.scheduledAt===identity.startedAt+slot*INTERVAL&&!reason(s)}
+
+export function createLocalGenerationZeroCanaryStore(directory:string):PrivateTesterCanaryStore{
+ const base=join(directory,"private-tester-canary"),path=(key:string,name:string)=>join(base,key+"."+name);
+ async function once(file:string,raw:string){await mkdir(base,{recursive:true});try{await writeFile(file,raw,{flag:"wx"});return{created:true}}catch(e:unknown){if(!(e instanceof Error)||!("code"in e)||e.code!=="EEXIST")throw e;return{created:false,existing:await readFile(file,"utf8")}}}
+ return Object.freeze({
+  async insert(key,sample){const r=await once(path(key,"sample-"+String(sample.slot).padStart(3,"0")+".json"),canonical(sample));return r.created?{created:true}:{created:false,existing:JSON.parse(r.existing??"") as PrivateTesterCanarySample}},
+  async list(key){try{return await Promise.all((await readdir(base)).filter(n=>new RegExp("^"+key+"\\.sample-\\d{3}\\.json$").test(n)).sort().map(async n=>JSON.parse(await readFile(join(base,n),"utf8"))))as PrivateTesterCanarySample[]}catch(e:unknown){if(e instanceof Error&&"code"in e&&e.code==="ENOENT")return[];throw e}},
+  async readReceipt(key){try{return await readFile(path(key,"final.json"),"utf8")}catch(e:unknown){if(e instanceof Error&&"code"in e&&e.code==="ENOENT")return;throw e}},
+  async writeReceipt(key,raw){return once(path(key,"final.json"),raw)},
+ });
 }
-function canonical(value: unknown): string { return `${JSON.stringify(stable(value))}\n`; }
-function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
-function validIdentity(identity: PrivateTesterCanaryIdentity): boolean { return RELEASE.test(identity.releaseId) && BUILD.test(identity.buildId) && DEPLOYMENT.test(identity.deploymentId) && Number.isSafeInteger(identity.startedAt); }
-function sameIdentity(left: Pick<PrivateTesterCanaryIdentity, "releaseId" | "buildId" | "deploymentId">, right: Pick<PrivateTesterCanaryIdentity, "releaseId" | "buildId" | "deploymentId">): boolean { return left.releaseId === right.releaseId && left.buildId === right.buildId && left.deploymentId === right.deploymentId; }
-export function privateTesterCanaryWindowKey(identity: PrivateTesterCanaryIdentity): string { if (!validIdentity(identity)) throw new Error("private tester canary input invalid"); return sha256(canonical(identity)); }
-
-async function failClosed(requestKill: (reason: string) => Promise<void>, reason: string): Promise<never> {
-  try { await requestKill(reason); } catch { /* A failing local proof adapter must never reopen the evidence gate. */ }
-  throw new Error(`private tester canary failed: ${reason}`);
-}
-function sampleFor(identity: PrivateTesterCanaryIdentity, proof: PrivateTesterCanaryProof): PrivateTesterCanarySample | undefined {
-  if (!sameIdentity(identity, proof) || !Number.isSafeInteger(proof.scheduledAt) || !Number.isSafeInteger(proof.observedAt) || !Number.isSafeInteger(proof.heartbeatAt)) return undefined;
-  const slot = (proof.scheduledAt - identity.startedAt) / INTERVAL_MS;
-  if (!Number.isSafeInteger(slot) || slot < 0 || slot >= WINDOW_SAMPLES) return undefined;
-  return Object.freeze({ version: 1, slot, windowKey: privateTesterCanaryWindowKey(identity), ...proof });
-}
-function failedProofReason(sample: PrivateTesterCanarySample): string | undefined {
-  if (sample.observedAt < sample.scheduledAt || sample.observedAt - sample.scheduledAt >= INTERVAL_MS) return "late";
-  if (!sample.nearStoryInvited || sample.nearStoryDenied || !sample.nearFamilyInvited || sample.nearFamilyDenied) return "authorization";
-  if (!sample.dataIntegrity) return "integrity";
-  if (!Number.isSafeInteger(sample.deadLetters) || sample.deadLetters !== 0) return "dead_letters";
-  if (!Number.isSafeInteger(sample.workerFailures) || sample.workerFailures !== 0) return "worker";
-  if (!Number.isSafeInteger(sample.errorRateBps) || sample.errorRateBps < 0 || sample.errorRateBps > MAX_ERROR_RATE_BPS) return "errors";
-  if (sample.heartbeatAt > sample.observedAt || sample.observedAt - sample.heartbeatAt > MAX_HEARTBEAT_AGE_MS) return "heartbeat";
-  return undefined;
+/** Durable object-store adapter. Every create uses generation-zero. */
+export function createGoogleGenerationZeroCanaryStore(input:{bucket:string;prefix:string;accessToken:string;fetch?:typeof fetch}):PrivateTesterCanaryStore{
+ if(!/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(input.bucket)||!/^[A-Za-z0-9._/-]{1,240}$/.test(input.prefix)||input.prefix.includes("..")||input.prefix.startsWith("/")||input.accessToken.length<20)throw new Error("private tester canary store invalid");
+ const call=input.fetch??fetch,root="https://storage.googleapis.com/storage/v1/b/"+encodeURIComponent(input.bucket)+"/o/",name=(key:string,suffix:string)=>input.prefix+"/"+key+"/"+suffix;
+ async function get(object:string){const r=await call(root+encodeURIComponent(object)+"?alt=media",{headers:{authorization:"Bearer "+input.accessToken},redirect:"error"});if(r.status===404)return;const raw=await r.text();if(!r.ok||Buffer.byteLength(raw)>524288)throw new Error("private tester canary store failed");return raw}
+ async function put(object:string,raw:string){const r=await call("https://storage.googleapis.com/upload/storage/v1/b/"+encodeURIComponent(input.bucket)+"/o?uploadType=media&ifGenerationMatch=0&name="+encodeURIComponent(object),{method:"POST",headers:{authorization:"Bearer "+input.accessToken,"content-type":"application/json"},body:raw,redirect:"error"});if(r.ok)return{created:true};if(r.status!==412)throw new Error("private tester canary store failed");return{created:false,existing:await get(object)}}
+ return Object.freeze({async insert(key,sample){const r=await put(name(key,"sample-"+String(sample.slot).padStart(3,"0")+".json"),canonical(sample));return r.created?{created:true}:{created:false,existing:JSON.parse(r.existing??"") as PrivateTesterCanarySample}},async list(key){const prefix=name(key,"sample-"),r=await call(root+"?prefix="+encodeURIComponent(prefix),{headers:{authorization:"Bearer "+input.accessToken},redirect:"error"}),raw=await r.text();if(!r.ok||Buffer.byteLength(raw)>524288)throw new Error("private tester canary store failed");let values:unknown;try{values=JSON.parse(raw)}catch{throw new Error("private tester canary store failed")}const items=(values as {items?:unknown}).items;if(!Array.isArray(items)||items.length>SLOTS)throw new Error("private tester canary store failed");return Promise.all(items.map(async x=>{const n=(x as {name?:unknown}).name;if(typeof n!=="string"||!n.startsWith(prefix))throw new Error("private tester canary store failed");return JSON.parse((await get(n))??"")}))as Promise<PrivateTesterCanarySample[]>},async readReceipt(key){return get(name(key,"final.json"))},async writeReceipt(key,raw){return put(name(key,"final.json"),raw)}})
 }
 
-/** File-only generation-zero storage for disposable/local evidence. */
-export function createLocalGenerationZeroCanaryStore(directory: string): PrivateTesterCanaryStore {
-  const base = join(directory, "private-tester-canary");
-  async function writeOnce(path: string, raw: string): Promise<{ created: boolean; existing?: string }> {
-    await mkdir(base, { recursive: true });
-    try { await writeFile(path, raw, { encoding: "utf8", flag: "wx" }); return { created: true }; }
-    catch (error: unknown) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-      return { created: false, existing: await readFile(path, "utf8") };
-    }
-  }
-  return Object.freeze({
-    async insert(windowKey, sample) {
-      const raw = canonical(sample), result = await writeOnce(join(base, `${windowKey}.sample-${String(sample.slot).padStart(3, "0")}.json`), raw);
-      return result.created ? { created: true } : { created: false, existing: JSON.parse(result.existing ?? "") as PrivateTesterCanarySample };
-    },
-    async list(windowKey) {
-      try {
-        const names = (await readdir(base)).filter((name) => new RegExp(`^${windowKey}\\.sample-\\d{3}\\.json$`).test(name)).sort();
-        return Promise.all(names.map(async (name) => JSON.parse(await readFile(join(base, name), "utf8")) as PrivateTesterCanarySample));
-      } catch (error: unknown) {
-        if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
-        throw error;
-      }
-    },
-    async writeReceipt(windowKey, raw) { return writeOnce(join(base, `${windowKey}.final.json`), raw); },
-  });
-}
+export function createTrustedCanaryReceiptVerifier(trust:{keyId:string;keyVersion:number;key:CryptoKey}){const key=trust.key,algorithm=key.algorithm as RsaHashedKeyAlgorithm;if(!/^[A-Za-z0-9._-]{3,160}$/.test(trust.keyId)||!Number.isSafeInteger(trust.keyVersion)||trust.keyVersion<1||key.type!=="public"||key.usages.length!==1||key.usages[0]!=="verify"||algorithm.name!=="RSA-PSS"||algorithm.hash.name!=="SHA-256"||algorithm.modulusLength<3072)throw new Error("private tester canary trust invalid");return Object.freeze({async verify(body:string,s:Signature){if(s.algorithm!=="RSA-PSS-SHA256"||s.keyId!==trust.keyId||s.keyVersion!==trust.keyVersion||!/^[A-Za-z0-9_-]{16,8192}$/.test(s.value))return false;try{return await crypto.subtle.verify({name:"RSA-PSS",saltLength:32},key,Buffer.from(s.value,"base64url"),new TextEncoder().encode(body))}catch{return false}}})}
+function validRollback(value:unknown,identity:PrivateTesterCanaryIdentity):value is Task6RollbackProof{const o=exact(value,["fixture","gatesRemainOff","observations","passed","releaseId","resultHash","version"]);const fixture=o&&exact(o.fixture,["deniedHouseholdHash","deniedHouseholdId","fixtureMarker","fixtureNamespace","invitedHouseholdHash","invitedHouseholdId","jobId","priorSitesVersion","r2ScopePrefix","releaseId","requestHash","version"]);return!!o&&!!fixture&&o.version===1&&o.passed===true&&o.gatesRemainOff===true&&o.releaseId===identity.releaseId&&fixture.version===1&&fixture.releaseId===identity.releaseId&&fixture.fixtureNamespace==="task6-private-tester"&&fixture.fixtureMarker==="synthetic:"+identity.releaseId&&HASH.test(String(o.resultHash))&&!!exact(o.observations,["after","before","transitions"])}
+function unsigned(identity:PrivateTesterCanaryIdentity,key:string,samples:PrivateTesterCanarySample[],rollback:Task6RollbackProof){return{version:1 as const,kind:"private-tester-canary-window" as const,identity,windowKey:key,passed:true as const,sampleCount:96 as const,coveredUntil:identity.startedAt+SLOTS*INTERVAL,samplesSha256:hash(canonical(samples)),rollback}}
+function parseReceipt(raw:string,identity:PrivateTesterCanaryIdentity,key:string):PrivateTesterCanaryReceipt|undefined{let value:unknown;try{value=JSON.parse(raw)}catch{return}const o=exact(value,receiptKeys),s=o&&exact(o.signature,["algorithm","keyId","keyVersion","value"]);if(!o||!s||!validIdentity(o.identity)||!same(identity,o.identity as PrivateTesterCanaryIdentity)||o.identity.startedAt!==identity.startedAt||o.version!==1||o.kind!=="private-tester-canary-window"||o.windowKey!==key||o.passed!==true||o.sampleCount!==96||o.coveredUntil!==identity.startedAt+SLOTS*INTERVAL||!HASH.test(String(o.samplesSha256))||!validRollback(o.rollback,identity)||!HASH.test(String(o.receiptSha256))||canonical(value)!==raw)return;return o as PrivateTesterCanaryReceipt}
+export async function recordPrivateTesterCanarySample(identity:PrivateTesterCanaryIdentity,proof:unknown,deps:{store:PrivateTesterCanaryStore;currentBinding():Promise<unknown>;requestKill(reason:string):Promise<void>}){try{if(!validIdentity(identity))return fail(deps.requestKill,"binding");const current=await deps.currentBinding();if(!validIdentity(current)||!same(identity,current))return fail(deps.requestKill,"binding");const sample=validProof(proof,identity);if(!sample)return fail(deps.requestKill,"proof");const r=reason(sample);if(r)return fail(deps.requestKill,r);let inserted;try{inserted=await deps.store.insert(sample.windowKey,sample)}catch{return fail(deps.requestKill,"storage")}if(!inserted.created){if(!inserted.existing||canonical(inserted.existing)!==canonical(sample))return fail(deps.requestKill,"duplicate");return Object.freeze({recorded:false as const,resumed:true as const,sample})}return Object.freeze({recorded:true as const,resumed:false as const,sample})}catch{return fail(deps.requestKill,"dependency")}}
+export async function finalizePrivateTesterCanaryWindow(identity:PrivateTesterCanaryIdentity,deps:{store:PrivateTesterCanaryStore;rollbackRecheck(input:Readonly<Pick<PrivateTesterCanaryIdentity,"releaseId"|"buildId"|"deploymentId">>):Promise<unknown>;signReceipt(body:string):Promise<Signature>;verifier:{verify(body:string,signature:Signature):Promise<boolean>};requestKill(reason:string):Promise<void>}){try{if(!validIdentity(identity))return fail(deps.requestKill,"binding");const key=privateTesterCanaryWindowKey(identity);let samples;try{samples=await deps.store.list(key)}catch{return fail(deps.requestKill,"storage")}if(!Array.isArray(samples)||samples.length!==SLOTS)return fail(deps.requestKill,"discontinuity");for(let i=0;i<SLOTS;i++){if(!validSample(samples[i],identity,i,key)||i>0&&(samples[i]!.observedAt<=samples[i-1]!.observedAt||samples[i]!.observedAt-samples[i-1]!.observedAt>INTERVAL))return fail(deps.requestKill,"discontinuity")}let rollback;try{rollback=await deps.rollbackRecheck(Object.freeze({releaseId:identity.releaseId,buildId:identity.buildId,deploymentId:identity.deploymentId}))}catch{return fail(deps.requestKill,"rollback")}if(!validRollback(rollback,identity))return fail(deps.requestKill,"rollback");const body=canonical(unsigned(identity,key,samples,rollback));async function accepted(raw:string|undefined){if(!raw)return;const r=parseReceipt(raw,identity,key);if(!r)return;try{return await deps.verifier.verify(body,r.signature)&&r.receiptSha256===hash(body)?r:undefined}catch{return}}let existing;try{existing=await deps.store.readReceipt(key)}catch{return fail(deps.requestKill,"storage")}const already=await accepted(existing);if(already)return already;if(existing!==undefined)return fail(deps.requestKill,"receipt_conflict");let signature:Signature;try{signature=await deps.signReceipt(body);if(!await deps.verifier.verify(body,signature))return fail(deps.requestKill,"signature")}catch{return fail(deps.requestKill,"signature")}const receipt=Object.freeze({...unsigned(identity,key,samples,rollback),signature,receiptSha256:hash(body)});const raw=canonical(receipt);let written;try{written=await deps.store.writeReceipt(key,raw)}catch{return fail(deps.requestKill,"storage")}if(written.created)return receipt;const raced=await accepted(written.existing);if(raced)return raced;return fail(deps.requestKill,"receipt_conflict")}catch{return fail(deps.requestKill,"dependency")}}
 
-export async function recordPrivateTesterCanarySample(identity: PrivateTesterCanaryIdentity, proof: PrivateTesterCanaryProof, deps: { store: PrivateTesterCanaryStore; currentBinding(): Promise<PrivateTesterCanaryIdentity>; requestKill(reason: string): Promise<void> }) {
-  if (!validIdentity(identity) || !sameIdentity(identity, await deps.currentBinding())) return failClosed(deps.requestKill, "binding");
-  const sample = sampleFor(identity, proof);
-  if (!sample) return failClosed(deps.requestKill, "binding");
-  const reason = failedProofReason(sample);
-  if (reason) return failClosed(deps.requestKill, reason);
-  let inserted: { created: boolean; existing?: PrivateTesterCanarySample };
-  try { inserted = await deps.store.insert(sample.windowKey, sample); } catch { return failClosed(deps.requestKill, "storage"); }
-  if (!inserted.created) {
-    if (canonical(inserted.existing) !== canonical(sample)) return failClosed(deps.requestKill, "duplicate");
-    return Object.freeze({ recorded: false as const, resumed: true as const, sample: inserted.existing });
-  }
-  return Object.freeze({ recorded: true as const, resumed: false as const, sample });
-}
-
-function validRollback(identity: PrivateTesterCanaryIdentity, result: Task6RollbackProof): boolean { return result.version === 1 && result.passed === true && result.releaseId === identity.releaseId && result.gatesRemainOff === true && HASH.test(result.resultHash); }
-export async function finalizePrivateTesterCanaryWindow(identity: PrivateTesterCanaryIdentity, deps: { store: PrivateTesterCanaryStore; rollbackRecheck(): Promise<Task6RollbackProof>; signReceipt(raw: string): Promise<{ keyId: string; signature: string }>; requestKill(reason: string): Promise<void> }) {
-  if (!validIdentity(identity)) return failClosed(deps.requestKill, "binding");
-  const windowKey = privateTesterCanaryWindowKey(identity);
-  let samples: PrivateTesterCanarySample[];
-  try { samples = await deps.store.list(windowKey); } catch { return failClosed(deps.requestKill, "storage"); }
-  if (samples.length !== WINDOW_SAMPLES) return failClosed(deps.requestKill, "discontinuity");
-  for (let slot = 0; slot < WINDOW_SAMPLES; slot++) {
-    const sample = samples[slot];
-    if (!sample || sample.slot !== slot || sample.windowKey !== windowKey || !sameIdentity(identity, sample) || sample.scheduledAt !== identity.startedAt + slot * INTERVAL_MS || failedProofReason(sample)) return failClosed(deps.requestKill, "discontinuity");
-  }
-  let rollback: Task6RollbackProof;
-  try { rollback = await deps.rollbackRecheck(); } catch { return failClosed(deps.requestKill, "rollback"); }
-  if (!validRollback(identity, rollback)) return failClosed(deps.requestKill, "rollback");
-  const coveredUntil = identity.startedAt + WINDOW_SAMPLES * INTERVAL_MS;
-  const unsigned = canonical({ version: 1, kind: "private-tester-canary-window", identity, windowKey, sampleCount: WINDOW_SAMPLES, coveredUntil, samplesSha256: sha256(canonical(samples)), rollbackResultHash: rollback.resultHash });
-  let signature: { keyId: string; signature: string };
-  try { signature = await deps.signReceipt(unsigned); } catch { return failClosed(deps.requestKill, "signature"); }
-  if (!/^[A-Za-z0-9._-]{3,160}$/.test(signature.keyId) || !/^[A-Za-z0-9+/_=-]{16,8192}$/.test(signature.signature)) return failClosed(deps.requestKill, "signature");
-  const receipt = Object.freeze({ version: 1 as const, kind: "private-tester-canary-window" as const, identity, windowKey, passed: true as const, sampleCount: WINDOW_SAMPLES, coveredUntil, samplesSha256: sha256(canonical(samples)), rollbackResultHash: rollback.resultHash, signature, receiptSha256: sha256(unsigned) });
-  const raw = canonical(receipt);
-  let written: { created: boolean; existing?: string };
-  try { written = await deps.store.writeReceipt(windowKey, raw); } catch { return failClosed(deps.requestKill, "storage"); }
-  if (!written.created && written.existing !== raw) return failClosed(deps.requestKill, "receipt_conflict");
-  return receipt;
-}
-
-async function main(): Promise<void> {
-  if (process.env.LOCAL_CANARY_EVIDENCE !== "true") throw new Error("local canary evidence requires explicit local mode");
-  const [command, directory, identityRaw, proofRaw] = process.argv.slice(2);
-  if (command !== "sample-local" || !directory || !identityRaw || !proofRaw) throw new Error("local canary evidence input invalid");
-  const identity = JSON.parse(identityRaw) as PrivateTesterCanaryIdentity, proof = JSON.parse(proofRaw) as PrivateTesterCanaryProof;
-  await recordPrivateTesterCanarySample(identity, proof, { store: createLocalGenerationZeroCanaryStore(directory), currentBinding: async () => identity, requestKill: async () => { throw new Error("local evidence cannot invoke a kill switch"); } });
-}
-if (import.meta.url === `file://${process.argv[1]}`) main().catch(() => { process.stderr.write("local private tester canary evidence failed\n"); process.exitCode = 1; });
+async function main(){if(process.argv[2]!=="sample")throw new Error("private tester canary command invalid");const identity=JSON.parse(process.env.CANARY_IDENTITY_JSON??"")as PrivateTesterCanaryIdentity,proof=JSON.parse(process.env.CANARY_PROOF_JSON??"");const store=createGoogleGenerationZeroCanaryStore({bucket:process.env.PRIVATE_TESTER_EVIDENCE_BUCKET??"",prefix:"private-tester-canary",accessToken:process.env.GOOGLE_OAUTH_ACCESS_TOKEN??""});await recordPrivateTesterCanarySample(identity,proof,{store,currentBinding:async()=>identity,requestKill:async()=>{throw new Error("workflow must use the separately approved controller")}})}
+if(import.meta.url==="file://"+process.argv[1])main().catch(()=>{process.stderr.write("private tester canary sampling failed\\n");process.exitCode=1});
