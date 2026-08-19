@@ -11,7 +11,7 @@ export function CompanyHeader() {
         <Link href="/nearsleep">NearSleep</Link>
         <Link href="/#company-purpose">Our purpose</Link>
         <Link className="btn btn-secondary btn-small" href="/sign-in">Sign in</Link>
-        <MobileMenu primary={{ href: "/nearsleep", label: "Explore NearSleep" }} account={{ href: "/sign-in", label: "Sign in" }} links={[{ href: "/#products", label: "Recommended products" }, { href: "/nearsleep", label: "NearSleep" }, { href: "/#company-purpose", label: "Our purpose" }]} />
+        <MobileMenu primary={{ href: "/nearsleep", label: "Explore NearSleep" }} account={{ href: "/sign-in", label: "Sign in" }} links={[{ href: "/#products", label: "Products" }, { href: "/#company-purpose", label: "Our purpose" }]} />
       </nav>
     </div>
   </header>;

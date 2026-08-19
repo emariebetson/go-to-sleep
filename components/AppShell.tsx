@@ -23,6 +23,7 @@ export async function AppShell({ children, active, familyAvailable }: AppShellPr
     return nearFamilyPageAvailability().catch(() => ({ available: false as const }));
   });
   const links = appNavigationLinks({ showStories, showLegacy, familyAvailable: showFamily });
+  const mobileLinks = links.filter(([key]) => key !== "studio" && key !== "account");
 
   return (
     <div className="app-page">
@@ -32,7 +33,7 @@ export async function AppShell({ children, active, familyAvailable }: AppShellPr
           <div className="nav-links">
             <Link href="/pricing">Plan</Link>
             <Link className="btn btn-secondary btn-small" href="/">View site</Link>
-            <MobileMenu primary={{ href: "/studio", label: "Create a bedtime" }} account={{ href: "/account", label: "Voice & account" }} links={links.map(([, href, label]) => ({ href, label }))} />
+            <MobileMenu primary={{ href: "/studio", label: "Create a bedtime" }} account={{ href: "/account", label: "Voice & account" }} links={mobileLinks.map(([, href, label]) => ({ href, label }))} />
           </div>
         </div>
       </header>

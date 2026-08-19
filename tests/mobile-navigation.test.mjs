@@ -20,3 +20,9 @@ test("mobile navigation keeps the header pinned and exposes the approved menu af
   assert.match(css, /safe-area-inset-top/);
   assert.match(css, /\.nav-links > a:not\(\.btn\)/);
 });
+
+test("company mobile navigation keeps the product entry concise", () => {
+  const companyHeader = source("components/CompanyHeader.tsx");
+  assert.match(companyHeader, /href: "\/#products", label: "Products"/);
+  assert.doesNotMatch(companyHeader, /href: "\/nearsleep", label: "NearSleep"/);
+});
