@@ -62,3 +62,9 @@ The build uses metadata/workload identity, `--auto-iam-authn`, the exact
 password. Static database passwords, a mutable proxy image tag, missing KMS
 trust, stale observations, or disagreement on release, deployment, build ID,
 D1 digests, PostgreSQL catalog, or literal-dark gates are no-go.
+
+`infra/production/private-tester-evidence.disposable.cloudbuild.yaml` is an
+explicit disposable, non-production exercise path. It requires a digest-pinned
+proxy image, metadata identity, synthetic staged inputs, and the same exact
+IAM verifier URL; it executes the runner but must never be pointed at the
+production project, bucket, or receipts.
