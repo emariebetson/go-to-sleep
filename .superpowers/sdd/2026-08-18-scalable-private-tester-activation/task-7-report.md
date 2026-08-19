@@ -40,3 +40,4 @@ No 24-hour monitor was scheduled or run. No deployment, production request, data
 - Task 6 rollback evidence now derives and compares the deterministic synthetic fixture before accepting the rollback proof; altered fixture bindings fail closed.
 - Added focused regression coverage for forged Task 6 rollback bindings. The focused suite now has 8 passing tests.
 - The manual sampler now supports durable KMS-backed finalize, and production rebuilds the canary operational artifact only after the same trusted RSA-PSS verifier accepts the stored receipt; it no longer copies an arbitrary storage URI.
+- Rollback acceptance now recomputes the exact Task 6 immutable SHA-256 over the canonical fixture and observations. Production verification additionally binds the stored identity release, build, and deployment to the release-evidence environment values before emitting an artifact.
