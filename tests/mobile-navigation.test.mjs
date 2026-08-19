@@ -26,3 +26,10 @@ test("company mobile navigation keeps the product entry concise", () => {
   assert.match(companyHeader, /href: "\/#products", label: "Products"/);
   assert.doesNotMatch(companyHeader, /href: "\/nearsleep", label: "NearSleep"/);
 });
+
+test("site mobile navigation omits recommended while the header omits the bedtime CTA", () => {
+  const siteHeader = source("components/SiteHeader.tsx");
+  assert.doesNotMatch(siteHeader, /href: "\/nearsleep#recommended", label: "Recommended"/);
+  assert.doesNotMatch(siteHeader, /className="btn btn-primary btn-small" href="\/studio">Create a bedtime<\/Link>/);
+  assert.match(siteHeader, /primary=\{\{ href: "\/studio", label: "Create a bedtime" \}\}/);
+});
