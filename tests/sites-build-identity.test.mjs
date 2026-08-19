@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile as execFileCallback } from "node:child_process";
 import test from "node:test";
+import { promisify } from "node:util";
 import {
   createSitesBuildReceipt,
+  readSitesArchiveBuildIdentity,
   readSitesBuildIdentity,
   runtimeBuildIdFromHtml,
   verifyStableRuntimeBuild,
 } from "../scripts/read-sites-build-identity.ts";
+
+const execFile = promisify(execFileCallback);
 
 const buildId = "12345678-1234-4123-8123-123456789abc";
 const commitSha = "a".repeat(40);
@@ -95,6 +100,7 @@ test("creates one exact receipt across saved version, deployment, archive, runti
   });
   assert.equal(receipt.buildId, buildId);
   assert.equal(receipt.providerScriptVersion, "87654321-4321-4321-8321-cba987654321");
+  assert.equal(receipt.runtimeSha256, sha256(html));
   assert.equal(receipt.versionId.startsWith(`${receipt.projectId}~`), true);
 });
 
@@ -116,4 +122,22 @@ test("rejects same-project wrong-version and malformed provider bindings", () =>
   };
   assert.throws(() => createSitesBuildReceipt(base), /Sites build receipt invalid/);
   assert.throws(() => createSitesBuildReceipt({ ...base, versionId: `${base.projectId}~appgver_example`, providerScriptName: "site---attacker" }), /Sites build receipt invalid/);
+});
+
+test("rejects archive substitution after packaging and extraction", async () => {
+  const root = await fixture();
+  const temp = await mkdtemp(join(tmpdir(), "sites-build-archive-"));
+  const archive = join(temp, "site.tar.gz");
+  try {
+    await execFile("tar", ["-czf", archive, "-C", root, "dist"]);
+    const archiveSha256 = sha256(await readFile(archive));
+    const receipt = await readSitesArchiveBuildIdentity({ archive, commitSha, expectedArchiveSha256: archiveSha256 });
+    assert.equal(receipt.archiveSha256, archiveSha256);
+    await writeFile(join(root, "dist/server/index.js"), `const runtime={deploymentVersion:${JSON.stringify(buildId)},buildId:${JSON.stringify(buildId)},repacked:true};`);
+    await execFile("tar", ["-czf", archive, "-C", root, "dist"]);
+    await assert.rejects(readSitesArchiveBuildIdentity({ archive, commitSha, expectedArchiveSha256: archiveSha256 }), /archive identity invalid/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true });
+  }
 });

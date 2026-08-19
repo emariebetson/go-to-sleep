@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const UUID_EXACT = new RegExp(`^${UUID}$`);
@@ -9,6 +12,7 @@ const COMMIT_EXACT = /^[0-9a-f]{40}$/;
 const PROJECT_EXACT = /^appgprj_([0-9a-f]{32})$/;
 const VERSION_EXACT = /^appgprj_[0-9a-f]{32}~appgver_[A-Za-z0-9_-]{3,160}$/;
 const DEPLOYMENT_EXACT = /^appgdep_[A-Za-z0-9_-]{8,152}$/;
+const execFile = promisify(execFileCallback);
 
 function sha256(value: string | Uint8Array) {
   return createHash("sha256").update(value).digest("hex");
@@ -45,6 +49,22 @@ export async function readSitesBuildIdentity(input: {
   });
 }
 
+export async function readSitesArchiveBuildIdentity(input: { archive: string; commitSha: string; expectedArchiveSha256: string }) {
+  if (typeof input.archive !== "string" || !input.archive.startsWith("/") || !COMMIT_EXACT.test(input.commitSha) || !SHA256_EXACT.test(input.expectedArchiveSha256)) throw new Error("Sites archive identity invalid");
+  const archive = await readFile(input.archive);
+  if (sha256(archive) !== input.expectedArchiveSha256) throw new Error("Sites archive identity invalid");
+  const extracted = await mkdtemp(join(tmpdir(), "nearyou-sites-build-identity-"));
+  try {
+    await execFile("tar", ["-xzf", input.archive, "-C", extracted]);
+    return await readSitesBuildIdentity({ root: extracted, commitSha: input.commitSha, archiveSha256: input.expectedArchiveSha256 });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Sites runtime build identity invalid") throw error;
+    throw new Error("Sites archive identity invalid");
+  } finally {
+    await rm(extracted, { recursive: true, force: true });
+  }
+}
+
 export function runtimeBuildIdFromHtml(html: string) {
   if (typeof html !== "string" || html.length < 1 || html.length > 8_388_608) {
     throw new Error("Sites runtime build observation invalid");
@@ -75,7 +95,6 @@ export function createSitesBuildReceipt(input: {
   deploymentId: string;
   commitSha: string;
   archiveSha256: string;
-  runtimeSha256: string;
   buildId: string;
   beforeHtml: string;
   afterHtml: string;
@@ -87,7 +106,7 @@ export function createSitesBuildReceipt(input: {
   if (
     !project || !VERSION_EXACT.test(input.versionId) || !input.versionId.startsWith(`${input.projectId}~`) ||
     !DEPLOYMENT_EXACT.test(input.deploymentId) || !COMMIT_EXACT.test(input.commitSha) ||
-    !SHA256_EXACT.test(input.archiveSha256) || !SHA256_EXACT.test(input.runtimeSha256) ||
+    !SHA256_EXACT.test(input.archiveSha256) ||
     !UUID_EXACT.test(input.buildId) || !UUID_EXACT.test(input.providerScriptVersion) ||
     input.providerScriptName !== `site---${project[1]}` || !Number.isSafeInteger(input.observedAt) || input.observedAt < 1
   ) throw new Error("Sites build receipt invalid");
@@ -99,7 +118,7 @@ export function createSitesBuildReceipt(input: {
     deploymentId: input.deploymentId,
     commitSha: input.commitSha,
     archiveSha256: input.archiveSha256,
-    runtimeSha256: input.runtimeSha256,
+    runtimeSha256: sha256(input.beforeHtml),
     buildId: input.buildId,
     providerScriptName: input.providerScriptName,
     providerScriptVersion: input.providerScriptVersion,
