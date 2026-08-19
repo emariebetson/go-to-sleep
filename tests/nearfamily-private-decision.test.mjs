@@ -22,6 +22,7 @@ test("NearFamily decision migration defines the fixed execute-only authority", (
   assert.match(sql, /i\.expires_at>p_observed_at/);
   assert.match(sql, /i\.expires_at>statement_timestamp\(\)/);
   assert.match(sql, /CREATE ROLE nearyou_private_tester_decision NOLOGIN NOINHERIT/);
+  assert.match(sql, /IF EXISTS\(SELECT 1 FROM pg_roles WHERE rolname='nearyou_private_tester_decision'\) THEN\s+RAISE EXCEPTION 'private tester decision role already exists'/);
   assert.match(sql, /REVOKE nearyou_private_tester_decision FROM nearyou_rollout_controller/);
   assert.match(sql, /REVOKE nearyou_rollout_controller FROM nearyou_private_tester_decision/);
   assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.authorize_nearfamily_private_tester\(text,text,timestamptz\) FROM PUBLIC/);
@@ -82,6 +83,12 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
 
     const migrations = await loadPostgresMigrations();
     const checksum = (await import("node:crypto")).createHash("sha256").update(migrations.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")).digest("hex");
+    const priorMigrations = migrations.slice(0, -1);
+    const priorChecksum = (await import("node:crypto")).createHash("sha256").update(priorMigrations.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")).digest("hex");
+    await applyPostgresMigrations(transactionalPg, priorMigrations, priorChecksum);
+    await client.query("CREATE ROLE nearyou_private_tester_decision LOGIN");
+    await assert.rejects(() => applyPostgresMigrations(transactionalPg, migrations, checksum), /migration execution failed:0012_nearfamily_private_tester_decision/);
+    await client.query("DROP ROLE nearyou_private_tester_decision");
     await applyPostgresMigrations(transactionalPg, migrations, checksum);
     await client.query(`CREATE ROLE "${decisionUser}" LOGIN PASSWORD '${decisionPassword}'`);
     await client.query(`CREATE ROLE "${controllerUser}" LOGIN`);
@@ -95,8 +102,10 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
     ]);
     const grants = (await client.query("SELECT has_function_privilege($1,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS decision_execute,has_function_privilege($2,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS controller_execute,has_table_privilege($1,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS decision_state,has_table_privilege($1,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS decision_invites,has_table_privilege($2,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS controller_state,has_table_privilege($2,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS controller_invites", [decisionUser, controllerUser])).rows[0];
     assert.deepEqual(grants, { decision_execute: true, controller_execute: false, decision_state: false, decision_invites: false, controller_state: false, controller_invites: false });
-    const decisionFunctionCount = (await client.query("SELECT count(*)::integer AS count FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace WHERE namespace.nspname='nearyou' AND has_function_privilege($1,procedure.oid,'EXECUTE')", [decisionUser])).rows[0].count;
-    assert.equal(decisionFunctionCount, 1, "the decision identity may execute only the fixed NearFamily function");
+    const effectiveTablePrivileges = (await client.query("SELECT principal,namespace.nspname||'.'||relation.relname AS identity FROM (VALUES ($1::text),($2::text)) identities(principal) JOIN pg_class relation ON relation.relkind IN ('r','p','v','m','f') JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace WHERE namespace.nspname='nearyou' AND has_table_privilege(principal,relation.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') ORDER BY principal,identity", [decisionUser, controllerUser])).rows;
+    assert.deepEqual(effectiveTablePrivileges, [], "decision and controller identities may not directly access any Nearyou relation");
+    const effectiveDecisionFunctions = (await client.query("SELECT procedure.proname FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace WHERE namespace.nspname='nearyou' AND has_function_privilege($1,procedure.oid,'EXECUTE') ORDER BY procedure.proname", [decisionUser])).rows;
+    assert.deepEqual(effectiveDecisionFunctions, [{ proname: "authorize_nearfamily_private_tester" }], "the decision identity may execute only the fixed NearFamily function");
 
     await client.query("UPDATE nearyou.private_tester_activation_state SET release_id=$1,terminal_kill=false WHERE product='nearfamily'", [release]);
     await client.query("INSERT INTO nearyou.private_tester_activation_invites(product,household_hash,release_id,expires_at) VALUES('nearfamily',$1,$2,statement_timestamp()+interval '10 minutes')", [hash, release]);

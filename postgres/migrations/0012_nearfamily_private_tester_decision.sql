@@ -1,8 +1,10 @@
 BEGIN;
-DO $role$ BEGIN
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='nearyou_private_tester_decision') THEN
+    RAISE EXCEPTION 'private tester decision role already exists';
+  END IF;
   CREATE ROLE nearyou_private_tester_decision NOLOGIN NOINHERIT;
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $role$;
+END $$;
 GRANT USAGE ON SCHEMA nearyou TO nearyou_private_tester_decision;
 REVOKE nearyou_private_tester_decision FROM nearyou_rollout_controller;
 REVOKE nearyou_rollout_controller FROM nearyou_private_tester_decision;

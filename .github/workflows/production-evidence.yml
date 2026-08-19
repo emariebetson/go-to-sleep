@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - name: Apply PostgreSQL migrations 0001-0010 in reviewed order
+      - name: Apply PostgreSQL migrations 0001-0012 in reviewed order
         env:
           READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres"
           NEARYOU_CATALOG_DATABASE_DISPOSABLE: "true"
@@ -42,8 +42,36 @@ jobs:
           name: rls-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: postgres/rls-evidence.json
           if-no-files-found: error
+  nearfamily-decision-proof:
+    runs-on: ubuntu-latest
+    environment: production-evidence
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: nearyou }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Prove fixed NearFamily decision authority on disposable PostgreSQL 16
+        env:
+          NEARYOU_TEST_POSTGRES16_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/nearyou"
+          NEARYOU_TEST_POSTGRES16_DISPOSABLE: "true"
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node --import tsx scripts/verify-nearfamily-private-decision-proof.ts | tee evidence/nearfamily-private-decision-proof.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: nearfamily-private-decision-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/nearfamily-private-decision-proof.log
+          if-no-files-found: warn
   operational-evidence:
-    needs: postgres-contract
+    needs: [postgres-contract, nearfamily-decision-proof]
     runs-on: ubuntu-latest
     env:
       RELEASE_ID: ${{ vars.RELEASE_ID }}
