@@ -220,6 +220,10 @@ test("the PostgreSQL controller contract is transactional, terminal, and private
   assert.match(sql, /p_principal IS DISTINCT FROM actor/);
   assert.match(sql, /CREATE TRIGGER private_tester_activation_audit_immutable/);
   assert.match(sql, /request_payload jsonb NOT NULL/);
+  assert.match(sql, /nearyou_crypto\.digest\(convert_to\(canonical_claims/);
+  assert.doesNotMatch(sql, /(?<!nearyou_crypto\.)digest\(convert_to\(/);
+  assert.match(sql, /GRANT USAGE ON SCHEMA nearyou TO nearyou_rollout_controller/);
+  assert.match(sql, /VALUES\(p_operation_id,request_digest,p_payload,p_product,actor,p_action,s\.version,next_version,p_release_id,p_evidence_digest,result\)/);
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
   assert.match(sql, /FORCE ROW LEVEL SECURITY/);
   assert.match(sql, /REVOKE ALL ON FUNCTION nearyou\.apply_private_tester_activation[\s\S]* FROM PUBLIC/);
