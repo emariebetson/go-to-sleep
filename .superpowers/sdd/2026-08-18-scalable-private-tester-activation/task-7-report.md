@@ -22,3 +22,15 @@
 ## Scope and safety
 
 No 24-hour monitor was scheduled or run. No deployment, production request, database mutation, rollout change, invitation, or kill switch was invoked. The only kill calls exercised were test-provided in-memory adapters.
+
+## Fix round 1
+
+- The resume namespace is the SHA-256 of exactly release ID, build ID, and deployment ID; start time cannot fork a window. Durable Google Cloud Storage support writes every sample and final receipt with generation zero, while the local store remains test-only.
+- Proofs, samples, receipts, rollback proofs, and booleans now require exact canonical schemas. Every malformed dependency, storage response, signature, and receipt fails closed through the injected kill seam.
+- Finalization enforces a maximum actual observation gap of 15 minutes, binds the complete Task 6 rollback result (including its synthetic fixture), verifies a real RSA-PSS/SHA-256 signature against a trusted public key, and verifies/reuses an existing receipt before signing to avoid randomized-signature conflicts.
+- The manual-only sampler workflow now authenticates to the durable evidence bucket and writes a generation-zero remote sample rather than runner-temporary state. Production evidence retrieves the reviewed signed receipt into evidence/canary.json, and claim composition accepts the signed canary receipt shape.
+
+### Fix-round verification
+
+- Bundled Node focused test: 7 passed, 0 failed.
+- npm run typecheck, scoped ESLint, and git diff --check: passed.
