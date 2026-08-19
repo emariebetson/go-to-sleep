@@ -1,29 +1,32 @@
-name: canary-evidence-sampler
+name: local-private-tester-canary-contract
+
+# Intentionally manual and local-only. This is a disposable contract check, not
+# a scheduler, rollout controller, production sampler, or kill-switch caller.
 on:
   workflow_dispatch:
-permissions: { contents: read, id-token: write }
+    inputs:
+      local_identity_json:
+        description: Disposable release/build/deployment identity JSON
+        required: true
+        type: string
+      local_proof_json:
+        description: Disposable Task 5/6 proof JSON
+        required: true
+        type: string
+
+permissions: { contents: read }
+
 jobs:
-  sample:
+  local-contract:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_ID: ${{ vars.RELEASE_ID }}
-      SCHEMA_CHECKSUM: ${{ vars.EVIDENCE_SCHEMA_CHECKSUM }}
-    environment: production-evidence
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - id: google-auth
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ vars.CANARY_METRICS_AUDIENCE }}
-      - name: Record one durable PostgreSQL sample
+      - name: Record one disposable generation-zero sample
         env:
-          RELEASE_ID: ${{ vars.RELEASE_ID }}
-          CANARY_METRICS_URL: ${{ vars.CANARY_METRICS_URL }}
-          CANARY_METRICS_TOKEN: ${{ steps.google-auth.outputs.id_token }}
-        run: node --import tsx scripts/canary-evidence-cli.ts sample
+          LOCAL_CANARY_EVIDENCE: "true"
+          LOCAL_IDENTITY: ${{ inputs.local_identity_json }}
+          LOCAL_PROOF: ${{ inputs.local_proof_json }}
+        run: node --import tsx scripts/canary-evidence-cli.ts sample-local "$RUNNER_TEMP" "$LOCAL_IDENTITY" "$LOCAL_PROOF"
