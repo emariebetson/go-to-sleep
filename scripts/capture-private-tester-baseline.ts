@@ -19,7 +19,7 @@ import { validatePrivateTesterBaselineCandidate } from "./promote-private-tester
 import { parseSitesManagedResourceReceiptV3 } from "../lib/sites-managed-resource-receipt";
 import { SITES_D1_FORWARD_ARTIFACT } from "../lib/sites-d1-forward-artifact.generated";
 import { completeEvidence, type EvidencePage } from "../lib/private-tester-sites-evidence";
-import { createSitesBuildReceipt } from "./read-sites-build-identity";
+import { createSitesBuildReceipt, readSitesArchiveBytesBuildIdentity } from "./read-sites-build-identity";
 
 const HASH = /^[a-f0-9]{64}$/, ID = /^[A-Za-z][A-Za-z0-9_.:/@-]{2,511}$/, NAME = /^[a-z][a-z0-9_-]{2,127}$/;
 const SECRET_VERSION = /^projects\/[a-z][a-z0-9-]{2,62}\/secrets\/[A-Za-z0-9_-]{1,255}\/versions\/[1-9][0-9]*$/;
@@ -153,7 +153,9 @@ export async function capturePrivateTesterBaseline(input: PrivateTesterBaselineI
   const logs = providerLog(input.sitesProviderLogRaw, input.expectedSitesProviderLogSha256, capturedAt);
   const schemaCompletion = raw[8] as ReturnType<typeof completeEvidence>, ledgerCompletion = raw[9] as ReturnType<typeof completeEvidence>;
   if (schemaCompletion.buildId !== ledgerCompletion.buildId) throw new Error("private tester baseline invalid");
-  const buildReceipt = createSitesBuildReceipt({ projectId: deployment.projectId, versionId: deployment.versionId, deploymentId: deployment.deploymentId, commitSha: deployment.commitSha, archiveSha256: bytesHash(input.sitesArchiveBytes), buildId: schemaCompletion.buildId, beforeHtml: beforeRuntime.html, afterHtml: afterRuntime.html, providerScriptName: logs.scriptName as string, providerScriptVersion: logs.scriptVersionId as string, observedAt: capturedAt });
+  let archiveIdentity: Awaited<ReturnType<typeof readSitesArchiveBytesBuildIdentity>>; try { archiveIdentity = await readSitesArchiveBytesBuildIdentity({ archiveBytes: input.sitesArchiveBytes, commitSha: deployment.commitSha, expectedArchiveSha256: bytesHash(input.sitesArchiveBytes) }); } catch { throw new Error("private tester baseline invalid"); }
+  if (archiveIdentity.buildId !== schemaCompletion.buildId) throw new Error("private tester baseline invalid");
+  const buildReceipt = createSitesBuildReceipt({ projectId: deployment.projectId, versionId: deployment.versionId, deploymentId: deployment.deploymentId, commitSha: deployment.commitSha, archiveSha256: archiveIdentity.archiveSha256, buildId: archiveIdentity.buildId, beforeHtml: beforeRuntime.html, afterHtml: afterRuntime.html, providerScriptName: logs.scriptName as string, providerScriptVersion: logs.scriptVersionId as string, observedAt: capturedAt });
   let resourceEvidence: ReturnType<typeof parseSitesManagedResourceReceiptV3>; try { resourceEvidence=parseSitesManagedResourceReceiptV3(input.sitesResourceReceiptRaw,input.expectedSitesResourceReceiptHash,capturedAt,{buildReceipt,schemaCompletion,ledgerCompletion}); } catch { throw new Error("private tester baseline invalid"); }
   const resourceReceipt=resourceEvidence.receipt as RecordValue,resourceVersion=resourceReceipt.version as RecordValue,resourceDeployment=resourceReceipt.deployment as RecordValue;
   if (manifest.schemaVersion!==3||manifest.releaseId !== release.releaseId || manifest.live.version !== release.sitesVersion || manifest.live.commitSha !== release.commitSha || deployment.projectId!==manifest.projectId || deployment.versionId!==manifest.live.version || deployment.commitSha!==manifest.live.commitSha || Math.abs(Date.parse(deployment.deployedAt)-manifest.issuedAt)>MAX_AGE_MS||resourceVersion.project_id!==manifest.projectId||resourceVersion.id!==manifest.live.version||(resourceVersion.source as RecordValue).commit_sha!==manifest.live.commitSha||resourceDeployment.id!==deployment.deploymentId||canonical(resourceEvidence.resources)!==canonical(manifest.resources)||beforeRuntime.meta.identity!==afterRuntime.meta.identity||beforeRuntime.meta.rayId===afterRuntime.meta.rayId) throw new Error("private tester baseline invalid");

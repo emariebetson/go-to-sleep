@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -62,6 +62,18 @@ export async function readSitesArchiveBuildIdentity(input: { archive: string; co
     throw new Error("Sites archive identity invalid");
   } finally {
     await rm(extracted, { recursive: true, force: true });
+  }
+}
+
+export async function readSitesArchiveBytesBuildIdentity(input: { archiveBytes: Uint8Array; commitSha: string; expectedArchiveSha256: string }) {
+  if (!(input.archiveBytes instanceof Uint8Array) || input.archiveBytes.byteLength < 1 || input.archiveBytes.byteLength > 1_073_741_824 || !COMMIT_EXACT.test(input.commitSha) || !SHA256_EXACT.test(input.expectedArchiveSha256) || sha256(input.archiveBytes) !== input.expectedArchiveSha256) throw new Error("Sites archive identity invalid");
+  const directory = await mkdtemp(join(tmpdir(), "nearyou-sites-build-bytes-"));
+  const archive = join(directory, "site.tar.gz");
+  try {
+    await writeFile(archive, input.archiveBytes, { flag: "wx" });
+    return await readSitesArchiveBuildIdentity({ archive, commitSha: input.commitSha, expectedArchiveSha256: input.expectedArchiveSha256 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
