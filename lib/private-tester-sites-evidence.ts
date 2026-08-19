@@ -103,22 +103,23 @@ export async function readEvidencePage(input: {
   return Object.freeze({ ...core, nextCursor, pageSha256 });
 }
 
-export function completeEvidence(input: { kind: string; buildId: string; pages: readonly EvidencePage[] }) {
-  validHeader(input.kind, input.buildId);
-  if (!Array.isArray(input.pages) || input.pages.length < 1 || input.pages.length > 50_000) invalid();
+export function completeEvidence(kind: string, orderedPageHashes: readonly EvidencePage[]) {
+  if (!Array.isArray(orderedPageHashes) || orderedPageHashes.length < 1 || orderedPageHashes.length > 50_000) invalid();
+  const buildId = orderedPageHashes[0]?.buildId;
+  validHeader(kind, buildId);
   let count = 0, previous: string | null = null, priorIdentity = "";
   const hashes: string[] = [];
-  for (const [index, page] of input.pages.entries()) {
-    if (!page || typeof page !== "object" || Array.isArray(page) || Object.getPrototypeOf(page) !== Object.prototype || !exactDataKeys(page, ["version", "kind", "buildId", "page", "afterIdentity", "previousPageSha256", "rows", "nextCursor", "pageSha256"]) || page.version !== 1 || page.kind !== input.kind || page.buildId !== input.buildId || page.page !== index || page.afterIdentity !== (index === 0 ? null : priorIdentity) || page.previousPageSha256 !== previous || page.rows.length < 1 || page.rows.length > PAGE_SIZE || page.pageSha256 !== pageHash(page)) invalid();
+  for (const [index, page] of orderedPageHashes.entries()) {
+    if (!page || typeof page !== "object" || Array.isArray(page) || Object.getPrototypeOf(page) !== Object.prototype || !exactDataKeys(page, ["version", "kind", "buildId", "page", "afterIdentity", "previousPageSha256", "rows", "nextCursor", "pageSha256"]) || page.version !== 1 || page.kind !== kind || page.buildId !== buildId || page.page !== index || page.afterIdentity !== (index === 0 ? null : priorIdentity) || page.previousPageSha256 !== previous || page.rows.length < 1 || page.rows.length > PAGE_SIZE || page.pageSha256 !== pageHash(page)) invalid();
     for (const row of page.rows) { if (!validRow(row) || row.identity <= priorIdentity) invalid(); priorIdentity = row.identity; }
-    if (index < input.pages.length - 1) {
+    if (index < orderedPageHashes.length - 1) {
       if (page.rows.length !== PAGE_SIZE || page.nextCursor === null) invalid();
       const next = decodeCursor(page.nextCursor);
-      if (next.kind !== input.kind || next.buildId !== input.buildId || next.page !== index + 1 || next.lastIdentity !== priorIdentity || next.previousPageSha256 !== page.pageSha256) invalid();
+      if (next.kind !== kind || next.buildId !== buildId || next.page !== index + 1 || next.lastIdentity !== priorIdentity || next.previousPageSha256 !== page.pageSha256) invalid();
     } else if (page.nextCursor !== null) invalid();
     count += page.rows.length; hashes.push(page.pageSha256); previous = page.pageSha256;
   }
-  return Object.freeze({ version: 1 as const, kind: input.kind, buildId: input.buildId, count, pageCount: input.pages.length, orderedDigest: sha256(canonical(hashes)) });
+  return Object.freeze({ version: 1 as const, kind, buildId, count, pageCount: orderedPageHashes.length, orderedDigest: sha256(canonical(hashes)) });
 }
 
 type D1PageDatabase = {

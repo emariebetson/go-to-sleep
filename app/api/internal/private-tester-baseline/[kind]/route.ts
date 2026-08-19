@@ -7,6 +7,7 @@ import {
   createPrivateTesterBaselineGateway,
   createPrivateTesterBaselineRuntime,
 } from "@/lib/private-tester-baseline-gateway";
+import { privateTesterPackagedBuildId } from "@/lib/private-tester-packaged-build-id";
 
 type Runtime = Record<string, unknown> & {
   PRIVATE_TESTER_BASELINE_OIDC_SUBJECT?: string;
@@ -27,7 +28,7 @@ export async function GET(request: Request): Promise<Response> {
   return createPrivateTesterBaselineGateway({
     trust,
     authenticate,
-    load: async () => createPrivateTesterBaselineRuntime(runtime),
+    load: async () => createPrivateTesterBaselineRuntime(runtime, { buildId: privateTesterPackagedBuildId() }),
     now: Date.now,
   })(request);
 }
