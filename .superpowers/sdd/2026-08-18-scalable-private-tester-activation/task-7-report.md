@@ -34,3 +34,8 @@ No 24-hour monitor was scheduled or run. No deployment, production request, data
 
 - Bundled Node focused test: 7 passed, 0 failed.
 - npm run typecheck, scoped ESLint, and git diff --check: passed.
+
+## Fix round 2
+
+- Task 6 rollback evidence now derives and compares the deterministic synthetic fixture before accepting the rollback proof; altered fixture bindings fail closed.
+- Added focused regression coverage for forged Task 6 rollback bindings. The focused suite now has 8 passing tests.
