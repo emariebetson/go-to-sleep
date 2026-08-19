@@ -4,12 +4,21 @@ name: private-tester-canary-evidence
 on:
   workflow_dispatch:
     inputs:
+      phase:
+        description: Record a sample or finalize the completed window
+        required: true
+        type: choice
+        options: [sample, finalize]
       identity_json:
         description: Exact release/build/deployment/start identity JSON
         required: true
         type: string
       proof_json:
         description: Reviewed Task 5 authorization and health proof JSON
+        required: true
+        type: string
+      rollback_proof_json:
+        description: Exact Task 6 rollback proof JSON (required by finalize)
         required: true
         type: string
 
@@ -37,4 +46,12 @@ jobs:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.evidence-auth.outputs.access_token }}
           CANARY_IDENTITY_JSON: ${{ inputs.identity_json }}
           CANARY_PROOF_JSON: ${{ inputs.proof_json }}
-        run: node --import tsx scripts/canary-evidence-cli.ts sample
+          CANARY_ROLLBACK_PROOF_JSON: ${{ inputs.rollback_proof_json }}
+          KMS_PROJECT: ${{ vars.KMS_PROJECT }}
+          KMS_LOCATION: ${{ vars.KMS_LOCATION }}
+          KMS_KEY_RING: ${{ vars.KMS_KEY_RING }}
+          KMS_KEY: ${{ vars.KMS_KEY }}
+          EVIDENCE_PRINCIPAL: ${{ vars.EVIDENCE_PRINCIPAL }}
+          EVIDENCE_KEY_ID: ${{ vars.EVIDENCE_KEY_ID }}
+          EVIDENCE_KEY_VERSION: ${{ vars.EVIDENCE_KEY_VERSION }}
+        run: node --import tsx scripts/canary-evidence-cli.ts ${{ inputs.phase }}
