@@ -71,6 +71,7 @@ export async function composePrivateTesterDeploymentManifestFile(inputPath: stri
   try { observed = JSON.parse(raw); } catch { throw new Error("private tester deployment input invalid"); }
   if (raw.trim() !== canonicalPrivateTesterReleaseOperation(observed)) throw new Error("private tester deployment input invalid");
   const claims = composePrivateTesterDeploymentManifest(observed, dependencies.now ?? Date.now, dependencies.nonce ?? (() => randomBytes(32).toString("base64url")));
+  if (claims.schemaVersion !== 3) throw new Error("private tester deployment schema v3 required");
   const project = environmentValue(environment, "KMS_PROJECT", /^[a-z][a-z0-9-]{2,62}$/), location = environmentValue(environment, "KMS_LOCATION", /^[A-Za-z0-9_-]{1,255}$/), keyRing = environmentValue(environment, "KMS_KEY_RING", /^[A-Za-z0-9_-]{1,255}$/), key = environmentValue(environment, "KMS_KEY", /^[A-Za-z0-9_-]{1,255}$/), principal = environmentValue(environment, "EVIDENCE_PRINCIPAL", /^[A-Za-z0-9_:/.@-]{3,200}$/), keyId = environmentValue(environment, "EVIDENCE_KEY_ID", /^[A-Za-z0-9_:/.@-]{3,200}$/), version = Number(environment.EVIDENCE_KEY_VERSION);
   if (!Number.isSafeInteger(version) || version < 1 || claims.principal !== principal || claims.keyId !== keyId || claims.keyVersion !== version) throw new Error("private tester deployment signer mismatch");
   let token: string | undefined;
