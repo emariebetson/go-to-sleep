@@ -174,6 +174,12 @@ test("the disposable Cloud Build path invokes the runner behind a digest-pinned 
   assert.doesNotMatch(build, /POSTGRES_PASSWORD|postgres:\/\/[^\n]*:[^\n]*@/);
 });
 
+test("the private restored-database proof writes only to the provisioned immutable evidence bucket", () => {
+  const build = readFileSync(new URL("../infra/production/restore-evidence.private.cloudbuild.yaml", import.meta.url), "utf8");
+  assert.match(build, /location: gs:\/\/nearyou-production-private-evidence-nearnight\/restores\/\$BUILD_ID/);
+  assert.doesNotMatch(build, /gs:\/\/nearyou-private-evidence/);
+});
+
 test("the object-store adapter uses generation zero and fetches raw bytes on a collision", async () => {
   const requests = [];
   const store = createGoogleStorageGenerationZeroStore({

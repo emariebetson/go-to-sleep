@@ -27,7 +27,7 @@ steps:
           '
 artifacts:
   objects:
-    location: gs://nearyou-private-evidence/restores/$BUILD_ID
+      location: gs://nearyou-production-private-evidence-nearnight/restores/$BUILD_ID
     paths: [evidence/restore.json]
 options:
   pool:
