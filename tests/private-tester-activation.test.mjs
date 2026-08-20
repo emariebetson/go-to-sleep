@@ -223,6 +223,8 @@ test("the PostgreSQL controller contract is transactional, terminal, and private
   assert.match(sql, /nearyou_crypto\.digest\(convert_to\(canonical_claims/);
   assert.doesNotMatch(sql, /(?<!nearyou_crypto\.)digest\(convert_to\(/);
   assert.match(sql, /GRANT USAGE ON SCHEMA nearyou TO nearyou_rollout_controller/);
+  assert.doesNotMatch(sql, /ALTER TABLE nearyou\.private_tester_activation_baselines,/,
+    "PostgreSQL ALTER TABLE accepts one relation per OWNER statement");
   assert.match(sql, /CASE WHEN p_action='activate' THEN p_release_id ELSE s\.release_id END/);
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
   assert.match(sql, /FORCE ROW LEVEL SECURITY/);

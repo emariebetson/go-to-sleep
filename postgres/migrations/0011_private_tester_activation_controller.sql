@@ -4,7 +4,10 @@ CREATE TABLE nearyou.private_tester_activation_state(product text PRIMARY KEY CH
 CREATE TABLE nearyou.private_tester_activation_invites(product text NOT NULL REFERENCES nearyou.private_tester_activation_state(product),household_hash text NOT NULL CHECK(household_hash~'^[a-f0-9]{64}$'),release_id text NOT NULL,expires_at timestamptz NOT NULL,revoked_at timestamptz,PRIMARY KEY(product,household_hash,release_id));
 CREATE TABLE nearyou.private_tester_activation_audit(operation_id text PRIMARY KEY CHECK(operation_id~'^[a-z][a-z0-9-]{7,127}$'),request_digest text NOT NULL,request_payload jsonb NOT NULL,product text NOT NULL,principal text NOT NULL,action text NOT NULL,prior_version bigint NOT NULL,new_version bigint NOT NULL,release_id text,evidence_digest text,result jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT statement_timestamp());
 INSERT INTO nearyou.private_tester_activation_state(product) VALUES('nearstory'),('nearfamily');
-ALTER TABLE nearyou.private_tester_activation_baselines,nearyou.private_tester_activation_state,nearyou.private_tester_activation_invites,nearyou.private_tester_activation_audit OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.private_tester_activation_baselines OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.private_tester_activation_state OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.private_tester_activation_invites OWNER TO nearyou_release_policy_owner;
+ALTER TABLE nearyou.private_tester_activation_audit OWNER TO nearyou_release_policy_owner;
 REVOKE ALL ON nearyou.private_tester_activation_baselines,nearyou.private_tester_activation_state,nearyou.private_tester_activation_invites,nearyou.private_tester_activation_audit FROM PUBLIC,nearyou_app,nearyou_release_verifier,nearyou_rollout_controller,nearyou_private_tester_baseline_verifier;
 GRANT USAGE ON SCHEMA nearyou TO nearyou_rollout_controller;
 ALTER TABLE nearyou.private_tester_activation_baselines ENABLE ROW LEVEL SECURITY; ALTER TABLE nearyou.private_tester_activation_baselines FORCE ROW LEVEL SECURITY;
