@@ -176,6 +176,7 @@ test("the disposable Cloud Build path invokes the runner behind a digest-pinned 
 
 test("the private restored-database proof writes only to the provisioned immutable evidence bucket", () => {
   const build = readFileSync(new URL("../infra/production/restore-evidence.private.cloudbuild.yaml", import.meta.url), "utf8");
+  assert.match(build, /serviceAccount: projects\/nearnight\/serviceAccounts\/nearyou-evidence-ci@nearnight\.iam\.gserviceaccount\.com/);
   assert.match(build, /location: gs:\/\/nearyou-production-private-evidence-nearnight\/restores\/\$BUILD_ID/);
   assert.doesNotMatch(build, /gs:\/\/nearyou-private-evidence/);
 });

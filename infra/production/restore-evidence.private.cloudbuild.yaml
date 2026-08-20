@@ -27,8 +27,9 @@ steps:
           '
 artifacts:
   objects:
-      location: gs://nearyou-production-private-evidence-nearnight/restores/$BUILD_ID
+    location: gs://nearyou-production-private-evidence-nearnight/restores/$BUILD_ID
     paths: [evidence/restore.json]
+serviceAccount: projects/nearnight/serviceAccounts/nearyou-evidence-ci@nearnight.iam.gserviceaccount.com
 options:
   pool:
     name: projects/nearnight/locations/us-central1/workerPools/nearfamily-evidence-private
