@@ -181,6 +181,18 @@ test("the private restored-database proof writes only to the provisioned immutab
   assert.doesNotMatch(build, /gs:\/\/nearyou-private-evidence/);
 });
 
+test("the independent restored-database capture is digest-pinned and emits only checksum evidence", () => {
+  const build = readFileSync(new URL("../infra/production/restore-evidence.capture.private.cloudbuild.yaml", import.meta.url), "utf8");
+  const capture = readFileSync(new URL("../scripts/capture-restore-checksums.ts", import.meta.url), "utf8");
+  assert.match(build, /cloud-sql-connectors\/cloud-sql-proxy@sha256:\[a-f0-9\]\{64\}/);
+  assert.match(build, /capture-restore-checksums\.ts evidence\/capture\.json/);
+  assert.match(build, /capture:proxy-started/);
+  assert.match(capture, /RESTORED_DATABASE_URL/);
+  assert.match(capture, /rowChecksum/);
+  assert.match(capture, /catalogChecksum/);
+  assert.doesNotMatch(capture, /process\.env\.GOOGLE_OAUTH_ACCESS_TOKEN/);
+});
+
 test("the object-store adapter uses generation zero and fetches raw bytes on a collision", async () => {
   const requests = [];
   const store = createGoogleStorageGenerationZeroStore({

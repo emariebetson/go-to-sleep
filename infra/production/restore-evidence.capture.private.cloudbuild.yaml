@@ -1,0 +1,33 @@
+# Captures independent, non-secret checksums from the approved restored clone.
+# The final proof receives these exact values as immutable substitutions.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        test "${PROJECT_ID}" = "nearnight"
+        test "${_RESTORED_CLOUD_SQL_INSTANCE}" = "nearnight:us-central1:nearyou-evidence-20260820"
+        printf '%s' "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" | grep -Eq '^gcr\.io/cloud-sql-connectors/cloud-sql-proxy@sha256:[a-f0-9]{64}$'
+        docker run --detach --rm --name restore-evidence-auth-proxy --network cloudbuild \
+          "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" --auto-iam-authn --structured-logs --address=0.0.0.0 --port=5432 \
+          "${_RESTORED_CLOUD_SQL_INSTANCE}"
+        trap 'docker rm -f restore-evidence-auth-proxy >/dev/null 2>&1 || true' EXIT
+        printf '%s\n' 'capture:proxy-started'
+        docker run --rm --network cloudbuild -v /workspace:/workspace -w /workspace \
+          -e RESTORED_DATABASE_URL='postgresql://nearyou-evidence-ci%40nearnight.iam@restore-evidence-auth-proxy:5432/nearyou?sslmode=disable' \
+          node:24-bookworm bash -ceu '
+            printf "%s\\n" "capture:dependency-install"
+            npm ci --ignore-scripts
+            printf "%s\\n" "capture:query-start"
+            node --import tsx scripts/capture-restore-checksums.ts evidence/capture.json
+          '
+artifacts:
+  objects:
+    location: gs://nearyou-production-private-evidence-nearnight/restores/capture-$BUILD_ID
+    paths: [evidence/capture.json]
+serviceAccount: projects/nearnight/serviceAccounts/nearyou-evidence-ci@nearnight.iam.gserviceaccount.com
+options:
+  pool:
+    name: projects/nearnight/locations/us-central1/workerPools/nearfamily-evidence-private
+  logging: CLOUD_LOGGING_ONLY
