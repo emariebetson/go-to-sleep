@@ -97,8 +97,8 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
 
     const memberships = (await client.query("SELECT member.rolname AS member,role.rolname AS role FROM pg_auth_members membership JOIN pg_roles member ON member.oid=membership.member JOIN pg_roles role ON role.oid=membership.roleid WHERE member.rolname IN ($1,$2) AND role.rolname LIKE 'nearyou_%' ORDER BY member,role", [controllerUser, decisionUser])).rows;
     assert.deepEqual(memberships, [
-      { member: controllerUser, role: "nearyou_rollout_controller" },
       { member: decisionUser, role: "nearyou_private_tester_decision" },
+      { member: controllerUser, role: "nearyou_rollout_controller" },
     ]);
     const grants = (await client.query("SELECT has_function_privilege($1,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS decision_execute,has_function_privilege($2,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS controller_execute,has_table_privilege($1,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS decision_state,has_table_privilege($1,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS decision_invites,has_table_privilege($2,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS controller_state,has_table_privilege($2,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS controller_invites", [decisionUser, controllerUser])).rows[0];
     assert.deepEqual(grants, { decision_execute: true, controller_execute: false, decision_state: false, decision_invites: false, controller_state: false, controller_invites: false });

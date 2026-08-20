@@ -104,14 +104,14 @@ test("prepares a review-required catalog from exact live PostgreSQL 16 state and
   const { result, writes, events, migrations } = await fixture();
   assert.equal(result.candidate.generatedFrom, "live-production-postgresql-16");
   assert.equal(result.candidate.reviewRequired, true);
-  assert.equal(result.candidate.migrationHead, "0011_private_tester_activation_controller");
+  assert.equal(result.candidate.migrationHead, "0012_nearfamily_private_tester_decision");
   assert.deepEqual(result.candidate.provenance.migrationLedger, migrations.map(({ id, checksum }) => ({ id, checksum })));
   assert.deepEqual(result.candidate.provenance.source, { commitSha: "a".repeat(40), imageDigest: `sha256:${"b".repeat(64)}` });
   assert.equal(result.candidate.provenance.baseline.migrationHead,"0006_private_canary_observation");assert.equal(result.candidate.provenance.baseline.catalogChecksum,catalogChecksum);
   assert.deepEqual(result.candidate.provenance.identities, { controllerDatabaseUser: controllerUser, controllerPrincipal, verifierDatabaseUser: verifierUser, verifierPrincipal });
   assert.equal(Object.hasOwn(result.candidate, "ready"), false);
   assert.equal(Object.hasOwn(result.candidate, "gate"), false);
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage","insert:0011_private_tester_activation_controller"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage","insert:0011_private_tester_activation_controller","insert:0012_nearfamily_private_tester_decision"]);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].contentSha256, sha256(writes[0].body));
   assert.equal(result.receipt.contentSha256, writes[0].contentSha256);
@@ -207,7 +207,7 @@ test("legacy 0001-0004 ledger is remediated through 0010 and preserved exactly i
   const migrations = await loadPostgresMigrations();
   const legacyLedger = migrations.slice(0, 6).map(({ id, checksum }, index) => ({ id, checksum: retiredChecksums[index] ?? checksum }));
   const { result, events } = await fixture({ ledger: legacyLedger });
-  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage","insert:0011_private_tester_activation_controller"]);
+  assert.deepEqual(events.filter((event) => event.startsWith("insert:")), ["insert:0007_private_tester_deployment_manifest","insert:0008_cloud_sql_iam_database_usernames","insert:0009_cloud_sql_verifier_identity_limit","insert:0010_migration_schema_usage","insert:0011_private_tester_activation_controller","insert:0012_nearfamily_private_tester_decision"]);
   assert.deepEqual(result.candidate.provenance.migrationLedger, [...legacyLedger, ...migrations.slice(6).map(({id,checksum})=>({id,checksum}))]);
   assert.equal(result.candidate.provenance.migrationLedgerChecksum, sha256(result.candidate.provenance.migrationLedger.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")));
 });

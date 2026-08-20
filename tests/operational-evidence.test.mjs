@@ -44,7 +44,7 @@ test("disposable catalog candidates remain review artifacts but cannot promote t
 test("catalog records the reviewed absence of NearYou role memberships",()=>{
   assert.match(LIVE_CATALOG_QUERY,/SELECT 'membership','<none>',''/);
   assert.match(LIVE_CATALOG_QUERY,/NOT EXISTS[\s\S]*pg_auth_members/);
-  assert.match(LIVE_CATALOG_SECURITY_QUERY,/jsonb_agg\(c\.relname ORDER BY c\.relname\)/);
+  assert.match(LIVE_CATALOG_SECURITY_QUERY,/jsonb_agg\(c\.relname ORDER BY array_position\(ARRAY\['household_members','tenant_records','private_tester_activation_baselines','private_tester_activation_state','private_tester_activation_invites','private_tester_activation_audit'\],c\.relname\)\)/);
 });
 
 test("catalog policy identity binds exact C-ordered role sets",()=>{const restricted=canonicalPolicyDefinition({roles:["nearyou_policy_owner"],cmd:"SELECT",qual:"true",withCheck:null}),publicPolicy=canonicalPolicyDefinition({roles:["PUBLIC"],cmd:"SELECT",qual:"true",withCheck:null});assert.notEqual(restricted,publicPolicy);assert.equal(restricted,"nearyou_policy_owner|SELECT|true|");assert.equal(canonicalPolicyDefinition({roles:["nearyou_tenant","nearyou_policy_owner"],cmd:"ALL",qual:"tenant",withCheck:"tenant"}),"nearyou_policy_owner,nearyou_tenant|ALL|tenant|tenant");assert.match(LIVE_CATALOG_QUERY,/unnest\(roles\)[\s\S]*COLLATE "C"/);assert.match(LIVE_CATALOG_QUERY,/COALESCE\(qual,''\),COALESCE\(with_check,''\)/)});
