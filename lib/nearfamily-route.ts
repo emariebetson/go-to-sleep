@@ -12,6 +12,24 @@ type NearFamilyAvailabilityDependencies = Pick<NearFamilyGetDependencies, "sourc
 
 export type NearFamilyAvailability = { available: false } | { available: true; householdId: string };
 
+export type NearFamilyPrivateRouteRollbackDependencies = Readonly<{
+  emergencyKillAndRevoke(): Promise<void>;
+  confirmDenied(): Promise<void>;
+  fencePendingWork(): Promise<void>;
+  revokeTestEntitlement(): Promise<void>;
+  restorePriorWorker(): Promise<void>;
+  verifyRecovery(): Promise<void>;
+}>;
+
+export async function runNearFamilyPrivateRouteRollback(dependencies: NearFamilyPrivateRouteRollbackDependencies): Promise<void> {
+  await dependencies.emergencyKillAndRevoke();
+  await dependencies.confirmDenied();
+  await dependencies.fencePendingWork();
+  await dependencies.revokeTestEntitlement();
+  await dependencies.restorePriorWorker();
+  await dependencies.verifyRecovery();
+}
+
 export function createNearFamilyAvailability(dependencies: NearFamilyAvailabilityDependencies) {
   return async (request: Request): Promise<NearFamilyAvailability> => {
     if (!dependencies.sourceActivated()) return { available: false };

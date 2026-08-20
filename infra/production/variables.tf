@@ -221,6 +221,72 @@ variable "pad_image_digest" {
     error_message = "An immutable PAD image digest is required."
   }
 }
+variable "readiness_decision_image_digest" {
+  type = string
+  validation {
+    condition     = can(regex("^.+@sha256:[0-9a-f]{64}$", var.readiness_decision_image_digest))
+    error_message = "An immutable readiness-decision image digest is required."
+  }
+}
+variable "readiness_gateway_disposable" {
+  type    = bool
+  default = false
+}
+variable "readiness_gateway_proof_approved" {
+  type    = bool
+  default = false
+}
+variable "readiness_decision_hostname" {
+  type = string
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.readiness_decision_hostname)) && !strcontains(var.readiness_decision_hostname, "example")
+    error_message = "A reviewed readiness decision hostname is required."
+  }
+}
+variable "readiness_controller_image_digest" {
+  type = string
+  validation {
+    condition     = can(regex("^.+@sha256:[0-9a-f]{64}$", var.readiness_controller_image_digest))
+    error_message = "An immutable readiness-controller image digest is required."
+  }
+}
+variable "readiness_decision_secret_name" {
+  type = string
+}
+variable "readiness_decision_secret_version" {
+  type = string
+  validation {
+    condition     = can(regex("^[0-9]+$", var.readiness_decision_secret_version))
+    error_message = "A numeric readiness decision secret version is required."
+  }
+}
+variable "readiness_controller_secret_name" {
+  type = string
+}
+variable "readiness_controller_secret_version" {
+  type = string
+  validation {
+    condition     = can(regex("^[0-9]+$", var.readiness_controller_secret_version))
+    error_message = "A numeric readiness controller secret version is required."
+  }
+}
+variable "readiness_kill_secret_name" {
+  type = string
+}
+variable "readiness_kill_secret_version" {
+  type = string
+  validation {
+    condition     = can(regex("^[0-9]+$", var.readiness_kill_secret_version))
+    error_message = "A numeric readiness emergency kill secret version is required."
+  }
+}
+variable "readiness_kill_service_audience" {
+  type = string
+  validation {
+    condition     = length(var.readiness_kill_service_audience) >= 16 && !strcontains(var.readiness_kill_service_audience, "example")
+    error_message = "A real readiness emergency kill audience is required."
+  }
+}
 variable "provenance_evidence" {
   type = object({
     signed_predicate_uri = string,

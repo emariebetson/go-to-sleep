@@ -2,16 +2,18 @@ import { env } from "cloudflare:workers";
 import { headers } from "next/headers";
 import { requireHouseholdContext } from "@/lib/api-v1-context";
 import { nearFamilySourceActivated } from "@/lib/nearfamily-activation";
+import { createNearFamilyPrivateDecisionClient } from "@/lib/nearfamily-private-decision-client";
 import { createNearFamilyAvailability, createNearFamilyPageAvailability } from "@/lib/nearfamily-route";
-import { createPostgresHouseholdProductAccess, createPostgresPrivateTesterInvitationEvaluator } from "@/lib/product-release-readiness-service";
 
 const availability = createNearFamilyPageAvailability(createNearFamilyAvailability({
-  sourceActivated: nearFamilySourceActivated,
+  sourceActivated: () => nearFamilySourceActivated(env.NEARFAMILY_PRIVATE_ROUTE_ENABLED),
   requireHousehold: async request => (await requireHouseholdContext(request, "entitlement:read")).householdId,
-  authorizeProduct: async householdId => {
-    const pg = (env as unknown as { READINESS_PG?: { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }> } }).READINESS_PG;
-    return Boolean(pg && await createPostgresHouseholdProductAccess(pg, createPostgresPrivateTesterInvitationEvaluator(pg))("nearfamily", householdId));
-  },
+  authorizeProduct: createNearFamilyPrivateDecisionClient({
+    endpoint: env.NEARFAMILY_DECISION_ENDPOINT,
+    signingKey: env.NEARFAMILY_DECISION_SIGNING_KEY,
+    keyVersion: Number(env.NEARFAMILY_DECISION_KEY_VERSION),
+    releaseId: env.NEARFAMILY_DECISION_RELEASE_ID,
+  }).authorize,
 }));
 
 export async function nearFamilyPageAvailability() {

@@ -1,0 +1,64 @@
+project_id = "nearyou-rdy-gwy"
+data_residency = "US"
+deployment_approved = true
+readiness_gateway_disposable = true
+readiness_gateway_proof_approved = true
+scheduler_paused = true
+evidence_collection_approved = false
+
+release_id = "rel_20260819_readiness_gateway_01"
+schema_checksum = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+migration_image_digest = "gcr.io/placeholder/ghc@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+legacy_image_digest = "gcr.io/placeholder/legacy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+pad_image_digest = "gcr.io/placeholder/pad@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+readiness_decision_image_digest = "gcr.io/placeholder/readiness-decision@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+readiness_controller_image_digest = "gcr.io/placeholder/readiness-controller@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+readiness_decision_hostname = "readiness-disposable.invalid"
+readiness_decision_secret_name = "nearyou-readiness-decision-db-url"
+readiness_decision_secret_version = "1"
+readiness_controller_secret_name = "nearyou-readiness-controller-db-url"
+readiness_controller_secret_version = "2"
+readiness_kill_secret_name = "nearyou-readiness-controller-kill-db-url"
+readiness_kill_secret_version = "3"
+readiness_kill_service_audience = "https://run.googleapis.com/projects/nearyou-rdy-gwy/locations/us-central1/services/nearyou-readiness-controller-kill"
+
+secret_bootstrap_evidence = {
+  complete   = true
+  app_version = "1"
+  legacy_version = "1"
+  pad_version = "1"
+  checksum = "sha256:1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+  verified_at = "2026-08-19T00:00:00Z"
+}
+
+migration_evidence = {
+  status       = "succeeded"
+  release_id   = "rel_20260819_readiness_gateway_01"
+  schema_checksum = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  artifact_digest = "sha256:999999999999999999999999999999999999999999999999999999999999999999"
+  completed_at = "2026-08-19T00:10:00Z"
+}
+
+provenance_evidence = {
+  signed_predicate_uri = "gs://example-bucket/provenance/ready.txt"
+  sbom_uri = "gs://example-bucket/sbom/ready.json"
+  builder_identity = "projects/example/locations/us-central1/keyRings/example/cryptoKeys/example"
+  verified_at = "2026-08-19T00:15:00Z"
+}
+
+ci_oidc_issuer = "https://token.actions.githubusercontent.com"
+ci_oidc_audience = "https://github.com/abc392c9-3b74-4317-a499-1b09ad9353d6/appgprj_6a79f8a66eb4819198bb42a2b26addea"
+ci_repository = "abc392c9-3b74-4317-a499-1b09ad9353d6/appgprj_6a79f8a66eb4819198bb42a2b26addea"
+ci_ref = "refs/heads/main"
+ci_environment = "production"
+ci_workflow = "production-evidence.yml"
+
+cloudflare_worker_subject = "service:nearyou-production"
+cloudflare_oidc_issuer = "https://identity.cloudflareaccess.com"
+cloudflare_oidc_audience = "https://api.cloudflareaccess.com/v1/certs"
+cloudflare_account_tag = "0f0e0d0c0b0a09080706050403020100"
+scheduler_audience = "https://scheduler.example"
+billing_account = "000000-111111-222222"
+notification_email = "security@example.com"
+cloudflare_account_id = "0f0e0d0c0b0a09080706050403020100"
+cloudflare_worker_script_name = "nearyoustill-production"
