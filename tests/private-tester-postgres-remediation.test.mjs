@@ -41,7 +41,7 @@ test("0009 repairs the Cloud SQL service-account length limit without rewriting 
 });
 
 test("0010 grants only schema usage required to call migration-owned registration functions",async()=>{
-  const files=await loadPostgresMigrations(),migration=files.at(-1);
+  const files=await loadPostgresMigrations(),migration=files.find(file=>file.id==="0010_migration_schema_usage");
   assert.equal(migration.id,"0010_migration_schema_usage");
   assert.match(migration.sql,/^BEGIN;\s*GRANT USAGE ON SCHEMA nearyou TO nearyou_migration;\s*COMMIT;\s*$/);
   assert.doesNotMatch(migration.sql,/TABLE|FUNCTION|ALL PRIVILEGES|CREATE|ALTER|ROLE/i);
@@ -101,8 +101,8 @@ test("historical PostgreSQL ledger through 0006 upgrades forward through 0008 wi
   assert.match(executedBodies[0], /CREATE POLICY policy_owner_member_select ON nearyou\.household_members FOR SELECT TO nearyou_policy_owner USING \(true\)/);
 
   await applyPostgresMigrations(pg, files, ledgerChecksum(files));
-  assert.equal(executedBodies.length, 4, "a fully ledgered replay must execute no additional migration body");
-  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 through 0010 to the ledger");
+  assert.equal(executedBodies.length, files.slice(6).length, "a fully ledgered replay must execute no additional migration body");
+  assert.deepEqual(ledgerInserts, files.slice(6).map(file=>[file.id,file.checksum]), "the upgrade must append only 0007 through 0012 to the ledger");
 });
 
 test("Cloud SQL policy owners use narrow RLS policy access instead of unavailable BYPASSRLS", async () => {
@@ -138,9 +138,9 @@ test("migration compatibility accepts only exact retired checksums", async () =>
   assert.equal(acceptsMigrationLedger(files, [...files.slice(0, 6), retiredSeventh]), false);
 });
 
-test("production evidence builds the catalog from the complete 0001 through 0010 migration set", async () => {
+test("production evidence builds the catalog from the complete 0001 through 0012 migration set", async () => {
   const workflow = await readFile(new URL("../.github/workflows/production-evidence.yml", import.meta.url), "utf8");
-  assert.match(workflow, /Apply PostgreSQL migrations 0001-0010 in reviewed order/);
+  assert.match(workflow, /Apply PostgreSQL migrations 0001-0012 in reviewed order/);
   assert.match(workflow, /node --import tsx scripts\/apply-catalog-migrations\.ts/);
   assert.doesNotMatch(workflow, /for migration in postgres\/migrations/);
   assert.doesNotMatch(workflow, /Apply PostgreSQL migrations 0001-0006 in reviewed order/);

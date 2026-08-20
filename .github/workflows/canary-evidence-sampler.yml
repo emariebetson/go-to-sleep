@@ -1,29 +1,57 @@
-name: canary-evidence-sampler
+name: private-tester-canary-evidence
+
+# No schedule: an approved operator starts each resumable, durable sample.
 on:
   workflow_dispatch:
+    inputs:
+      phase:
+        description: Record a sample or finalize the completed window
+        required: true
+        type: choice
+        options: [sample, finalize]
+      identity_json:
+        description: Exact release/build/deployment/start identity JSON
+        required: true
+        type: string
+      proof_json:
+        description: Reviewed Task 5 authorization and health proof JSON
+        required: true
+        type: string
+      rollback_proof_json:
+        description: Exact Task 6 rollback proof JSON (required by finalize)
+        required: true
+        type: string
+
 permissions: { contents: read, id-token: write }
+
 jobs:
   sample:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_ID: ${{ vars.RELEASE_ID }}
-      SCHEMA_CHECKSUM: ${{ vars.EVIDENCE_SCHEMA_CHECKSUM }}
     environment: production-evidence
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - id: google-auth
+      - id: evidence-auth
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ vars.CANARY_METRICS_AUDIENCE }}
-      - name: Record one durable PostgreSQL sample
+          token_format: access_token
+          access_token_lifetime: 900s
+      - name: Record one durable generation-zero sample
         env:
-          RELEASE_ID: ${{ vars.RELEASE_ID }}
-          CANARY_METRICS_URL: ${{ vars.CANARY_METRICS_URL }}
-          CANARY_METRICS_TOKEN: ${{ steps.google-auth.outputs.id_token }}
-        run: node --import tsx scripts/canary-evidence-cli.ts sample
+          PRIVATE_TESTER_EVIDENCE_BUCKET: ${{ vars.PRIVATE_TESTER_EVIDENCE_BUCKET }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.evidence-auth.outputs.access_token }}
+          CANARY_IDENTITY_JSON: ${{ inputs.identity_json }}
+          CANARY_PROOF_JSON: ${{ inputs.proof_json }}
+          CANARY_ROLLBACK_PROOF_JSON: ${{ inputs.rollback_proof_json }}
+          KMS_PROJECT: ${{ vars.KMS_PROJECT }}
+          KMS_LOCATION: ${{ vars.KMS_LOCATION }}
+          KMS_KEY_RING: ${{ vars.KMS_KEY_RING }}
+          KMS_KEY: ${{ vars.KMS_KEY }}
+          EVIDENCE_PRINCIPAL: ${{ vars.EVIDENCE_PRINCIPAL }}
+          EVIDENCE_KEY_ID: ${{ vars.EVIDENCE_KEY_ID }}
+          EVIDENCE_KEY_VERSION: ${{ vars.EVIDENCE_KEY_VERSION }}
+        run: node --import tsx scripts/canary-evidence-cli.ts ${{ inputs.phase }}

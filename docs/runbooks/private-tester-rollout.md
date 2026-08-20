@@ -39,3 +39,32 @@ Keep the resulting artifact private. It contains identifiers and hashes but no s
 ## After capture
 
 Source completion and even a valid baseline do not invite a tester or activate a product. Continue only through separately approved runtime proof, migration, backup/recovery, rehearsal, security/IP review, invitation, revocation, rollback, and go/no-go tasks. Any unknown or failed observation is no-go, and the literal dark gates remain unchanged.
+
+## Immutable evidence publication
+
+The one-shot runner publishes the signed deployment manifest, review-required
+baseline, provider-log receipt, promoted baseline, and a compact immutable
+index. Its operation ID and UTC start timestamp are supplied once in the
+reviewed build request; retries must reuse both values exactly. Do not create a
+new ID to bypass a conflict.
+
+The runner writes each object with Cloud Storage `ifGenerationMatch=0`. If a
+write response is lost or another runner already wrote the object, it reads the
+stored raw bytes and accepts the result only when its SHA-256 equals the local
+raw bytes. A different byte stream is a stop condition, including for the
+index. Partial sets may be resumed only with the same operation ID, start time,
+and source receipt bytes.
+
+Run it only inside the reviewed Cloud Build execution that starts the pinned
+Cloud SQL Auth Proxy image with `infra/production/cloud-sql-auth-proxy.args`.
+The build uses metadata/workload identity, `--auto-iam-authn`, the exact
+`nearyou-pt-baseline@nearnight.iam` verifier user, and a loopback URL with no
+password. Static database passwords, a mutable proxy image tag, missing KMS
+trust, stale observations, or disagreement on release, deployment, build ID,
+D1 digests, PostgreSQL catalog, or literal-dark gates are no-go.
+
+`infra/production/private-tester-evidence.disposable.cloudbuild.yaml` is an
+explicit disposable, non-production exercise path. It requires a digest-pinned
+proxy image, metadata identity, synthetic staged inputs, and the same exact
+IAM verifier URL; it executes the runner but must never be pointed at the
+production project, bucket, or receipts.

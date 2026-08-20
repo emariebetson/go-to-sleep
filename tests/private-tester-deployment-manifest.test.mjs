@@ -33,6 +33,14 @@ const observed = () => ({
     { binding: "DB", kind: "d1", resource: `accounts/${accountId}/d1/database/22222222-2222-4222-8222-222222222222` },
   ],
 });
+const observedV3 = () => ({
+  ...observed(),
+  schemaVersion: 3,
+  resources: [
+    { provider: "sites-managed", binding: "AUDIO", kind: "r2", physicalId: "unknown-managed", archiveSha256: "a".repeat(64), deploymentId: "appgdep_12345678", buildId: "12345678-1234-4123-8123-123456789abc" },
+    { provider: "sites-managed", binding: "DB", kind: "d1", physicalId: "unknown-managed", buildId: "12345678-1234-4123-8123-123456789abc", schemaDigest: "b".repeat(64), schemaObjectCount: 1140, migrationDigest: "c".repeat(64), migrationCount: 27 },
+  ],
+});
 const nonce = "abcdefghijklmnopqrstuv";
 const claims = () => composePrivateTesterDeploymentManifest(observed(), () => now, () => nonce);
 const hex = (value) => Buffer.from(value).toString("hex");
@@ -51,7 +59,7 @@ const crc32c = (bytes) => { let crc = 0xffffffff; for (const byte of bytes) { cr
 
 test("v2 signs exact Sites-managed logical resources without fabricating physical IDs",()=>{const value={...claims(),schemaVersion:2,resources:[{provider:"sites-managed",binding:"AUDIO",kind:"r2",physicalId:"unknown-managed"},{provider:"sites-managed",binding:"DB",kind:"d1",physicalId:"unknown-managed",tableHash:"c".repeat(64)}]};const parsed=parsePrivateTesterDeploymentManifest(value,now);assert.deepEqual(parsed.resources,value.resources);assert.match(canonicalPrivateTesterDeploymentClaims(parsed),/unknown-managed/);for(const invalid of[{...value,resources:[{...value.resources[0],physicalId:"bucket-guess"},value.resources[1]]},{...value,resources:[value.resources[0],{...value.resources[1],tableHash:"bad"}]},{...value,resources:[{...value.resources[0],extra:true},value.resources[1]]}])assert.throws(()=>parsePrivateTesterDeploymentManifest(invalid,now),/deployment manifest invalid/)});
 
-test("v3 binds logical Sites resources to the archive, deployment, runtime build, and paginated D1 completions",()=>{const buildId="12345678-1234-4123-8123-123456789abc",value={...claims(),schemaVersion:3,resources:[{provider:"sites-managed",binding:"AUDIO",kind:"r2",physicalId:"unknown-managed",archiveSha256:"a".repeat(64),deploymentId:"appgdep_12345678",buildId},{provider:"sites-managed",binding:"DB",kind:"d1",physicalId:"unknown-managed",buildId,schemaDigest:"b".repeat(64),schemaObjectCount:1140,migrationDigest:"c".repeat(64),migrationCount:27}]};const parsed=parsePrivateTesterDeploymentManifest(value,now);assert.deepEqual(parsed.resources,value.resources);for(const mutate of[r=>r.resources[0].archiveSha256="bad",r=>r.resources[1].schemaObjectCount=0,r=>r.resources[1].buildId="87654321-4321-4321-8321-cba987654321",r=>r.resources[1].extra=true]){const changed=structuredClone(value);mutate(changed);assert.throws(()=>parsePrivateTesterDeploymentManifest(changed,now),/deployment manifest invalid/)}});
+test("v3 binds logical Sites resources to the archive, deployment, runtime build, and paginated D1 completions",()=>{const buildId="12345678-1234-4123-8123-123456789abc",value={...claims(),schemaVersion:3,resources:[{provider:"sites-managed",binding:"AUDIO",kind:"r2",physicalId:"unknown-managed",archiveSha256:"a".repeat(64),deploymentId:"appgdep_12345678",buildId},{provider:"sites-managed",binding:"DB",kind:"d1",physicalId:"unknown-managed",buildId,schemaDigest:"b".repeat(64),schemaObjectCount:1140,migrationDigest:"c".repeat(64),migrationCount:27}]};const parsed=parsePrivateTesterDeploymentManifest(value,now);assert.deepEqual(parsed.resources,value.resources);for(const mutate of[r=>r.resources[0].archiveSha256="bad",r=>r.resources[0].physicalId="fabricated-bucket",r=>r.resources[1].physicalId="22222222-2222-4222-8222-222222222222",r=>r.resources[1].schemaObjectCount=0,r=>r.resources[1].buildId="87654321-4321-4321-8321-cba987654321",r=>r.resources[1].extra=true]){const changed=structuredClone(value);mutate(changed);assert.throws(()=>parsePrivateTesterDeploymentManifest(changed,now),/deployment manifest invalid/)}});
 
 test("composes exact deployment facts and verifies an RSA-3072 KMS-compatible envelope", async () => {
   const fixtureValue = await fixture();
@@ -93,7 +101,7 @@ test("uses the existing exact-version KMS signer with digest and signature CRC c
 
 test("production composer accepts only a canonical bounded operation file and locally verifies KMS output", async () => {
   const fixtureValue = await fixture(), directory = await mkdtemp(join(tmpdir(), "private-tester-compose-")), input = join(directory, "operation.json"), output = join(directory, "manifest.json");
-  const operation = observed(), canonicalOperation = canonicalPrivateTesterReleaseOperation(operation), expectedClaims = claims(), signedClaims = privateTesterDeploymentManifestSignedBytes(expectedClaims);
+  const operation = observedV3(), canonicalOperation = canonicalPrivateTesterReleaseOperation(operation), expectedClaims = composePrivateTesterDeploymentManifest(operation, () => now, () => nonce), signedClaims = privateTesterDeploymentManifestSignedBytes(expectedClaims);
   const versionedKeyName = "projects/near-prod/locations/us-central1/keyRings/release/cryptoKeys/evidence/cryptoKeyVersions/7", keyName = versionedKeyName.replace(/\/cryptoKeyVersions\/7$/, "");
   const encoded = Buffer.from(await crypto.subtle.exportKey("spki", fixtureValue.pair.publicKey)).toString("base64"), pem = `-----BEGIN PUBLIC KEY-----\n${encoded.match(/.{1,64}/g).join("\n")}\n-----END PUBLIC KEY-----\n`;
   const response = (value) => { const body = JSON.stringify(value); return new Response(body, { status: 200, headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) } }); };
@@ -128,6 +136,17 @@ test("production composer accepts only a canonical bounded operation file and lo
     await writeFile(oversized, "x".repeat(16 * 1024 + 1), { flag: "wx" });
     await assert.rejects(() => composePrivateTesterDeploymentManifestFile(oversized, join(directory, "oversized-output.json"), environment, { fetch, now: () => now, nonce: () => nonce }), /input invalid/);
     await assert.rejects(() => composePrivateTesterDeploymentManifestFile(directory, join(directory, "directory-output.json"), environment, { fetch, now: () => now, nonce: () => nonce }), /input invalid/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("production composer rejects historical resource schemas before signing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "private-tester-compose-historical-"));
+  const input = join(directory, "operation.json"), output = join(directory, "manifest.json");
+  try {
+    await writeFile(input, canonicalPrivateTesterReleaseOperation(observed()), { flag: "wx" });
+    await assert.rejects(() => composePrivateTesterDeploymentManifestFile(input, output), /schema v3 required/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

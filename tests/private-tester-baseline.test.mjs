@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { createPrivateTesterBaselineRuntime } from "../lib/private-tester-baseline-gateway.ts";
+import { completeEvidence, readEvidencePage } from "../lib/private-tester-sites-evidence.ts";
 import { privateTesterDeploymentManifestSignedBytes } from "../lib/private-tester-deployment-manifest.ts";
 import { capturePrivateTesterBaseline, createAuthenticatedProductionReaders } from "../scripts/capture-private-tester-baseline.ts";
 import { verifyPrivateTesterD1SourceBaseline } from "../scripts/private-tester-d1-source.ts";
@@ -18,7 +21,11 @@ const signerKeyId = "private-tester-deployment";
 const projectId = `appgprj_${"a".repeat(32)}`;
 const googleClientId = "619793096923-2hspnuckl0j99p3jrfb6qd21aatb0pep.apps.googleusercontent.com";
 const workerRuntime = Object.freeze({ id: "11111111-1111-4111-8111-111111111111", commitSha: "a".repeat(40), deployedAt: "2026-08-14T17:59:00.000Z" });
-const workerDeployment = Object.freeze({ scriptName: "site---6a79f8a66eb4819198bb42a2b26addea", deploymentId: "11111111-1111-4111-8111-111111111111", versionId: "22222222-2222-4222-8222-222222222222", percentage: 100 });
+const execFile = promisify(execFileCallback);
+async function archiveFor(buildId) { const root = await mkdtemp(join(tmpdir(), "private-tester-archive-")), archive = join(root, "site.tar.gz"); try { await mkdir(join(root, "dist/server"), { recursive: true }); await writeFile(join(root, "dist/server/BUILD_ID"), buildId); await writeFile(join(root, "dist/server/index.js"), `const runtime={buildId:${JSON.stringify(buildId)},deploymentVersion:${JSON.stringify(buildId)}};`); await execFile("tar", ["-czf", archive, "-C", root, "dist"]); return await readFile(archive); } finally { await rm(root, { recursive: true, force: true }); } }
+const archiveBytes = await archiveFor(workerRuntime.id);
+const archiveSha256 = createHash("sha256").update(archiveBytes).digest("hex");
+const workerDeployment = Object.freeze({ scriptName: `site---${projectId.slice(8)}`, deploymentId: "11111111-1111-4111-8111-111111111111", versionId: "22222222-2222-4222-8222-222222222222", percentage: 100 });
 const release = () => ({ releaseId: "rel_20260814_private_01", commitSha: "a".repeat(40), sitesVersion: `${projectId}~appgver_example`, startsAt: "2026-08-14T18:00:00.000Z", expiresAt: "2026-08-21T18:00:00.000Z", products: ["nearfamily", "nearstory"] });
 const ledger = Object.freeze([{ id: "0015_platform_release_foundation", checksum: "b".repeat(64) }, { id: "0016_existing_head", checksum: "c".repeat(64) }]);
 const reviewedSourceHash = createHash("sha256").update(JSON.stringify([{ name: "0000_nearnight_foundation.sql", checksum: "a".repeat(64) }, ...ledger.map(({ id, checksum }) => ({ name: `${id}.sql`, checksum }))])).digest("hex");
@@ -43,8 +50,13 @@ const sourceSchemaObjects = schemaObjects.filter(({ type, name, tableName }) => 
 const schemaDefinitionHash = createHash("sha256").update(JSON.stringify(sourceSchemaObjects.map(({ rootPage, ...object }) => { void rootPage; return object; }))).digest("hex");
 const managedTables = Object.freeze(["accounts", "d1_migrations"]);
 const managedTableHash = createHash("sha256").update(JSON.stringify(managedTables)).digest("hex");
-const buildReceipt = () => ({ version: 1, projectId, versionId: release().sitesVersion, deploymentId: "appgdep_12345678", commitSha: release().commitSha, archiveSha256: "c".repeat(64), runtimeSha256: "d".repeat(64), buildId: workerRuntime.id, providerScriptName: `site---${projectId.slice(8)}`, providerScriptVersion: workerDeployment.versionId, observedAt: now });
-const sitesEvidence = () => ({ buildReceipt: buildReceipt(), schemaCompletion: { version: 1, kind: "d1-schema", buildId: workerRuntime.id, count: 10, pageCount: 1, orderedDigest: "e".repeat(64) }, ledgerCompletion: { version: 1, kind: "d1-ledger", buildId: workerRuntime.id, count: 17, pageCount: 1, orderedDigest: "f".repeat(64) } });
+const evidenceRows = (kind, count) => Array.from({ length: count }, (_, index) => ({ identity: `${kind}\u0000${String(index).padStart(3, "0")}`, sha256: createHash("sha256").update(`${kind}:${index}`).digest("hex") }));
+const schemaRowsForEvidence = evidenceRows("schema", 10);
+const ledgerRowsForEvidence = evidenceRows("ledger", 17);
+const schemaEvidencePage = await readEvidencePage({ kind: "d1-schema", buildId: workerRuntime.id, cursor: null, readAfter: async () => schemaRowsForEvidence });
+const ledgerEvidencePage = await readEvidencePage({ kind: "d1-ledger", buildId: workerRuntime.id, cursor: null, readAfter: async () => ledgerRowsForEvidence });
+const schemaCompletion = completeEvidence("d1-schema", [schemaEvidencePage]);
+const ledgerCompletion = completeEvidence("d1-ledger", [ledgerEvidencePage]);
 const deploymentOperation = () => ({
   schemaVersion: 3,
   principal: signerPrincipal,
@@ -55,26 +67,29 @@ const deploymentOperation = () => ({
   live: { version: `${projectId}~appgver_example`, commitSha: "a".repeat(40) },
   rollback: { version: `${projectId}~appgver_rollback`, commitSha: "f".repeat(40) },
   resources: [
-    { provider: "sites-managed", binding: "AUDIO", kind: "r2", physicalId: "unknown-managed", archiveSha256: "c".repeat(64), deploymentId: "appgdep_12345678", buildId: workerRuntime.id },
-    { provider: "sites-managed", binding: "DB", kind: "d1", physicalId: "unknown-managed", buildId: workerRuntime.id, schemaDigest: "e".repeat(64), schemaObjectCount: 10, migrationDigest: "f".repeat(64), migrationCount: 17 },
+    { provider: "sites-managed", binding: "AUDIO", kind: "r2", physicalId: "unknown-managed", archiveSha256, deploymentId: "appgdep_12345678", buildId: workerRuntime.id },
+    { provider: "sites-managed", binding: "DB", kind: "d1", physicalId: "unknown-managed", buildId: workerRuntime.id, schemaDigest: schemaCompletion.orderedDigest, schemaObjectCount: 10, migrationDigest: ledgerCompletion.orderedDigest, migrationCount: 17 },
   ],
 });
 const sitesResourceReceipt = () => {
   const hostingMetadata = { project_id: projectId, d1: "DB", r2: "AUDIO" };
-  return { schema_version: 2, provider: "openai-sites-control-plane", captured_at: now, version: { id: release().sitesVersion, project_id: projectId, version_number: 7, source: { commit_sha: release().commitSha }, archive_storage: { archive_format: "tar", sediment_file_id: "sediment_12345678", content_hash: `sha256:${"c".repeat(64)}`, size_bytes: 1234, file_count: 42 } }, deployment: { id: "appgdep_12345678", project_id: projectId, version_id: release().sitesVersion, type: "publish", status: "succeeded", url: "https://nearnight.ebetson.chatgpt.site", provider_deployment_id: "provider_12345678", env_set_revision: 3, updated_at: workerRuntime.deployedAt }, hosting_metadata: hostingMetadata, hosting_metadata_sha256: createHash("sha256").update(JSON.stringify(hostingMetadata)).digest("hex") };
+  return { schema_version: 2, provider: "openai-sites-control-plane", captured_at: now, version: { id: release().sitesVersion, project_id: projectId, version_number: 7, source: { commit_sha: release().commitSha }, archive_storage: { archive_format: "tar", sediment_file_id: "sediment_12345678", content_hash: `sha256:${archiveSha256}`, size_bytes: 1234, file_count: 42 } }, deployment: { id: "appgdep_12345678", project_id: projectId, version_id: release().sitesVersion, type: "publish", status: "succeeded", url: "https://nearnight.ebetson.chatgpt.site", provider_deployment_id: "provider_12345678", env_set_revision: 3, updated_at: workerRuntime.deployedAt }, hosting_metadata: hostingMetadata, hosting_metadata_sha256: createHash("sha256").update(JSON.stringify(hostingMetadata)).digest("hex") };
 };
 const observed = (body, overrides = {}) => ({ provider: "test-reader", observedAt: now, identity, body, ...overrides });
 const runtimeObserved = (body, overrides = {}) => {const key=Object.hasOwn(body,"appliedMigrations")?"1111111111111111-ORD":Object.hasOwn(body,"schema")?"2222222222222222-ORD":Object.hasOwn(body,"nearfamily")?"3333333333333333-ORD":"4444444444444444-ORD";return observed(body,{provider:"sites-runtime",rayId:key,...overrides})};
 const postgresObserved = (body, overrides = {}) => observed(body, { provider: "cloud-sql", identity: postgresIdentity, ...overrides });
-const readers = (overrides = {}) => ({
-  d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }) },
+const readers = (overrides = {}) => {
+  const base = {
+  d1: { readLedger: async () => runtimeObserved({ appliedMigrations }), readSchema: async () => runtimeObserved({ schema: "sqlite_schema", objects: schemaObjects }), readLedgerPage: async (cursor) => { if (cursor !== null) throw new Error("unexpected cursor"); return ledgerEvidencePage; }, readSchemaPage: async (cursor) => { if (cursor !== null) throw new Error("unexpected cursor"); return schemaEvidencePage; } },
+  runtime: (() => { let calls = 0; const html = `{\\"deploymentVersion\\":\\"${workerRuntime.id}\\"}`; return { readHtml: async () => runtimeObserved({ html }, { rayId: calls++ === 0 ? "5555555555555555-ORD" : "6666666666666666-ORD" }) }; })(),
   postgres: { readMigrations: async () => postgresObserved({ ledger }), readCatalog: async () => postgresObserved({ schema: "nearyou", relations: [{ name: "household_members", kind: "table", checksum: "f".repeat(64) }] }) },
   dns: { readIdentifiers: async () => observed({ records: [{ name: "nearyoustill.com", recordId: "dns-record-01", type: "A" }] },{provider:"google"}) },
   oauth: { readIdentifiers: async () => runtimeObserved({ issuer: "https://accounts.google.com", audience: googleClientId, clientId: googleClientId, providerAcceptedRedirectUri: "https://nearyoustill.com/api/auth/callback/google", proof: "interaction_required" }) },
   secretManager: { listVersions: async () => observed({ versions: ["nearyou-prod-app","nearyou-prod-legacy","nearyou-prod-pad","nearyou-prod-migration-admin"].map(secret=>`projects/nearnight/secrets/${secret}/versions/1`) },{provider:"google"}) },
   gates: { read: async () => runtimeObserved({ nearfamily: false, nearstory: false, scheduler: false }) },
-  ...overrides,
-});
+  };
+  return { ...base, ...overrides, d1: { ...base.d1, ...(overrides.d1 ?? {}) }, runtime: { ...base.runtime, ...(overrides.runtime ?? {}) } };
+};
 const deploymentPair = await crypto.subtle.generateKey({ name: "RSA-PSS", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
 const deploymentFingerprint = Buffer.from(await crypto.subtle.digest("SHA-256", await crypto.subtle.exportKey("spki", deploymentPair.publicKey))).toString("hex");
 let deploymentNonce = 0;
@@ -96,8 +111,8 @@ async function input(overrides = {}) {
   const expectedSitesDeploymentReceiptHash = createHash("sha256").update(JSON.stringify(sitesDeploymentReceipt)).digest("hex");
   const sitesResourceReceiptRaw = `${JSON.stringify(sitesResourceReceipt())}\n`;
   const expectedSitesResourceReceiptHash = createHash("sha256").update(sitesResourceReceiptRaw).digest("hex");
-  const sitesEvidenceRaw = JSON.stringify(sitesEvidence());
-  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, sitesResourceReceiptRaw, expectedSitesResourceReceiptHash, sitesEvidence: sitesEvidence(), expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
+  const sitesProviderLogRaw = JSON.stringify({ version: 1, provider: "sites-worker-logs", scriptName: workerDeployment.scriptName, scriptVersionId: workerDeployment.versionId, observedAt: now, rays: ["1111111111111111-ORD", "2222222222222222-ORD", "3333333333333333-ORD", "4444444444444444-ORD", "5555555555555555-ORD", "6666666666666666-ORD"] });
+  return { release: release(), deploymentManifest: signed.envelope, deploymentVerification: signed.verification, sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash, sitesResourceReceiptRaw, expectedSitesResourceReceiptHash, sitesArchiveBytes: archiveBytes, sitesProviderLogRaw, expectedSitesProviderLogSha256: createHash("sha256").update(sitesProviderLogRaw).digest("hex"), expectedD1Ledger: ledger, expectedD1SourceHash: reviewedSourceHash, expectedD1SchemaDefinitionHash: schemaDefinitionHash, expectedD1SchemaObjectCount: sourceSchemaObjects.length, outputPath: join(dir, "baseline.json"), now: () => now, readers: readers(), ...rest };
 }
 function productionEnvironment() {
   const instance = "nearnight:us-central1:nearyou-production";
@@ -155,6 +170,44 @@ test("a valid signed one-time deployment manifest unblocks exact live baseline c
   assert.equal(baseline.observations.sitesResourceReceipt.identity, `project:${projectId}`);
 });
 
+test("derives the build receipt from exact archive bytes and bracketed runtime evidence", async () => {
+  const options = await input();
+  const runtimeHtml = `{\\"deploymentVersion\\":\\"${workerRuntime.id}\\"}`;
+  options.sitesArchiveBytes = archiveBytes;
+  let runtimeReads = 0;
+  options.readers = readers({
+    runtime: {
+      readHtml: async () => runtimeObserved({ html: runtimeHtml }, { rayId: runtimeReads++ === 0 ? "5555555555555555-ORD" : "6666666666666666-ORD" }),
+    },
+  });
+  const baseline = await capturePrivateTesterBaseline(options);
+  assert.equal(baseline.sites.buildReceipt.buildId, workerRuntime.id);
+  assert.equal(baseline.sites.buildReceipt.archiveSha256, createHash("sha256").update(options.sitesArchiveBytes).digest("hex"));
+});
+
+test("rejects arbitrary bytes in place of a Sites archive", async () => {
+  const options = await input();
+  options.sitesArchiveBytes = Buffer.from("not a tar archive");
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+});
+
+test("rejects an archive BUILD_ID that differs from Task 1 runtime evidence", async () => {
+  const options = await input();
+  options.sitesArchiveBytes = await archiveFor("33333333-3333-4333-8333-333333333333");
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /baseline invalid/);
+});
+
+test("rejects a deployment swap during the capture bracket", async () => {
+  const options = await input();
+  let runtimeReads = 0;
+  options.readers = readers({
+    runtime: {
+      readHtml: async () => runtimeObserved({ html: `{"deploymentVersion":"${runtimeReads++ === 0 ? workerRuntime.id : "33333333-3333-4333-8333-333333333333"}"}` }, { rayId: runtimeReads === 1 ? "5555555555555555-ORD" : "6666666666666666-ORD" }),
+    },
+  });
+  await assert.rejects(() => capturePrivateTesterBaseline(options), /runtime build changed/);
+});
+
 test("requires an independently hashed exact Sites deployment receipt", async () => {
   const substituted = await input();
   substituted.sitesDeploymentReceipt = { ...substituted.sitesDeploymentReceipt, deploymentId: "appgdep_substituted" };
@@ -199,6 +252,11 @@ test("production CLI requires separate exact Sites deployment and logical-resour
   assert.match(source, /sitesDeploymentReceipt, expectedSitesDeploymentReceiptHash/);
   assert.match(source, /SITES_RESOURCE_RECEIPT_SHA256/);
   assert.match(source, /sitesResourceReceiptRaw\s*,\s*expectedSitesResourceReceiptHash/);
+  assert.match(source, /SITES_PROVIDER_LOG_SHA256/);
+  assert.match(source, /sitesArchiveBytes\s*,\s*sitesProviderLogRaw\s*,\s*expectedSitesProviderLogSha256/);
+  assert.match(source, /readSchemaPage/);
+  assert.match(source, /readLedgerPage/);
+  assert.doesNotMatch(source, /sitesEvidence/);
   assert.doesNotMatch(source, /cloudflare-workers-version-key/);
 });
 

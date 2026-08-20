@@ -78,7 +78,7 @@ async function mutate(db: D1, publicInput: PublicInput, principal: string, now: 
 async function loadVerifiedInvite(pg: Pg, householdId: string, releaseId: string, now: number) {
   if (!ID.test(householdId) || !RELEASE.test(releaseId) || !safeTime(now)) throw new Error("canary verification invalid");
   const householdHash = await sha256(householdId);
-  const row = (await pg.query<{ expires_at: string | number | Date }>("SELECT expires_at FROM nearyou.product_canary_invites WHERE product='nearfamily' AND release_id=$1 AND household_hash=$2 AND expires_at>statement_timestamp()", [releaseId, householdHash])).rows[0];
+  const row = (await pg.query<{ expires_at: string | number | Date }>("SELECT expires_at FROM nearyou.product_canary_invites WHERE product='nearfamily' AND release_id=$1 AND household_hash=$2 AND expires_at>to_timestamp($3::double precision/1000)", [releaseId, householdHash, now])).rows[0];
   const expiresAt = row?.expires_at instanceof Date ? row.expires_at.getTime() : typeof row?.expires_at === "string" ? Date.parse(row.expires_at) : Number(row?.expires_at);
   if (!safeTime(expiresAt) || expiresAt <= now) throw new Error("canary verification unavailable");
   return { householdHash, expiresAt };

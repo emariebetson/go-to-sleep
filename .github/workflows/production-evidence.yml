@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
-      - name: Apply PostgreSQL migrations 0001-0010 in reviewed order
+      - name: Apply PostgreSQL migrations 0001-0012 in reviewed order
         env:
           READINESS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres"
           NEARYOU_CATALOG_DATABASE_DISPOSABLE: "true"
@@ -42,8 +42,36 @@ jobs:
           name: rls-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: postgres/rls-evidence.json
           if-no-files-found: error
+  nearfamily-decision-proof:
+    runs-on: ubuntu-latest
+    environment: production-evidence
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: nearyou }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Prove fixed NearFamily decision authority on disposable PostgreSQL 16
+        env:
+          NEARYOU_TEST_POSTGRES16_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/nearyou"
+          NEARYOU_TEST_POSTGRES16_DISPOSABLE: "true"
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node --import tsx scripts/verify-nearfamily-private-decision-proof.ts | tee evidence/nearfamily-private-decision-proof.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: nearfamily-private-decision-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/nearfamily-private-decision-proof.log
+          if-no-files-found: warn
   operational-evidence:
-    needs: postgres-contract
+    needs: [postgres-contract, nearfamily-decision-proof]
     runs-on: ubuntu-latest
     env:
       RELEASE_ID: ${{ vars.RELEASE_ID }}
@@ -112,22 +140,25 @@ jobs:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.media-auth.outputs.access_token }}
           RELEASE_ID: ${{ vars.RELEASE_ID }}
         run: node --import tsx scripts/media-evidence-cli.ts evidence/media.json
-      - name: Mint fresh reconciliation identity
-        id: reconciliation-auth
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ vars.OUTCOME_RECONCILIATION_AUDIENCE }}
-      - name: finalize durable 24h canary operational-evidence
+      - name: Cryptographically verify the durable private-tester canary receipt
         env:
-          READINESS_CONTROL_DATABASE_URL: ${{ secrets.READINESS_CONTROL_DATABASE_URL }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.media-auth.outputs.access_token }}
+          PRIVATE_TESTER_EVIDENCE_BUCKET: ${{ vars.PRIVATE_TESTER_EVIDENCE_BUCKET }}
+          CANARY_IDENTITY_JSON: ${{ vars.PRIVATE_TESTER_CANARY_IDENTITY_JSON }}
+          PRIVATE_TESTER_CANARY_BUILD_ID: ${{ vars.PRIVATE_TESTER_CANARY_BUILD_ID }}
+          PRIVATE_TESTER_CANARY_DEPLOYMENT_ID: ${{ vars.PRIVATE_TESTER_CANARY_DEPLOYMENT_ID }}
           RELEASE_ID: ${{ vars.RELEASE_ID }}
-          OUTCOME_RECONCILIATION_URL: ${{ vars.OUTCOME_RECONCILIATION_URL }}
-          OUTCOME_RECONCILIATION_AUDIENCE: ${{ vars.OUTCOME_RECONCILIATION_AUDIENCE }}
-          CANARY_METRICS_TOKEN: ${{ steps.reconciliation-auth.outputs.id_token }}
-        run: node --import tsx scripts/canary-evidence-cli.ts finalize > evidence/canary.json
+          CANARY_ROLLBACK_PROOF_JSON: ${{ secrets.PRIVATE_TESTER_CANARY_ROLLBACK_PROOF_JSON }}
+          KMS_PROJECT: ${{ vars.KMS_PROJECT }}
+          KMS_LOCATION: ${{ vars.KMS_LOCATION }}
+          KMS_KEY_RING: ${{ vars.KMS_KEY_RING }}
+          KMS_KEY: ${{ vars.KMS_KEY }}
+          EVIDENCE_PRINCIPAL: ${{ vars.EVIDENCE_PRINCIPAL }}
+          EVIDENCE_KEY_ID: ${{ vars.EVIDENCE_KEY_ID }}
+          EVIDENCE_KEY_VERSION: ${{ vars.EVIDENCE_KEY_VERSION }}
+        run: |
+          set -euo pipefail
+          node --import tsx scripts/canary-evidence-cli.ts verify > evidence/canary.json
       - name: Compose exact release claims from operational artifacts
         env:
           RELEASE_ID: ${{ vars.RELEASE_ID }}
@@ -163,3 +194,48 @@ jobs:
           path: evidence/release-evidence.immutable.json
           if-no-files-found: error
           retention-days: 90
+  private-tester-evidence:
+    needs: operational-evidence
+    runs-on: ubuntu-latest
+    environment: production-evidence
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - id: private-tester-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 900s
+      - name: Require a reviewed immutable evidence build request
+        env:
+          CLOUD_SQL_AUTH_PROXY_IMAGE: ${{ vars.CLOUD_SQL_AUTH_PROXY_IMAGE }}
+          CLOUD_SQL_INSTANCE_CONNECTION_NAME: ${{ vars.CLOUD_SQL_INSTANCE_CONNECTION_NAME }}
+          NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER: ${{ vars.NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER }}
+          PRIVATE_TESTER_EVIDENCE_BUCKET: ${{ vars.PRIVATE_TESTER_EVIDENCE_BUCKET }}
+          PRIVATE_TESTER_EVIDENCE_OPERATION_ID: ${{ vars.PRIVATE_TESTER_EVIDENCE_OPERATION_ID }}
+          PRIVATE_TESTER_EVIDENCE_STARTED_AT: ${{ vars.PRIVATE_TESTER_EVIDENCE_STARTED_AT }}
+          PRIVATE_TESTER_BASELINE_DATABASE_URL: ${{ secrets.PRIVATE_TESTER_BASELINE_DATABASE_URL }}
+          EVIDENCE_TRUST_JSON: ${{ secrets.EVIDENCE_TRUST_JSON }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.private-tester-auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          test -n "$GOOGLE_OAUTH_ACCESS_TOKEN"
+          test -n "$EVIDENCE_TRUST_JSON"
+          test -n "$PRIVATE_TESTER_EVIDENCE_BUCKET"
+          test -n "$PRIVATE_TESTER_EVIDENCE_OPERATION_ID"
+          test "$PRIVATE_TESTER_EVIDENCE_STARTED_AT" -gt 0
+          test "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" = "nearnight:us-central1:nearyou-production"
+          test "$NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER" = "nearyou-pt-baseline@nearnight.iam"
+          printf '%s' "$CLOUD_SQL_AUTH_PROXY_IMAGE" | grep -Eq '^gcr\.io/cloud-sql-connectors/cloud-sql-proxy@sha256:[a-f0-9]{64}$'
+          test "$PRIVATE_TESTER_BASELINE_DATABASE_URL" = 'postgresql://nearyou-pt-baseline%40nearnight.iam@127.0.0.1:5432/nearyou?sslmode=disable'
+          test -z "${PRIVATE_TESTER_BASELINE_DATABASE_PASSWORD:-}"
+          test -f infra/production/cloud-sql-auth-proxy.args
+          grep -qx -- '--auto-iam-authn' infra/production/cloud-sql-auth-proxy.args
+          printf '%s\n' 'Private tester evidence must run in the separately reviewed Cloud Build invocation.'

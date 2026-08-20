@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { canonicalEvidence, verifyReleaseEvidence, type Claims, type Trust } from "../lib/asymmetric-release-evidence";
 import { CloudKmsPublicKeyClient, PostgresNonceStore } from "../lib/release-evidence-adapters";
 import { featureFlagsFromEnv, nearStoryParentBetaFlagsEnabled } from "../lib/nearyou-foundation";
+import { createPostgresPrivateTesterInvitationEvaluator } from "../lib/product-release-readiness-service";
 import { assessPrivateCanaryObservations } from "./private-canary-smoke";
 import { verifyPrivateCanaryRuntimeSource } from "./verify-private-canary-runtime";
 
@@ -38,7 +39,8 @@ async function main(){
   if(!response.ok||response.headers.get("content-type")?.split(";")[0]!=="application/json")throw new Error("D1 canary observation unavailable");
   const observed=await response.json()as{observedAt:number;d1:never;story:{activationStatus:string;migrationVersion:string;heartbeatAt:number}},rollout=unwrapPrivateCanaryJsonb(facts as unknown as Json,"rollout"),provider=unwrapPrivateCanaryJsonb(facts as unknown as Json,"provider");
   if(Number(rollout.observedAt)!==observedAt||Number(provider.observedAt)!==observedAt||!Number.isSafeInteger(observed.observedAt)||observed.observedAt>observedAt||observedAt-observed.observedAt>30000)throw new Error("private canary observation clock mismatch");
-  const result=await assessPrivateCanaryObservations({mode:"post-issue",releaseId,invitedHouseholdHash,deniedHouseholdHash,maxHeartbeatAgeMs:300000},{now:async()=>observedAt,sourceGates:async()=>({family:source.productActivation,canaryRoute:source.internalRouteActivation,story:false}),d1:async()=>observed.d1,pg:async()=>rollout as never,story:async()=>({...observed.story,providerPrerequisites:provider.providerPrerequisites===true}),rollback:async()=>({...rollback,artifact:rollbackArtifactDigest})});
+  const task5Authorization=createPostgresPrivateTesterInvitationEvaluator(pool),[nearStoryInvited,nearStoryDenied,nearFamilyInvited,nearFamilyDenied]=await Promise.all([task5Authorization.authorize({product:"nearstory",householdHash:invitedHouseholdHash}),task5Authorization.authorize({product:"nearstory",householdHash:deniedHouseholdHash}),task5Authorization.authorize({product:"nearfamily",householdHash:invitedHouseholdHash}),task5Authorization.authorize({product:"nearfamily",householdHash:deniedHouseholdHash})]);
+  const result=await assessPrivateCanaryObservations({mode:"post-issue",releaseId,invitedHouseholdHash,deniedHouseholdHash,maxHeartbeatAgeMs:300000},{now:async()=>observedAt,sourceGates:async()=>({family:source.productActivation,canaryRoute:source.internalRouteActivation,story:false}),d1:async()=>observed.d1,pg:async()=>({...rollout,invitedAllowed:nearStoryInvited&&nearFamilyInvited,deniedAllowed:nearStoryDenied||nearFamilyDenied}) as never,story:async()=>({...observed.story,providerPrerequisites:provider.providerPrerequisites===true}),rollback:async()=>({...rollback,artifact:rollbackArtifactDigest})});
   await writeFile(output,JSON.stringify({version:1,authenticated:true,rollbackArtifactDigest,releaseEvidenceDigest:digest(canonicalEvidence(envelope.claims)),result})+"\n",{flag:"wx"});
  }finally{await pool.end()}
 }

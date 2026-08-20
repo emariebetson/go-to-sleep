@@ -1,5 +1,6 @@
 import { stickyProductCohort, type Product } from "./product-release-readiness";
 import {validateProductReadinessExact,type ProductReadiness}from"./asymmetric-release-evidence";
+import type { PrivateTesterProduct } from "./private-tester-activation";
 
 type Pg = { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }>;transaction?<T>(run:(tx:Pg)=>Promise<T>):Promise<T> };
 
@@ -16,13 +17,29 @@ export function createPostgresProductDecision(pg: Pg) {
   };
 }
 
-export function createPostgresHouseholdProductAccess(pg: Pg) {
+type PrivateTesterInvitationEvaluator = { authorize(input: { product: PrivateTesterProduct; householdHash: string }): Promise<boolean> };
+
+export function createPostgresPrivateTesterInvitationEvaluator(pg: Pick<Pg, "query">): PrivateTesterInvitationEvaluator {
+  return Object.freeze({
+    authorize: async ({ product, householdHash }) => {
+      if ((product !== "nearstory" && product !== "nearfamily") || !/^[a-f0-9]{64}$/.test(householdHash)) return false;
+      try {
+        return (await pg.query<{ allowed: boolean }>("SELECT nearyou.authorize_private_tester_household($1,$2) AS allowed", [product, householdHash])).rows[0]?.allowed === true;
+      } catch { return false; }
+    },
+  });
+}
+
+export function createPostgresHouseholdProductAccess(pg: Pg, invitationEvaluator?: PrivateTesterInvitationEvaluator) {
   return async (product: Product, householdId: string) => {
+    const householdHash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(householdId))), byte => byte.toString(16).padStart(2, "0")).join("");
+    if (invitationEvaluator && (product === "nearstory" || product === "nearfamily")) {
+      try { return await invitationEvaluator.authorize({ product, householdHash }); } catch { return false; }
+    }
     const state=(await pg.query<{release_id:string}>("SELECT release_id FROM nearyou.product_rollout_state WHERE product=$1 AND NOT kill_switch AND mode<>'off'",[product])).rows[0];
     if(!state?.release_id)return false;
     const releaseId=state.release_id;
     const cohort = await stickyProductCohort(householdId, releaseId);
-    const householdHash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(householdId))), byte => byte.toString(16).padStart(2, "0")).join("");
     const row = (await pg.query<{ allowed: boolean }>("SELECT nearyou.authorize_product_household($1,$2,$3,$4) AS allowed", [product, releaseId, householdHash, cohort])).rows[0];
     return row?.allowed === true;
   };

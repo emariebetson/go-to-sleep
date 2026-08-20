@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { acceptsMigrationLedger, applyPostgresMigrations, loadPostgresMigrations, type MigrationFile } from "./migrate";
 import { registerRolloutController,type AdminPg } from "./register-rollout-controller";
 import { registerPrivateTesterBaselineVerifier } from "./register-private-tester-baseline-verifier";
-import { collectLiveCatalog, verifyLiveCatalogSecurity } from "./postgres-catalog";
+import { collectLiveCatalog, PRIVATE_TESTER_ACTIVATION_FORCED_RLS, verifyLiveCatalogSecurity } from "./postgres-catalog";
 import { REQUIRED_CATALOG_KINDS } from "./check-catalog-manifest";
 
 const HASH = /^[a-f0-9]{64}$/;
@@ -171,7 +171,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
   precondition(COMMIT.test(dependencies.authoritativeSource.commitSha) && IMAGE.test(dependencies.authoritativeSource.imageDigest), "source-invalid");
   precondition(JSON.stringify({ controllerDatabaseUser: input.controllerDatabaseUser, controllerPrincipal: input.controllerPrincipal, verifierDatabaseUser: input.verifierDatabaseUser, verifierPrincipal: input.verifierPrincipal }) === JSON.stringify(PRODUCTION_IDENTITIES), "identity-invalid");
   const files = dependencies.migrations ?? await loadPostgresMigrations();
-  precondition(files.length === 10 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest" && files[7]?.id === "0008_cloud_sql_iam_database_usernames" && files[8]?.id === "0009_cloud_sql_verifier_identity_limit" && files[9]?.id === "0010_migration_schema_usage", "migration-set-invalid");
+  precondition(files.length === 12 && files[5]?.id === "0006_private_canary_observation" && files[6]?.id === "0007_private_tester_deployment_manifest" && files[7]?.id === "0008_cloud_sql_iam_database_usernames" && files[8]?.id === "0009_cloud_sql_verifier_identity_limit" && files[9]?.id === "0010_migration_schema_usage" && files[10]?.id === "0011_private_tester_activation_controller" && files[11]?.id === "0012_nearfamily_private_tester_decision", "migration-set-invalid");
   const connection = await atStage("database-connect-failed", () => dependencies.connect(input.databaseUrl));
   try {
     const target = (await atStage("target-authority-invalid", () => connection.query<{ database_name: string; server_version: number; database_user: string; allowed: boolean; pristine:boolean; vector_available:boolean }>(
@@ -218,7 +218,7 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
     precondition(verifier.baselineVerifierMappingVerified===true,"verifier-registration-failed");
     const finalLedger = (await atStage("final-ledger-invalid",()=>connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", []))).rows;
     precondition(acceptsMigrationLedger(files,finalLedger),"final-ledger-invalid");
-    const {rows,security}=await atStage("final-catalog-invalid",async()=>{const observedRows=await collectLiveCatalog(connection),observedSecurity=await verifyLiveCatalogSecurity(connection);precondition(REQUIRED_CATALOG_KINDS.every((kind) => observedRows.some((row) => row.kind === kind)),"final-catalog-invalid");return{rows:observedRows,security:observedSecurity}});
+    const {rows,security}=await atStage("final-catalog-invalid",async()=>{const observedRows=await collectLiveCatalog(connection),observedSecurity=await verifyLiveCatalogSecurity(connection,PRIVATE_TESTER_ACTIVATION_FORCED_RLS);precondition(REQUIRED_CATALOG_KINDS.every((kind) => observedRows.some((row) => row.kind === kind)),"final-catalog-invalid");return{rows:observedRows,security:observedSecurity}});
     const provenance = {
       database: { name: "nearyou", serverVersion: target.server_version, migrationAdmin: target.database_user },
       source: dependencies.authoritativeSource,
@@ -234,11 +234,11 @@ export async function prepareLiveProductionCatalog(input: LiveCatalogPreparation
       version: 1,
       reviewRequired: true,
       generatedFrom: "live-production-postgresql-16",
-      migrationHead: files[9].id,
+      migrationHead: files.at(-1)!.id,
       schema: "nearyou",
       catalogChecksum: sha256(JSON.stringify(rows)),
       requiredKinds: REQUIRED_CATALOG_KINDS,
-      requireForcedRls: ["household_members", "tenant_records"],
+      requireForcedRls: PRIVATE_TESTER_ACTIVATION_FORCED_RLS,
       forbidPublicExecute: true,
       security,
       provenance,
