@@ -11,6 +11,7 @@ import {
 } from "../scripts/verify-readiness-gateway.ts";
 import { createDisposableGatewayHandler } from "../services/readiness-gateway/src/runtime.ts";
 import { runReadinessDenialProbe } from "../scripts/readiness-denial-probe.ts";
+import { createDisposableDecisionWorker } from "../cloudflare/readiness-disposable-worker.ts";
 
 const execFile = promisify(execFileCallback);
 const tfvarsPath = new URL("../infra/disposable/readiness-gateway.tfvars.example", import.meta.url);
@@ -245,4 +246,26 @@ test("real denial probe requires one accepted HMAC then proves missing, invalid,
     nonce: "nonce_abcdefghijklmnopqrstuv",
     fetch,
   }), { missingHmac: 401, invalidHmac: 401, replayedHmac: 401, directCloudRun: 404, wrongAudience: 403, controllerEscalation: 403 });
+});
+
+test("disposable Cloudflare Worker signs one canonical decision and forwards only to the HTTPS gateway", async () => {
+  const now = 1_787_000_000_000;
+  const key = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
+  const decision = createDisposableGatewayHandler({ mode: "decision", disposable: true, key, now: () => now });
+  const forwarded = [];
+  const worker = createDisposableDecisionWorker({
+    gatewayUrl: "https://lb.example/v1/nearfamily/decision",
+    keyBase64: Buffer.from(key).toString("base64"),
+    now: () => now,
+    nonce: () => "nonce_abcdefghijklmnopqrstuv",
+    fetch: async (url, init) => {
+      forwarded.push(String(url));
+      return decision(new Request(String(url), init));
+    },
+  });
+  const body = '{"householdHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","releaseId":"rel_20260819_readiness_gateway_01"}';
+  const response = await worker(new Request("https://worker.example/v1/nearfamily/decision", { method: "POST", headers: { "content-type": "application/json" }, body }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { version: 1, allowed: false });
+  assert.deepEqual(forwarded, ["https://lb.example/v1/nearfamily/decision"]);
 });
