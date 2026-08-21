@@ -14,12 +14,11 @@ pad_image_digest = "gcr.io/placeholder/pad@sha256:dddddddddddddddddddddddddddddd
 readiness_decision_image_digest = "gcr.io/placeholder/readiness-decision@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 readiness_controller_image_digest = "gcr.io/placeholder/readiness-controller@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 readiness_decision_hostname = "readiness-disposable.invalid"
-readiness_decision_secret_name = "nearyou-readiness-decision-db-url"
+readiness_decision_secret_name = "nearyou-readiness-decision-hmac"
 readiness_decision_secret_version = "1"
-readiness_controller_secret_name = "nearyou-readiness-controller-db-url"
-readiness_controller_secret_version = "2"
-readiness_kill_secret_name = "nearyou-readiness-controller-kill-db-url"
-readiness_kill_secret_version = "3"
+readiness_decision_key_not_before = 1787000000000
+readiness_decision_key_not_after = 1787172800000
+readiness_controller_service_audience = "https://nearyou-readiness-controller-aaaaaaaaaa-uc.a.run.app"
 readiness_kill_service_audience = "https://run.googleapis.com/projects/nearyou-rdy-gwy/locations/us-central1/services/nearyou-readiness-controller-kill"
 
 secret_bootstrap_evidence = {

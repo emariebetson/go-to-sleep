@@ -49,6 +49,7 @@ const HASH = /^[a-f0-9]{64}$/;
 const RELEASE = /^rel_[A-Za-z0-9_-]{8,100}$/;
 const PRINCIPAL = /^service:[A-Za-z0-9_-]{3,100}$/;
 const OPERATION = /^[a-z][a-z0-9-]{7,127}$/;
+const EMERGENCY_KILL_EVIDENCE_SENTINEL = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
 const PRODUCTS: readonly PrivateTesterProduct[] = ["nearstory", "nearfamily"];
 const encoder = new TextEncoder();
 const memoryWriteInternals = new WeakMap<object, { replaceState(product: PrivateTesterProduct, state: ActivationState): void; appendAudit(audit: PrivateTesterActivationAudit): void }>();
@@ -286,7 +287,10 @@ export function createDurablePrivateTesterActivationController(input: { authorit
     let principal: { principal: string };
     try { principal = await input.authority.authenticatedController(); } catch { invalid("authority unavailable"); }
     if (!PRINCIPAL.test(principal.principal)) invalid("authority invalid");
-    if (raw.action === "kill") return input.store.apply({ ...raw, principal: principal.principal, canonicalClaims: "{}" });
+    if (raw.action === "kill") {
+      if (raw.releaseEvidenceDigest !== EMERGENCY_KILL_EVIDENCE_SENTINEL) invalid("kill sentinel invalid");
+      return input.store.apply({ ...raw, principal: principal.principal, canonicalClaims: "{}" });
+    }
     let baseline: { sha256: string; releaseId: string; darkGates: DarkGates } | null, claims: Claims | null;
     try {
       [baseline, claims] = await Promise.all([input.authority.promotedBaseline(raw.promotedBaselineSha256), input.authority.trustedReleaseEvidence(raw.releaseEvidenceDigest)]);

@@ -480,6 +480,14 @@ resource "google_cloud_run_v2_job" "migrations" {
           value = local.readiness_controller_oidc_principal
         }
         env {
+          name  = "NEARYOU_READINESS_KILL_DATABASE_USER"
+          value = local.readiness_controller_kill_database_user
+        }
+        env {
+          name  = "NEARYOU_READINESS_KILL_OIDC_PRINCIPAL"
+          value = local.readiness_controller_kill_oidc_principal
+        }
+        env {
           name  = "NEARYOU_PRIVATE_TESTER_BASELINE_DATABASE_USER"
           value = local.private_tester_baseline_database_user
         }

@@ -260,24 +260,25 @@ variable "readiness_decision_secret_version" {
     error_message = "A numeric readiness decision secret version is required."
   }
 }
-variable "readiness_controller_secret_name" {
-  type = string
-}
-variable "readiness_controller_secret_version" {
-  type = string
+variable "readiness_decision_key_not_before" {
+  type = number
   validation {
-    condition     = can(regex("^[0-9]+$", var.readiness_controller_secret_version))
-    error_message = "A numeric readiness controller secret version is required."
+    condition     = var.readiness_decision_key_not_before > 0
+    error_message = "A positive readiness decision key start is required."
   }
 }
-variable "readiness_kill_secret_name" {
-  type = string
+variable "readiness_decision_key_not_after" {
+  type = number
+  validation {
+    condition     = var.readiness_decision_key_not_after > var.readiness_decision_key_not_before
+    error_message = "The readiness decision key end must follow its start."
+  }
 }
-variable "readiness_kill_secret_version" {
+variable "readiness_controller_service_audience" {
   type = string
   validation {
-    condition     = can(regex("^[0-9]+$", var.readiness_kill_secret_version))
-    error_message = "A numeric readiness emergency kill secret version is required."
+    condition     = startswith(var.readiness_controller_service_audience, "https://") && !strcontains(var.readiness_controller_service_audience, "example")
+    error_message = "A real readiness controller audience is required."
   }
 }
 variable "readiness_kill_service_audience" {

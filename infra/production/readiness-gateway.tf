@@ -32,6 +32,15 @@ resource "google_project_iam_member" "readiness_decision_cloudsql_user" {
   depends_on = [terraform_data.approval_gate]
 }
 
+resource "google_secret_manager_secret_iam_member" "readiness_decision_hmac_accessor" {
+  count     = local.readiness_gateway_proof_ready ? 1 : 0
+  secret_id = var.readiness_decision_secret_name
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.readiness_decision[0].email}"
+
+  depends_on = [terraform_data.approval_gate]
+}
+
 resource "google_project_iam_member" "readiness_controller_kill_cloudsql_client" {
   count   = local.readiness_gateway_proof_ready ? 1 : 0
   project = var.project_id
@@ -55,6 +64,7 @@ resource "google_sql_user" "readiness_decision" {
   name     = google_service_account.readiness_decision[0].email
   instance = google_sql_database_instance.primary.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+  database_roles = ["nearyou_private_tester_decision"]
 
   depends_on = [terraform_data.approval_gate]
 }
@@ -64,6 +74,7 @@ resource "google_sql_user" "readiness_controller_kill" {
   name     = google_service_account.readiness_controller_kill[0].email
   instance = google_sql_database_instance.primary.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+  database_roles = ["nearyou_rollout_controller"]
 
   depends_on = [terraform_data.approval_gate]
 }
@@ -102,12 +113,12 @@ resource "google_cloud_run_v2_service" "readiness_decision" {
     max_instance_request_concurrency = 10
 
     volumes {
-      name = "readiness-db-url"
+      name = "readiness-hmac-key"
       secret {
         secret = var.readiness_decision_secret_name
         items {
           version = var.readiness_decision_secret_version
-          path    = "database-url"
+          path    = "hmac-key"
         }
       }
     }
@@ -124,17 +135,45 @@ resource "google_cloud_run_v2_service" "readiness_decision" {
       image = var.readiness_decision_image_digest
 
       volume_mounts {
-        name       = "readiness-db-url"
+        name       = "readiness-hmac-key"
         mount_path = "/var/run/secrets/nearyou"
       }
 
       env {
-        name  = "NEARYOU_READINESS_DECISION_DATABASE_USER"
+        name  = "READINESS_GATEWAY_MODE"
+        value = "decision"
+      }
+      env {
+        name  = "READINESS_GATEWAY_DISPOSABLE"
+        value = "true"
+      }
+      env {
+        name  = "READINESS_GATEWAY_DATABASE_BACKED"
+        value = "true"
+      }
+      env {
+        name  = "READINESS_GATEWAY_CLOUD_SQL_INSTANCE"
+        value = google_sql_database_instance.primary.connection_name
+      }
+      env {
+        name  = "READINESS_GATEWAY_DATABASE_USER"
         value = local.readiness_decision_database_user
       }
       env {
-        name  = "NEARYOU_READINESS_DECISION_OIDC_PRINCIPAL"
-        value = local.readiness_decision_oidc_principal
+        name  = "READINESS_GATEWAY_DATABASE_NAME"
+        value = google_sql_database.application.name
+      }
+      env {
+        name  = "READINESS_GATEWAY_HMAC_KEY_FILE"
+        value = "/var/run/secrets/nearyou/hmac-key"
+      }
+      env {
+        name  = "READINESS_GATEWAY_KEY_NOT_BEFORE"
+        value = tostring(var.readiness_decision_key_not_before)
+      }
+      env {
+        name  = "READINESS_GATEWAY_KEY_NOT_AFTER"
+        value = tostring(var.readiness_decision_key_not_after)
       }
 
       resources {
@@ -165,17 +204,6 @@ resource "google_cloud_run_v2_service" "readiness_controller" {
       max_instance_count = 1
     }
 
-    volumes {
-      name = "readiness-db-url"
-      secret {
-        secret = var.readiness_controller_secret_name
-        items {
-          version = var.readiness_controller_secret_version
-          path    = "database-url"
-        }
-      }
-    }
-
     vpc_access {
       network_interfaces {
         network    = google_compute_network.private.name
@@ -187,18 +215,45 @@ resource "google_cloud_run_v2_service" "readiness_controller" {
     containers {
       image = var.readiness_controller_image_digest
 
-      volume_mounts {
-        name       = "readiness-db-url"
-        mount_path = "/var/run/secrets/nearyou"
-      }
-
       env {
-        name  = "NEARYOU_READINESS_CONTROLLER_DATABASE_USER"
+        name  = "READINESS_GATEWAY_MODE"
+        value = "controller"
+      }
+      env {
+        name  = "READINESS_GATEWAY_DISPOSABLE"
+        value = "true"
+      }
+      env {
+        name  = "READINESS_GATEWAY_DATABASE_BACKED"
+        value = "true"
+      }
+      env {
+        name  = "READINESS_GATEWAY_CLOUD_SQL_INSTANCE"
+        value = google_sql_database_instance.primary.connection_name
+      }
+      env {
+        name  = "READINESS_GATEWAY_DATABASE_USER"
         value = local.readiness_controller_database_user
       }
       env {
-        name  = "NEARYOU_READINESS_CONTROLLER_OIDC_PRINCIPAL"
-        value = local.readiness_controller_oidc_principal
+        name  = "READINESS_GATEWAY_DATABASE_NAME"
+        value = google_sql_database.application.name
+      }
+      env {
+        name  = "READINESS_GATEWAY_ORDINARY_AUDIENCE"
+        value = var.readiness_controller_service_audience
+      }
+      env {
+        name  = "READINESS_GATEWAY_ORDINARY_CALLER"
+        value = google_service_account.readiness_controller.email
+      }
+      env {
+        name  = "READINESS_GATEWAY_EMERGENCY_AUDIENCE"
+        value = var.readiness_kill_service_audience
+      }
+      env {
+        name  = "READINESS_GATEWAY_EMERGENCY_CALLER"
+        value = google_service_account.readiness_controller_kill[0].email
       }
 
       resources {
@@ -211,6 +266,14 @@ resource "google_cloud_run_v2_service" "readiness_controller" {
   }
 
   depends_on = [terraform_data.approval_gate, google_project_iam_member.readiness_controller_cloudsql_user]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "readiness_controller_invoker" {
+  count    = local.readiness_gateway_proof_ready ? 1 : 0
+  location = local.region
+  name     = google_cloud_run_v2_service.readiness_controller[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.readiness_controller.email}"
 }
 
 resource "google_compute_region_network_endpoint_group" "readiness_decision" {
@@ -355,17 +418,6 @@ resource "google_cloud_run_v2_service" "readiness_controller_kill" {
       max_instance_count = 1
     }
 
-    volumes {
-      name = "readiness-db-url"
-      secret {
-        secret = var.readiness_kill_secret_name
-        items {
-          version = var.readiness_kill_secret_version
-          path    = "database-url"
-        }
-      }
-    }
-
     vpc_access {
       network_interfaces {
         network    = google_compute_network.private.name
@@ -377,22 +429,45 @@ resource "google_cloud_run_v2_service" "readiness_controller_kill" {
     containers {
       image = var.readiness_controller_image_digest
 
-      volume_mounts {
-        name       = "readiness-db-url"
-        mount_path = "/var/run/secrets/nearyou"
-      }
-
       env {
-        name  = "NEARYOU_READINESS_KILL_DATABASE_USER"
+        name  = "READINESS_GATEWAY_MODE"
+        value = "kill"
+      }
+      env {
+        name  = "READINESS_GATEWAY_DISPOSABLE"
+        value = "true"
+      }
+      env {
+        name  = "READINESS_GATEWAY_DATABASE_BACKED"
+        value = "true"
+      }
+      env {
+        name  = "READINESS_GATEWAY_CLOUD_SQL_INSTANCE"
+        value = google_sql_database_instance.primary.connection_name
+      }
+      env {
+        name  = "READINESS_GATEWAY_DATABASE_USER"
         value = local.readiness_controller_kill_database_user
       }
       env {
-        name  = "NEARYOU_READINESS_KILL_AUDIENCE"
+        name  = "READINESS_GATEWAY_DATABASE_NAME"
+        value = google_sql_database.application.name
+      }
+      env {
+        name  = "READINESS_GATEWAY_ORDINARY_AUDIENCE"
+        value = var.readiness_controller_service_audience
+      }
+      env {
+        name  = "READINESS_GATEWAY_ORDINARY_CALLER"
+        value = google_service_account.readiness_controller.email
+      }
+      env {
+        name  = "READINESS_GATEWAY_EMERGENCY_AUDIENCE"
         value = var.readiness_kill_service_audience
       }
       env {
-        name  = "NEARYOU_READINESS_KILL_OIDC_PRINCIPAL"
-        value = local.readiness_controller_kill_oidc_principal
+        name  = "READINESS_GATEWAY_EMERGENCY_CALLER"
+        value = google_service_account.readiness_controller_kill[0].email
       }
 
       resources {
@@ -405,4 +480,12 @@ resource "google_cloud_run_v2_service" "readiness_controller_kill" {
   }
 
   depends_on = [terraform_data.approval_gate, google_project_iam_member.readiness_controller_kill_cloudsql_user[0]]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "readiness_controller_kill_invoker" {
+  count    = local.readiness_gateway_proof_ready ? 1 : 0
+  location = local.region
+  name     = google_cloud_run_v2_service.readiness_controller_kill[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.readiness_controller_kill[0].email}"
 }
