@@ -133,20 +133,28 @@ async function start(): Promise<void> {
   const disposable = process.env.READINESS_GATEWAY_DISPOSABLE === "true";
   const key = mode === "decision" ? decodeKey(process.env.READINESS_GATEWAY_HMAC_KEY_FILE ?? "") : new Uint8Array(32);
   let handler: (request: Request) => Promise<Response>;
-  if (mode === "decision" && process.env.READINESS_GATEWAY_DATABASE_BACKED === "true") {
+  if ((["decision", "controller", "kill"] as const).includes(mode) && process.env.READINESS_GATEWAY_DATABASE_BACKED === "true") {
     const instanceConnectionName = process.env.READINESS_GATEWAY_CLOUD_SQL_INSTANCE ?? "";
     const user = process.env.READINESS_GATEWAY_DATABASE_USER ?? "";
     const database = process.env.READINESS_GATEWAY_DATABASE_NAME ?? "";
-    const keyNotBefore = Number(process.env.READINESS_GATEWAY_KEY_NOT_BEFORE);
-    const keyNotAfter = Number(process.env.READINESS_GATEWAY_KEY_NOT_AFTER);
     if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z]+(?:-[a-z]+)+[0-9]:[a-z][a-z0-9-]{2,97}$/.test(instanceConnectionName) || !/^[a-z0-9-]{3,30}@[a-z][a-z0-9-]{4,28}\.iam$/.test(user) || !/^[a-z][a-z0-9_]{2,62}$/.test(database)) throw new Error("database-backed readiness gateway configuration invalid");
     const connectorName = "@google-cloud/cloud-sql-connector", pgName = "pg";
     const connectorModule = await import(connectorName) as unknown as { Connector: new () => { getOptions(input: Record<string, unknown>): Promise<Record<string, unknown>>; close(): void }; AuthTypes: { IAM: string }; IpAddressTypes: { PRIVATE: string } };
-    const pgModule = await import(pgName) as unknown as { Pool: new (input: Record<string, unknown>) => Pg & { end(): Promise<void> } };
+    const pgModule = await import(pgName) as unknown as { Pool: new (input: Record<string, unknown>) => PoolPg & { end(): Promise<void> } };
     const connector = new connectorModule.Connector();
     const options = await connector.getOptions({ instanceConnectionName, authType: connectorModule.AuthTypes.IAM, ipType: connectorModule.IpAddressTypes.PRIVATE });
     const pool = new pgModule.Pool({ ...options, user, database, max: 1, connectionTimeoutMillis: 750, idleTimeoutMillis: 60_000 });
-    handler = createDatabaseBackedDecisionHandler({ disposable, key, keyNotBefore, keyNotAfter, pg: pool });
+    if (mode === "decision") {
+      const keyNotBefore = Number(process.env.READINESS_GATEWAY_KEY_NOT_BEFORE);
+      const keyNotAfter = Number(process.env.READINESS_GATEWAY_KEY_NOT_AFTER);
+      handler = createDatabaseBackedDecisionHandler({ disposable, key, keyNotBefore, keyNotAfter, pg: pool });
+    } else {
+      const ordinaryIdentity = { issuer: "https://accounts.google.com", audience: process.env.READINESS_GATEWAY_ORDINARY_AUDIENCE ?? "", subject: process.env.READINESS_GATEWAY_ORDINARY_CALLER ?? "" } as const;
+      const emergencyIdentity = { issuer: "https://accounts.google.com", audience: process.env.READINESS_GATEWAY_EMERGENCY_AUDIENCE ?? "", subject: process.env.READINESS_GATEWAY_EMERGENCY_CALLER ?? "" } as const;
+      const authName = "google-auth-library";
+      const authModule = await import(authName) as unknown as { OAuth2Client: new () => GoogleIdTokenClient };
+      handler = createDatabaseBackedControllerHandler({ mode, disposable, pg: createTransactionalPostgresPool(pool), ordinaryIdentity, emergencyIdentity, verifyIdToken: createGoogleIdTokenVerifier(new authModule.OAuth2Client()) });
+    }
   } else {
     handler = createDisposableGatewayHandler({ mode, disposable, key, now: Date.now });
   }
@@ -158,7 +166,8 @@ async function start(): Promise<void> {
     for await (const chunk of incoming) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       size += bytes.byteLength;
-      if (size > 4096) {
+      const maximumBodyBytes = mode === "decision" ? 4096 : 128_000;
+      if (size > maximumBodyBytes) {
         outgoing.writeHead(413, { "content-type": "application/json", "cache-control": "no-store" });
         outgoing.end('{"version":1,"allowed":false}');
         return;

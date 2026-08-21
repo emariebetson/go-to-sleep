@@ -57,7 +57,9 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - name: Prove private-tester controller and emergency-kill contracts
-        run: node --import tsx --test tests/private-tester-activation.test.mjs tests/readiness-gateway-contract.test.mjs tests/readiness-gateway-infrastructure.test.mjs
+        run: |
+          npm run typecheck
+          node --import tsx --test tests/private-tester-activation.test.mjs tests/readiness-gateway-contract.test.mjs tests/readiness-gateway-infrastructure.test.mjs
       - name: Prove fixed NearFamily decision authority on disposable PostgreSQL 16
         env:
           NEARYOU_TEST_POSTGRES16_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/nearyou"
