@@ -155,6 +155,7 @@ test("Terraform binds the exact database-backed runtime contract", () => {
   assert.match(source, /READINESS_GATEWAY_KEY_NOT_BEFORE/);
   assert.match(source, /READINESS_GATEWAY_KEY_NOT_AFTER/);
   assert.doesNotMatch(source, /path\s*=\s*"database-url"/);
+  assert.match(source, /resource "google_secret_manager_secret_iam_member" "readiness_decision_hmac_accessor"[\s\S]*roles\/secretmanager\.secretAccessor[\s\S]*google_service_account\.readiness_decision\[0\]\.email/);
 });
 
 test("migration registration includes both ordinary and emergency controller identities", () => {
