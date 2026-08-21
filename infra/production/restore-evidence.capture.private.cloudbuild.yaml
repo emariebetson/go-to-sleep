@@ -12,7 +12,7 @@ steps:
         docker run --detach --rm --name restore-evidence-auth-proxy --network cloudbuild \
           "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" --auto-iam-authn --structured-logs --address=0.0.0.0 --port=5432 \
           "${_RESTORED_CLOUD_SQL_INSTANCE}"
-        trap 'docker rm -f restore-evidence-auth-proxy >/dev/null 2>&1 || true' EXIT
+        trap 'status=$?; if [ "$status" -ne 0 ]; then docker logs restore-evidence-auth-proxy 2>&1 || true; fi; docker rm -f restore-evidence-auth-proxy >/dev/null 2>&1 || true; exit "$status"' EXIT
         printf '%s\n' 'capture:proxy-started'
         docker run --rm --network cloudbuild -v /workspace:/workspace -w /workspace \
           -e RESTORED_DATABASE_URL='postgresql://nearyou-evidence-ci%40nearnight.iam@restore-evidence-auth-proxy:5432/nearyou?sslmode=disable' \
