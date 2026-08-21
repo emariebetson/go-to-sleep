@@ -35,7 +35,7 @@ test("0009 repairs the Cloud SQL service-account length limit without rewriting 
   assert.equal(plan.exactRolesOnly,true);
   assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nf-rdy-controller@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nf-rdy-kill@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nf-rdy-decision@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_decision"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
   assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&item.command.includes("--revoke-existing-roles")));
-  assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback[3]===item.databaseUser));
+  assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback[4]===item.databaseUser));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
   assert.equal(validateCloudSqlRoleAssignmentReadback(plan,rows).reviewRequired,true);
   await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"BUILT_IN"})),/readback invalid/);
