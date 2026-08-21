@@ -88,10 +88,41 @@ function assertDenialProbes(probes: Json): void {
   }
 }
 
+function normalizeRunService(service: Json): Json {
+  if (service.apiVersion !== "serving.knative.dev/v1") return service;
+  const metadata = service.metadata as Json | undefined;
+  const annotations = metadata?.annotations as Json | undefined;
+  const spec = service.spec as Json | undefined;
+  const template = spec?.template as Json | undefined;
+  const templateMetadata = template?.metadata as Json | undefined;
+  const templateAnnotations = templateMetadata?.annotations as Json | undefined;
+  const templateSpec = template?.spec as Json | undefined;
+  const status = service.status as Json | undefined;
+  const ingress = annotations?.["run.googleapis.com/ingress"];
+  const ingressMap: Record<string, string> = { "internal": "INGRESS_TRAFFIC_INTERNAL_ONLY", "internal-and-cloud-load-balancing": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER", "all": "INGRESS_TRAFFIC_ALL" };
+  let networkInterfaces: unknown;
+  try { networkInterfaces = JSON.parse(String(templateAnnotations?.["run.googleapis.com/network-interfaces"] ?? "")); } catch { networkInterfaces = undefined; }
+  return {
+    name: metadata?.name,
+    ingress: typeof ingress === "string" ? ingressMap[ingress] : undefined,
+    defaultUriDisabled: annotations?.["run.googleapis.com/default-url-disabled"] === "true",
+    invokerIamDisabled: annotations?.["run.googleapis.com/invoker-iam-disabled"] === "true",
+    latestReadyRevision: status?.latestReadyRevisionName,
+    template: {
+      serviceAccount: templateSpec?.serviceAccountName,
+      containers: templateSpec?.containers,
+      vpcAccess: {
+        egress: templateAnnotations?.["run.googleapis.com/vpc-access-egress"] === "private-ranges-only" ? "PRIVATE_RANGES_ONLY" : undefined,
+        networkInterfaces,
+      },
+    },
+  };
+}
+
 export async function verifyReadinessGatewayProof(environment: Record<string, string | undefined> = process.env, runner: ReadinessGatewayCommandRunner = command) {
   const target = requireReadinessGatewayProofEnvironment(environment);
   const prefix = ["--project", target.project];
-  const describe = (name: string) => readJson(runner, "gcloud", [...prefix, "run", "services", "describe", name, "--region", target.region, "--format=json"], `${name} service`);
+  const describe = async (name: string) => normalizeRunService(await readJson(runner, "gcloud", [...prefix, "run", "services", "describe", name, "--region", target.region, "--format=json"], `${name} service`));
   const policy = (name: string) => readJson(runner, "gcloud", [...prefix, "run", "services", "get-iam-policy", name, "--region", target.region, "--format=json"], `${name} IAM policy`);
   const [decision, controller, kill, decisionPolicy, controllerPolicy, killPolicy, backend, armor] = await Promise.all([
     describe(target.decisionService), describe(target.controllerService), describe(target.killService),

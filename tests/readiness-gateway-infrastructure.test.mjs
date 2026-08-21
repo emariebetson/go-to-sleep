@@ -222,6 +222,26 @@ function commandRunner(overrides = {}) {
   };
 }
 
+function knativeRunService(name, ingress, publicInvoker = false) {
+  return JSON.stringify({
+    apiVersion: "serving.knative.dev/v1",
+    kind: "Service",
+    metadata: { name, annotations: {
+      "run.googleapis.com/ingress": ingress,
+      "run.googleapis.com/default-url-disabled": name === "nearyou-readiness-decision" ? "true" : "false",
+      "run.googleapis.com/invoker-iam-disabled": publicInvoker ? "true" : "false",
+    } },
+    spec: { template: { metadata: { annotations: {
+      "run.googleapis.com/network-interfaces": '[{"network":"private","subnetwork":"private"}]',
+      "run.googleapis.com/vpc-access-egress": "private-ranges-only",
+    } }, spec: {
+      serviceAccountName: `${name}@nearyou-rdy-gwy.iam.gserviceaccount.com`,
+      containers: [{ image: `us-docker.pkg.dev/nearyou-rdy-gwy/readiness/${name}@sha256:${"a".repeat(64)}` }],
+    } } },
+    status: { latestReadyRevisionName: `${name}-00001-a1b` },
+  });
+}
+
 test("readiness gateway proof hashes live read-only evidence and denial probes without emitting values", async () => {
   const calls = [];
   const runner = commandRunner();
@@ -237,6 +257,18 @@ test("readiness gateway proof hashes live read-only evidence and denial probes w
     "--controller-url", "https://controller.run.app/v1/nearfamily/controller",
     "--key-file", tfvarsPath.pathname,
   ]);
+});
+
+test("readiness gateway proof normalizes the live Knative Cloud Run readback", async () => {
+  const base=commandRunner();
+  const runner=async(file,args)=>{
+    const key=`${file} ${args.join(" ")}`;
+    if(key.includes("run services describe nearyou-readiness-controller-kill"))return{stdout:knativeRunService("nearyou-readiness-controller-kill","internal")};
+    if(key.includes("run services describe nearyou-readiness-controller"))return{stdout:knativeRunService("nearyou-readiness-controller","internal")};
+    if(key.includes("run services describe nearyou-readiness-decision"))return{stdout:knativeRunService("nearyou-readiness-decision","internal-and-cloud-load-balancing",true)};
+    return base(file,args);
+  };
+  assert.equal((await verifyReadinessGatewayProof(proofEnvironment(),runner)).ready,true);
 });
 
 test("readiness gateway proof rejects public IAM, wrong ingress, shared identities, missing VPC, and malformed probe output", async () => {
