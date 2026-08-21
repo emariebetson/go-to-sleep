@@ -45,7 +45,7 @@ test("0009 repairs the Cloud SQL service-account length limit without rewriting 
   assert.deepEqual(plan.assignments.filter(item=>item.cloudRunService).map(item=>[item.cloudRunService,item.serviceAccountEmail]),[["nf-rdy-controller","nf-rdy-controller@nearnight.iam.gserviceaccount.com"],["nf-rdy-kill","nf-rdy-kill@nearnight.iam.gserviceaccount.com"],["nf-rdy-decision","nf-rdy-decision@nearnight.iam.gserviceaccount.com"]]);
 });
 
-test("disposable Cloud SQL role assignment executes additive grants and retains exact readback",async()=>{
+test("disposable Cloud SQL role assignment replaces roles and retains exact readback",async()=>{
   const plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-evidence-20260820",operationId:`op_${"b".repeat(64)}`}),calls=[];
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
   const receipt=await executeCloudSqlRoleAssignment(plan,async(command,args)=>{calls.push([command,...args]);if(args[0]==="run")return plan.assignments.find(item=>item.cloudRunService===args[3]).serviceAccountEmail;if(args[2]==="list")return JSON.stringify(rows.slice(1).map(({databaseRoles,...row})=>row));if(args[2]==="describe")return JSON.stringify(rows.find(row=>row.name===args[3]));return""});
