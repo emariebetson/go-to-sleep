@@ -128,7 +128,7 @@ test("disposable readiness gateway image pins its base and starts the guarded ru
   assert.match(dockerfile, /npm ci --ignore-scripts --omit=dev --no-audit --no-fund/);
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /runtime\.ts/);
-  assert.deepEqual(packageJson.dependencies, { "@google-cloud/cloud-sql-connector": "1.11.3", pg: "8.16.3", tsx: "4.22.1" });
+  assert.deepEqual(packageJson.dependencies, { "@google-cloud/cloud-sql-connector": "1.11.3", "google-auth-library": "10.9.1", pg: "8.16.3", tsx: "4.22.1" });
   assert.equal(packageLock.lockfileVersion, 3);
 });
 
