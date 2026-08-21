@@ -78,6 +78,9 @@ jobs:
     needs: nearfamily-decision-proof
     runs-on: ubuntu-latest
     environment: production-evidence
+    outputs:
+      gateway-image: ${{ steps.build-images.outputs.gateway_image }}
+      database-proof-image: ${{ steps.build-images.outputs.database_proof_image }}
     permissions:
       contents: read
       id-token: write
@@ -92,14 +95,15 @@ jobs:
         with:
           version: ">= 548.0.0"
       - name: Build immutable disposable controller image
+        id: build-images
         run: |
           set -euo pipefail
           test "${{ vars.GCP_PROJECT }}" = "nearnight"
           mkdir -p evidence
           export DOCKER_CONFIG="$RUNNER_TEMP/nearfamily-docker-config"
           mkdir -p "$DOCKER_CONFIG"
-          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
           builder='gcr.io/cloud-builders/docker@sha256:2e8d40d8e48dc14fab4213d5e532d74f63fd403d9e8d7f6463096a75820286c3'
+          gcloud auth print-access-token | docker run --rm -i -v "$DOCKER_CONFIG:/root/.docker" "$builder" login -u oauth2accesstoken --password-stdin us-central1-docker.pkg.dev
           gateway="us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:$GITHUB_SHA"
           database_proof="us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-database-proof:$GITHUB_SHA"
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/workspace" -v "$DOCKER_CONFIG:/root/.docker" -w /workspace "$builder" build --file services/readiness-gateway/Dockerfile --tag "$gateway" .
@@ -108,7 +112,10 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$DOCKER_CONFIG:/root/.docker" "$builder" push "$database_proof"
           gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:$GITHUB_SHA" --project=nearnight --format=json > evidence/readiness-gateway-image.json
           gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-database-proof:$GITHUB_SHA" --project=nearnight --format=json > evidence/readiness-database-proof-image.json
-          jq -n --arg commit "$GITHUB_SHA" --arg builder "$builder" --arg gateway "$(jq -r .image_summary.fully_qualified_digest evidence/readiness-gateway-image.json)" --arg databaseProof "$(jq -r .image_summary.fully_qualified_digest evidence/readiness-database-proof-image.json)" '{version:1,commit:$commit,builder:$builder,gateway:$gateway,databaseProof:$databaseProof}' > evidence/readiness-gateway-image-build.json
+          gateway_digest="$(jq -r .image_summary.fully_qualified_digest evidence/readiness-gateway-image.json)"
+          database_proof_digest="$(jq -r .image_summary.fully_qualified_digest evidence/readiness-database-proof-image.json)"
+          printf 'gateway_image=%s\ndatabase_proof_image=%s\n' "$gateway_digest" "$database_proof_digest" >> "$GITHUB_OUTPUT"
+          jq -n --arg commit "$GITHUB_SHA" --arg builder "$builder" --arg gateway "$gateway_digest" --arg databaseProof "$database_proof_digest" '{version:1,commit:$commit,builder:$builder,gateway:$gateway,databaseProof:$databaseProof}' > evidence/readiness-gateway-image-build.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: readiness-gateway-image-${{ github.run_id }}-${{ github.run_attempt }}
@@ -152,8 +159,9 @@ jobs:
       - name: Execute private database migration and identity proof
         run: |
           set -euo pipefail
-          proof_image="$(gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-database-proof:$GITHUB_SHA" --project=nearnight --format='value(image_summary.fully_qualified_digest)')"
+          proof_image='${{ needs.readiness-gateway-image.outputs.database-proof-image }}'
           printf '%s' "$proof_image" | grep -Eq '^us-central1-docker\.pkg\.dev/nearnight/nearyou-prep/readiness-database-proof@sha256:[a-f0-9]{64}$'
+          test "$(gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-database-proof:$GITHUB_SHA" --project=nearnight --format='value(image_summary.fully_qualified_digest)')" = "$proof_image"
           gcloud run jobs deploy nf-rdy-database-proof --project=nearnight --region=us-central1 --image="$proof_image" --service-account=nearyou-prod-migration@nearnight.iam.gserviceaccount.com --network=nearyou-production --subnet=nearyou-production --vpc-egress=private-ranges-only --set-secrets=/var/run/secrets/nearyou/database-url=nf-rdy-disposable-migration-admin:1 --set-env-vars=NEARYOU_GATEWAY_DATABASE_INSTANCE=nearnight:us-central1:nearyou-evidence-20260820,NEARYOU_GATEWAY_DATABASE_DISPOSABLE=true --args=/var/run/secrets/nearyou/database-url --labels=nearyou-disposable-instance=nearyou-evidence-20260820,nearyou-migration-head=0014 --max-retries=0 --task-timeout=5m --quiet
           gcloud run jobs describe nf-rdy-database-proof --project=nearnight --region=us-central1 --format=json > evidence/readiness-gateway-database-proof-job.json
           jq -e --arg image "$proof_image" '.metadata.labels["nearyou-disposable-instance"] == "nearyou-evidence-20260820" and .metadata.labels["nearyou-migration-head"] == "0014" and .spec.template.spec.template.spec.serviceAccountName == "nearyou-prod-migration@nearnight.iam.gserviceaccount.com" and .spec.template.spec.template.spec.containers[0].image == $image' evidence/readiness-gateway-database-proof-job.json >/dev/null
