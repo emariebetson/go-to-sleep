@@ -177,13 +177,19 @@ test("the disposable Cloud Build path invokes the runner behind a digest-pinned 
 
 test("the private restored-database proof writes only to the provisioned immutable evidence bucket", () => {
   const build = readFileSync(new URL("../infra/production/restore-evidence.private.cloudbuild.yaml", import.meta.url), "utf8");
+  const runner = readFileSync(new URL("../scripts/restore-evidence-cli.ts", import.meta.url), "utf8");
   assert.match(build, /serviceAccount: projects\/nearnight\/serviceAccounts\/nearyou-evidence-ci@nearnight\.iam\.gserviceaccount\.com/);
-  assert.match(build, /location: gs:\/\/nearyou-production-private-evidence-nearnight\/restores\/\$BUILD_ID/);
+  assert.match(build, /RESTORE_EVIDENCE_BUCKET='nearyou-production-private-evidence-nearnight'/);
+  assert.match(build, /RESTORE_EVIDENCE_OBJECT='restores\/\$\{BUILD_ID\}\/evidence\/restore\.json'/);
+  assert.doesNotMatch(build, /^artifacts:/m);
   assert.doesNotMatch(build, /gs:\/\/nearyou-private-evidence/);
   assert.match(build, /--private-ip/);
   assert.match(build, /mkdir -p evidence/);
   assert.match(build, /npm install --prefix \/tmp\/restore-evidence-runtime --ignore-scripts --no-save pg@8\.16\.3 tsx@4\.22\.1/);
   assert.doesNotMatch(build, /npm ci/);
+  assert.match(runner, /uploadImmutableObject/);
+  assert.match(runner, /RESTORE_EVIDENCE_BUCKET/);
+  assert.match(runner, /RESTORE_EVIDENCE_OBJECT/);
 });
 
 test("the independent restored-database capture is digest-pinned and emits only checksum evidence", () => {
