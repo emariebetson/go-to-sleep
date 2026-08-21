@@ -12,6 +12,7 @@ import { createPostgresPrivateTesterActivationController } from "../../../lib/pr
 type Mode = "decision" | "controller" | "kill";
 type Pg = { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }> };
 type ControllerPg = Pg & { transaction<T>(run: (tx: Pg) => Promise<T>): Promise<T> };
+type PoolPg = Pg & { connect(): Promise<Pg & { release(): void }> };
 type ControllerIdentity = Readonly<{ issuer: string; audience: string; subject: string }>;
 type VerifiedControllerIdentity = Readonly<{ issuer: string; audience: string; subject: string; expiresAt: number }>;
 type GoogleIdTokenClient = { verifyIdToken(input: Readonly<{ idToken: string; audience: string }>): Promise<{ getPayload(): Record<string, unknown> | undefined }> };
@@ -24,6 +25,28 @@ export function createGoogleIdTokenVerifier(client: GoogleIdTokenClient) {
     if (!payload || payload.iss !== "https://accounts.google.com" || payload.aud !== input.audience || payload.email_verified !== true || typeof payload.email !== "string" || !/^[a-z0-9-]{3,100}@[a-z0-9-]{3,100}\.iam\.gserviceaccount\.com$/.test(payload.email) || !Number.isSafeInteger(payload.exp) || Number(payload.exp) < 1) throw new Error("Google identity invalid");
     return Object.freeze({ issuer: payload.iss, audience: payload.aud, subject: payload.email, expiresAt: Number(payload.exp) * 1000 });
   };
+}
+
+export function createTransactionalPostgresPool(pool: PoolPg): ControllerPg {
+  if (!pool || typeof pool.query !== "function" || typeof pool.connect !== "function") throw new Error("controller PostgreSQL pool invalid");
+  return Object.freeze({
+    query: <T>(sql: string, args: unknown[]) => pool.query<T>(sql, args),
+    transaction: async <T>(run: (tx: Pg) => Promise<T>): Promise<T> => {
+      if (typeof run !== "function") throw new Error("controller PostgreSQL transaction invalid");
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN", []);
+        const result = await run(client);
+        await client.query("COMMIT", []);
+        return result;
+      } catch (error) {
+        try { await client.query("ROLLBACK", []); } catch { /* fail with the original operation error */ }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  });
 }
 
 export function createDisposableGatewayHandler(input: Readonly<{
