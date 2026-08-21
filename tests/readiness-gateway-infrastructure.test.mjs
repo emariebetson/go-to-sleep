@@ -344,6 +344,27 @@ test("Google ID-token verification binds the verified service-account email to t
   await assert.rejects(() => unverified({ token: "emergency-token", audience: "https://nf-rdy-kill.example.run.app" }), /identity/);
 });
 
+test("controller PostgreSQL transactions commit once and roll back failed operations", async () => {
+  assert.equal(typeof readinessGatewayRuntime.createTransactionalPostgresPool, "function");
+  const calls = [];
+  const client = {
+    query: async (sql, args = []) => {
+      calls.push({ sql, args });
+      return { rows: [{ value: "ok" }] };
+    },
+    release: () => calls.push({ sql: "RELEASE", args: [] }),
+  };
+  const pg = readinessGatewayRuntime.createTransactionalPostgresPool({
+    query: async (sql, args) => client.query(sql, args),
+    connect: async () => client,
+  });
+  assert.deepEqual(await pg.transaction((tx) => tx.query("SELECT $1::text AS value", ["ok"])), { rows: [{ value: "ok" }] });
+  assert.deepEqual(calls.map((call) => call.sql), ["BEGIN", "SELECT $1::text AS value", "COMMIT", "RELEASE"]);
+  calls.length = 0;
+  await assert.rejects(() => pg.transaction(async () => { throw new Error("operation failed"); }), /operation failed/);
+  assert.deepEqual(calls.map((call) => call.sql), ["BEGIN", "ROLLBACK", "RELEASE"]);
+});
+
 test("real denial probe requires one accepted HMAC then proves missing, invalid, replayed, and direct denials", async () => {
   const now = 1_787_000_000_000;
   const key = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
