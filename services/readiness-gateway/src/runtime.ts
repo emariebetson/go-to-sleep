@@ -45,7 +45,7 @@ async function start(): Promise<void> {
   const handler = createDisposableGatewayHandler({
     mode,
     disposable: process.env.READINESS_GATEWAY_DISPOSABLE === "true",
-    key: decodeKey(process.env.READINESS_GATEWAY_HMAC_KEY_FILE ?? ""),
+    key: mode === "decision" ? decodeKey(process.env.READINESS_GATEWAY_HMAC_KEY_FILE ?? "") : new Uint8Array(32),
     now: Date.now,
   });
   const port = Number(process.env.PORT ?? "8080");
