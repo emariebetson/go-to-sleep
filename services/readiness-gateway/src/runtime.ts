@@ -14,6 +14,17 @@ type Pg = { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }> };
 type ControllerPg = Pg & { transaction<T>(run: (tx: Pg) => Promise<T>): Promise<T> };
 type ControllerIdentity = Readonly<{ issuer: string; audience: string; subject: string }>;
 type VerifiedControllerIdentity = Readonly<{ issuer: string; audience: string; subject: string; expiresAt: number }>;
+type GoogleIdTokenClient = { verifyIdToken(input: Readonly<{ idToken: string; audience: string }>): Promise<{ getPayload(): Record<string, unknown> | undefined }> };
+
+export function createGoogleIdTokenVerifier(client: GoogleIdTokenClient) {
+  if (!client || typeof client.verifyIdToken !== "function") throw new Error("Google identity verifier invalid");
+  return async (input: Readonly<{ token: string; audience: string }>): Promise<VerifiedControllerIdentity> => {
+    if (!input || typeof input.token !== "string" || !/^[A-Za-z0-9._~-]{8,8192}$/.test(input.token) || typeof input.audience !== "string" || !/^https:\/\/[A-Za-z0-9.-]+(?:\/[A-Za-z0-9_./-]*)?$/.test(input.audience)) throw new Error("Google identity invalid");
+    const payload = (await client.verifyIdToken({ idToken: input.token, audience: input.audience })).getPayload();
+    if (!payload || payload.iss !== "https://accounts.google.com" || payload.aud !== input.audience || payload.email_verified !== true || typeof payload.email !== "string" || !/^[a-z0-9-]{3,100}@[a-z0-9-]{3,100}\.iam\.gserviceaccount\.com$/.test(payload.email) || !Number.isSafeInteger(payload.exp) || Number(payload.exp) < 1) throw new Error("Google identity invalid");
+    return Object.freeze({ issuer: payload.iss, audience: payload.aud, subject: payload.email, expiresAt: Number(payload.exp) * 1000 });
+  };
+}
 
 export function createDisposableGatewayHandler(input: Readonly<{
   mode: Mode;
