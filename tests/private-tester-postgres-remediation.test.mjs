@@ -138,9 +138,9 @@ test("migration compatibility accepts only exact retired checksums", async () =>
   assert.equal(acceptsMigrationLedger(files, [...files.slice(0, 6), retiredSeventh]), false);
 });
 
-test("production evidence builds the catalog from the complete 0001 through 0012 migration set", async () => {
+test("production evidence builds the catalog from the complete 0001 through 0014 migration set", async () => {
   const workflow = await readFile(new URL("../.github/workflows/production-evidence.yml", import.meta.url), "utf8");
-  assert.match(workflow, /Apply PostgreSQL migrations 0001-0012 in reviewed order/);
+  assert.match(workflow, /Apply PostgreSQL migrations 0001-0014 in reviewed order/);
   assert.match(workflow, /node --import tsx scripts\/apply-catalog-migrations\.ts/);
   assert.doesNotMatch(workflow, /for migration in postgres\/migrations/);
   assert.doesNotMatch(workflow, /Apply PostgreSQL migrations 0001-0006 in reviewed order/);

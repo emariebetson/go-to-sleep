@@ -63,6 +63,9 @@ test("readiness controller and kill services are private, vpc-routed, and identi
   const kill = source.match(/resource "google_cloud_run_v2_service" "readiness_controller_kill" \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.match(controller, /INGRESS_TRAFFIC_INTERNAL_ONLY/);
   assert.match(kill, /INGRESS_TRAFFIC_INTERNAL_ONLY/);
+  assert.match(source, /resource "google_cloud_run_v2_service_iam_member" "readiness_controller_invoker"/);
+  assert.match(source, /resource "google_cloud_run_v2_service_iam_member" "readiness_controller_kill_invoker"/);
+  assert.doesNotMatch(source, /invoker_iam_disabled\s*=\s*true[\s\S]*?readiness_controller/);
 });
 
 test("readiness decision is reachable only through an external load balancer protected by Cloud Armor", () => {
@@ -109,12 +112,13 @@ test("readiness gateway provisions only under an explicit disposable-proof gate"
   assert.match(gatewaySource, /resource "google_service_account" "readiness_decision" \{[\s\S]*?count\s*=\s*local\.readiness_gateway_proof_ready/);
 });
 
-test("readiness gateway tfvars example exists and contains dedicated identity and secret inputs", () => {
+test("readiness gateway tfvars example contains the HMAC window and private-service audiences", () => {
   assert.equal(existsSync(tfvarsPath), true);
   const values = readFileSync(tfvarsPath, "utf8");
   assert.match(values, /readiness_decision_secret_name/);
-  assert.match(values, /readiness_controller_secret_name/);
-  assert.match(values, /readiness_kill_secret_name/);
+  assert.match(values, /readiness_decision_key_not_before/);
+  assert.match(values, /readiness_decision_key_not_after/);
+  assert.match(values, /readiness_controller_service_audience/);
   assert.match(values, /readiness_decision_image_digest/);
   assert.match(values, /readiness_controller_image_digest/);
   assert.match(values, /readiness_kill_service_audience/);
@@ -128,8 +132,35 @@ test("disposable readiness gateway image pins its base and starts the guarded ru
   assert.match(dockerfile, /npm ci --ignore-scripts --omit=dev --no-audit --no-fund/);
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /runtime\.ts/);
+  assert.match(dockerfile, /COPY services\/readiness-controller\/src \.\/services\/readiness-controller\/src/);
+  assert.match(dockerfile, /COPY lib\/private-tester-activation\.ts \.\/lib\/private-tester-activation\.ts/);
   assert.deepEqual(packageJson.dependencies, { "@google-cloud/cloud-sql-connector": "1.11.3", "google-auth-library": "10.9.1", pg: "8.16.3", tsx: "4.22.1" });
   assert.equal(packageLock.lockfileVersion, 3);
+});
+
+test("Terraform binds the exact database-backed runtime contract", () => {
+  for (const value of ["decision", "controller", "kill"]) assert.match(source, new RegExp(`READINESS_GATEWAY_MODE[\\s\\S]{0,120}value\\s*=\\s*"${value}"`));
+  for (const name of [
+    "READINESS_GATEWAY_DISPOSABLE",
+    "READINESS_GATEWAY_DATABASE_BACKED",
+    "READINESS_GATEWAY_CLOUD_SQL_INSTANCE",
+    "READINESS_GATEWAY_DATABASE_USER",
+    "READINESS_GATEWAY_DATABASE_NAME",
+    "READINESS_GATEWAY_ORDINARY_AUDIENCE",
+    "READINESS_GATEWAY_ORDINARY_CALLER",
+    "READINESS_GATEWAY_EMERGENCY_AUDIENCE",
+    "READINESS_GATEWAY_EMERGENCY_CALLER",
+  ]) assert.match(source, new RegExp(name));
+  assert.match(source, /READINESS_GATEWAY_HMAC_KEY_FILE[\s\S]{0,160}\/var\/run\/secrets\/nearyou\/hmac-key/);
+  assert.match(source, /READINESS_GATEWAY_KEY_NOT_BEFORE/);
+  assert.match(source, /READINESS_GATEWAY_KEY_NOT_AFTER/);
+  assert.doesNotMatch(source, /path\s*=\s*"database-url"/);
+});
+
+test("migration registration includes both ordinary and emergency controller identities", () => {
+  const migrationJob = readFileSync(new URL("../infra/production/storage-queues.tf", import.meta.url), "utf8");
+  assert.match(migrationJob, /NEARYOU_READINESS_KILL_DATABASE_USER/);
+  assert.match(migrationJob, /NEARYOU_READINESS_KILL_OIDC_PRINCIPAL/);
 });
 
 test("readiness gateway proof proof requires disposable target and explicit vars", () => {
