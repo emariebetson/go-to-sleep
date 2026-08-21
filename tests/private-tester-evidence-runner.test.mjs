@@ -187,6 +187,8 @@ test("the independent restored-database capture is digest-pinned and emits only 
   assert.match(build, /cloud-sql-connectors\/cloud-sql-proxy@sha256:\[a-f0-9\]\{64\}/);
   assert.match(build, /capture-restore-checksums\.ts evidence\/capture\.json/);
   assert.match(build, /capture:proxy-started/);
+  assert.match(build, /npm install --prefix \/tmp\/restore-evidence-runtime --ignore-scripts --no-save pg@8\.16\.3 tsx@4\.22\.1/);
+  assert.doesNotMatch(build, /npm ci/);
   assert.match(capture, /RESTORED_DATABASE_URL/);
   assert.match(capture, /rowChecksum/);
   assert.match(capture, /catalogChecksum/);

@@ -18,9 +18,11 @@ steps:
           -e RESTORED_DATABASE_URL='postgresql://nearyou-evidence-ci%40nearnight.iam@restore-evidence-auth-proxy:5432/nearyou?sslmode=disable' \
           node:24-bookworm bash -ceu '
             printf "%s\\n" "capture:dependency-install"
-            npm ci --ignore-scripts
+            npm install --prefix /tmp/restore-evidence-runtime --ignore-scripts --no-save pg@8.16.3 tsx@4.22.1
+            test ! -e /workspace/node_modules
+            ln -s /tmp/restore-evidence-runtime/node_modules /workspace/node_modules
             printf "%s\\n" "capture:query-start"
-            node --import tsx scripts/capture-restore-checksums.ts evidence/capture.json
+            /tmp/restore-evidence-runtime/node_modules/.bin/tsx scripts/capture-restore-checksums.ts evidence/capture.json
           '
 artifacts:
   objects:
