@@ -9,7 +9,7 @@ import {
   requireReadinessGatewayProofEnvironment,
   verifyReadinessGatewayProof,
 } from "../scripts/verify-readiness-gateway.ts";
-import { createDisposableGatewayHandler } from "../services/readiness-gateway/src/runtime.ts";
+import { createDatabaseBackedDecisionHandler, createDisposableGatewayHandler } from "../services/readiness-gateway/src/runtime.ts";
 import { runReadinessDenialProbe } from "../scripts/readiness-denial-probe.ts";
 import { createDisposableDecisionWorker } from "../cloudflare/readiness-disposable-worker.ts";
 
@@ -121,10 +121,14 @@ test("readiness gateway tfvars example exists and contains dedicated identity an
 
 test("disposable readiness gateway image pins its base and starts the guarded runtime", () => {
   const dockerfile = readFileSync(new URL("../services/readiness-gateway/Dockerfile", import.meta.url), "utf8");
+  const packageJson = JSON.parse(readFileSync(new URL("../services/readiness-gateway/package.json", import.meta.url), "utf8"));
+  const packageLock = JSON.parse(readFileSync(new URL("../services/readiness-gateway/package-lock.json", import.meta.url), "utf8"));
   assert.match(dockerfile, /^FROM node:24-bookworm@sha256:[a-f0-9]{64}$/m);
-  assert.match(dockerfile, /npm install --global tsx@4\.22\.1/);
+  assert.match(dockerfile, /npm ci --ignore-scripts --omit=dev --no-audit --no-fund/);
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /runtime\.ts/);
+  assert.deepEqual(packageJson.dependencies, { "@google-cloud/cloud-sql-connector": "1.11.3", pg: "8.16.3", tsx: "4.22.1" });
+  assert.equal(packageLock.lockfileVersion, 3);
 });
 
 test("readiness gateway proof proof requires disposable target and explicit vars", () => {
@@ -224,6 +228,31 @@ test("disposable runtime refuses production mode and keeps controller lanes clos
     const handler = createDisposableGatewayHandler({ mode, disposable: true, key: new Uint8Array(32), now: () => 1_787_000_000_000 });
     assert.equal((await handler(new Request("https://internal.example/v1/nearfamily/controller", { method: "POST" }))).status, 403);
   }
+});
+
+test("database-backed disposable decision runtime uses PostgreSQL for clock, nonce, and authority", async () => {
+  const now = 1_787_000_000_000;
+  const key = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
+  const calls = [];
+  const pg = { query: async (sql) => {
+    calls.push(sql);
+    if (sql.includes("statement_timestamp")) return { rows: [{ observed_at: String(now) }] };
+    if (sql.includes("consume_nearfamily_decision_nonce")) return { rows: [{ consumed: true }] };
+    if (sql.includes("authorize_nearfamily_private_tester")) return { rows: [{ allowed: false, expires_at: null }] };
+    throw new Error("unexpected SQL");
+  } };
+  const handler = createDatabaseBackedDecisionHandler({ disposable: true, key, pg, keyNotBefore: now - 60_000, keyNotAfter: now + 172_800_000 });
+  const releaseId = "rel_20260819_readiness_gateway_01", householdHash = "a".repeat(64), nonce = "nonce_abcdefghijklmnopqrstuv";
+  const bodySha256 = await (await import("../services/readiness-decision/src/envelope.ts")).sha256Hex(JSON.stringify({ householdHash, releaseId }));
+  const claims = { version: 1, releaseId, householdHash, issuedAt: now, nonce, bodySha256, keyVersion: 1 };
+  const envelope = (await import("../services/readiness-decision/src/envelope.ts")).canonicalDecisionEnvelope({ ...claims, signature: await (await import("../services/readiness-decision/src/envelope.ts")).signDecisionEnvelope(claims, key) });
+  const response = await handler(new Request("https://lb.example/v1/nearfamily/decision", { method: "POST", headers: { "content-type": "application/json" }, body: envelope }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { version: 1, allowed: false });
+  assert.equal(calls.length, 3);
+  assert.match(calls[0], /statement_timestamp/);
+  assert.match(calls[1], /consume_nearfamily_decision_nonce/);
+  assert.match(calls[2], /authorize_nearfamily_private_tester/);
 });
 
 test("real denial probe requires one accepted HMAC then proves missing, invalid, replayed, and direct denials", async () => {

@@ -1,6 +1,6 @@
 export type CatalogRow={kind:string;identity:string;definition:string};
 export const BASELINE_FORCED_RLS = ["household_members","tenant_records"] as const;
-export const PRIVATE_TESTER_ACTIVATION_FORCED_RLS = [...BASELINE_FORCED_RLS,"private_tester_activation_baselines","private_tester_activation_state","private_tester_activation_invites","private_tester_activation_audit"] as const;
+export const PRIVATE_TESTER_ACTIVATION_FORCED_RLS = [...BASELINE_FORCED_RLS,"private_tester_activation_baselines","private_tester_activation_state","private_tester_activation_invites","private_tester_activation_audit","nearfamily_decision_nonces"] as const;
 export const LIVE_CATALOG_QUERY=`SELECT kind::text,identity::text,definition::text FROM (
 SELECT 'schema'::text kind,n.nspname::text identity,concat_ws('|',pg_get_userbyid(n.nspowner),n.nspacl) definition FROM pg_namespace n WHERE n.nspname='nearyou'
 UNION ALL SELECT 'table',n.nspname||'.'||c.relname,concat_ws('|',pg_get_userbyid(c.relowner),c.relrowsecurity,c.relforcerowsecurity,c.relacl) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='nearyou' AND c.relkind IN('r','p')

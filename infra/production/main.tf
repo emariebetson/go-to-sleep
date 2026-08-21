@@ -31,10 +31,10 @@ locals {
     local.catalog_manifest_checksum != "0000000000000000000000000000000000000000000000000000000000000000" &&
     try(local.catalog_manifest.generatedFrom, "") == "reviewed-live-production-postgresql-16" &&
     try(local.catalog_manifest.reviewRequired, true) == false &&
-    try(local.catalog_manifest.migrationHead, "") == "0012_nearfamily_private_tester_decision" &&
+    try(local.catalog_manifest.migrationHead, "") == "0013_nearfamily_decision_nonce_and_evidence" &&
     try(local.catalog_manifest.schema, "") == "nearyou" &&
     try(local.catalog_manifest.forbidPublicExecute, false) == true &&
-    try(local.catalog_manifest.requireForcedRls, []) == ["household_members", "tenant_records", "private_tester_activation_baselines", "private_tester_activation_state", "private_tester_activation_invites", "private_tester_activation_audit"] &&
+    try(local.catalog_manifest.requireForcedRls, []) == ["household_members", "tenant_records", "private_tester_activation_baselines", "private_tester_activation_state", "private_tester_activation_invites", "private_tester_activation_audit", "nearfamily_decision_nonces"] &&
     try(local.catalog_manifest.requiredKinds, []) == ["schema", "table", "column", "constraint", "index", "trigger", "policy", "function", "sequence", "extension", "role", "membership"]
   )
 }

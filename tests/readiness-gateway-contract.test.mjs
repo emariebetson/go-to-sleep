@@ -10,6 +10,8 @@ import {
 import {
   createReadinessDecisionServer,
   createPostgresDecisionAuthority,
+  createPostgresDecisionNonceStore,
+  createPostgresDecisionClock,
 } from "../services/readiness-decision/src/server.ts";
 import { createReadinessControllerServer } from "../services/readiness-controller/src/server.ts";
 
@@ -156,6 +158,30 @@ test("decision authority calls only the fixed NearFamily authorization function"
   assert.match(calls[0].sql, /^SELECT allowed, expires_at FROM nearyou\.authorize_nearfamily_private_tester\(\$1,\$2,\$3\)$/);
   assert.deepEqual(calls[0].args, [householdHash, releaseId, new Date(now)]);
   assert.doesNotMatch(calls[0].sql, /INSERT|UPDATE|DELETE|;|authorize_private_tester_household/i);
+});
+
+test("decision nonce store consumes through one fixed PostgreSQL function", async () => {
+  const calls = [];
+  const store = createPostgresDecisionNonceStore({ query: async (sql, args) => {
+    calls.push({ sql, args });
+    return { rows: [{ consumed: true }] };
+  } });
+  const input = { issuer: "cloudflare:nearfamily-disposable", keyVersion: 1, nonce: "nonce_abcdefghijklmnopqrstuv", requestSha256: "f".repeat(64), expiresAt: now + 600_000 };
+  assert.equal(await store.consume(input), true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /^SELECT nearyou\.consume_nearfamily_decision_nonce\(\$1,\$2,\$3,\$4,\$5\) AS consumed$/);
+  assert.deepEqual(calls[0].args, [input.issuer, input.keyVersion, input.nonce, input.requestSha256, new Date(input.expiresAt)]);
+  assert.doesNotMatch(calls[0].sql, /INSERT|UPDATE|DELETE|;/i);
+});
+
+test("decision uses the PostgreSQL clock for envelope freshness", async () => {
+  const calls = [];
+  const clock = createPostgresDecisionClock({ query: async (sql, args) => {
+    calls.push({ sql, args });
+    return { rows: [{ observed_at: String(now) }] };
+  } });
+  assert.equal(await clock(), now);
+  assert.deepEqual(calls, [{ sql: "SELECT floor(extract(epoch FROM statement_timestamp())*1000)::bigint::text AS observed_at", args: [] }]);
 });
 
 function controllerBody(overrides = {}) {

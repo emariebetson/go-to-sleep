@@ -5,6 +5,7 @@ import test from "node:test";
 import { applyPostgresMigrations, loadPostgresMigrations } from "../scripts/migrate.ts";
 
 const migrationPath = new URL("../postgres/migrations/0012_nearfamily_private_tester_decision.sql", import.meta.url);
+const hardeningMigrationPath = new URL("../postgres/migrations/0013_nearfamily_decision_nonce_and_evidence.sql", import.meta.url);
 const manifestPath = new URL("../postgres/catalog-manifest.json", import.meta.url);
 const terraformPath = new URL("../infra/production/main.tf", import.meta.url);
 
@@ -29,7 +30,24 @@ test("NearFamily decision migration defines the fixed execute-only authority", (
   assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.authorize_nearfamily_private_tester\(text,text,timestamptz\) TO nearyou_private_tester_decision/);
 });
 
-test("catalog and production Terraform require the 0012 decision authority and complete forced-RLS set", () => {
+test("NearFamily decision hardening binds evidence and durable nonce authority", () => {
+  assert.equal(existsSync(hardeningMigrationPath), true, "the NearFamily decision hardening migration must exist");
+  const sql = readFileSync(hardeningMigrationPath, "utf8");
+  assert.match(sql, /CREATE TABLE nearyou\.nearfamily_decision_nonces/);
+  assert.match(sql, /PRIMARY KEY\(issuer,key_version,nonce\)/);
+  assert.match(sql, /CREATE FUNCTION nearyou\.consume_nearfamily_decision_nonce/);
+  assert.match(sql, /ON CONFLICT DO NOTHING/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION nearyou\.consume_nearfamily_decision_nonce/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION nearyou\.authorize_nearfamily_private_tester/);
+  assert.match(sql, /JOIN nearyou\.private_tester_activation_baselines b/);
+  assert.match(sql, /JOIN nearyou\.release_evidence_audit e/);
+  assert.match(sql, /b\.dark_gates='\{"nearfamily":false,"nearstory":false,"scheduler":false\}'::jsonb/);
+  assert.match(sql, /\(e\.claims_projection->>'expiresAt'\)::bigint>/);
+  assert.match(sql, /least\(max\(i\.expires_at\),max\(to_timestamp/);
+  assert.match(sql, /REVOKE ALL ON nearyou\.nearfamily_decision_nonces FROM PUBLIC/);
+});
+
+test("catalog and production Terraform require the 0013 decision authority and complete forced-RLS set", () => {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const terraform = readFileSync(terraformPath, "utf8");
   const forcedRls = [
@@ -39,12 +57,13 @@ test("catalog and production Terraform require the 0012 decision authority and c
     "private_tester_activation_state",
     "private_tester_activation_invites",
     "private_tester_activation_audit",
+    "nearfamily_decision_nonces",
   ];
 
-  assert.equal(manifest.migrationHead, "0012_nearfamily_private_tester_decision");
+  assert.equal(manifest.migrationHead, "0013_nearfamily_decision_nonce_and_evidence");
   assert.deepEqual(manifest.requireForcedRls, forcedRls);
-  assert.match(terraform, /migrationHead, ""\) == "0012_nearfamily_private_tester_decision"/);
-  assert.match(terraform, /requireForcedRls, \[\]\) == \["household_members", "tenant_records", "private_tester_activation_baselines", "private_tester_activation_state", "private_tester_activation_invites", "private_tester_activation_audit"\]/);
+  assert.match(terraform, /migrationHead, ""\) == "0013_nearfamily_decision_nonce_and_evidence"/);
+  assert.match(terraform, /requireForcedRls, \[\]\) == \["household_members", "tenant_records", "private_tester_activation_baselines", "private_tester_activation_state", "private_tester_activation_invites", "private_tester_activation_audit", "nearfamily_decision_nonces"\]/);
 });
 
 const disposablePostgresUrl = process.env.NEARYOU_TEST_POSTGRES16_DATABASE_URL;
@@ -83,11 +102,13 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
 
     const migrations = await loadPostgresMigrations();
     const checksum = (await import("node:crypto")).createHash("sha256").update(migrations.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")).digest("hex");
-    const priorMigrations = migrations.slice(0, -1);
+    const decisionMigrationIndex = migrations.findIndex(({ id }) => id === "0012_nearfamily_private_tester_decision");
+    assert.ok(decisionMigrationIndex > 0);
+    const priorMigrations = migrations.slice(0, decisionMigrationIndex);
     const priorChecksum = (await import("node:crypto")).createHash("sha256").update(priorMigrations.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")).digest("hex");
     await applyPostgresMigrations(transactionalPg, priorMigrations, priorChecksum);
     await client.query("CREATE ROLE nearyou_private_tester_decision LOGIN");
-    await assert.rejects(() => applyPostgresMigrations(transactionalPg, migrations, checksum), /migration execution failed:0012_nearfamily_private_tester_decision/);
+    await assert.rejects(() => applyPostgresMigrations(transactionalPg, migrations.slice(0, decisionMigrationIndex + 1), checksum), /migration execution failed:0012_nearfamily_private_tester_decision/);
     await client.query("DROP ROLE nearyou_private_tester_decision");
     await applyPostgresMigrations(transactionalPg, migrations, checksum);
     await client.query(`CREATE ROLE "${decisionUser}" LOGIN PASSWORD '${decisionPassword}'`);
@@ -100,14 +121,19 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
       { member: decisionUser, role: "nearyou_private_tester_decision" },
       { member: controllerUser, role: "nearyou_rollout_controller" },
     ]);
-    const grants = (await client.query("SELECT has_function_privilege($1,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS decision_execute,has_function_privilege($2,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS controller_execute,has_table_privilege($1,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS decision_state,has_table_privilege($1,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS decision_invites,has_table_privilege($2,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS controller_state,has_table_privilege($2,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS controller_invites", [decisionUser, controllerUser])).rows[0];
-    assert.deepEqual(grants, { decision_execute: true, controller_execute: false, decision_state: false, decision_invites: false, controller_state: false, controller_invites: false });
+    const grants = (await client.query("SELECT has_function_privilege($1,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS decision_execute,has_function_privilege($1,'nearyou.consume_nearfamily_decision_nonce(text,integer,text,text,timestamptz)','EXECUTE') AS decision_nonce_execute,has_function_privilege($2,'nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS controller_execute,has_table_privilege($1,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS decision_state,has_table_privilege($1,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS decision_invites,has_table_privilege($1,'nearyou.nearfamily_decision_nonces','SELECT,INSERT,UPDATE,DELETE') AS decision_nonces,has_table_privilege($2,'nearyou.private_tester_activation_state','SELECT,INSERT,UPDATE,DELETE') AS controller_state,has_table_privilege($2,'nearyou.private_tester_activation_invites','SELECT,INSERT,UPDATE,DELETE') AS controller_invites", [decisionUser, controllerUser])).rows[0];
+    assert.deepEqual(grants, { decision_execute: true, decision_nonce_execute: true, controller_execute: false, decision_state: false, decision_invites: false, decision_nonces: false, controller_state: false, controller_invites: false });
     const effectiveTablePrivileges = (await client.query("SELECT principal,namespace.nspname||'.'||relation.relname AS identity FROM (VALUES ($1::text),($2::text)) identities(principal) JOIN pg_class relation ON relation.relkind IN ('r','p','v','m','f') JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace WHERE namespace.nspname='nearyou' AND has_table_privilege(principal,relation.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') ORDER BY principal,identity", [decisionUser, controllerUser])).rows;
     assert.deepEqual(effectiveTablePrivileges, [], "decision and controller identities may not directly access any Nearyou relation");
     const effectiveDecisionFunctions = (await client.query("SELECT procedure.proname FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace WHERE namespace.nspname='nearyou' AND has_function_privilege($1,procedure.oid,'EXECUTE') ORDER BY procedure.proname", [decisionUser])).rows;
-    assert.deepEqual(effectiveDecisionFunctions, [{ proname: "authorize_nearfamily_private_tester" }], "the decision identity may execute only the fixed NearFamily function");
+    assert.deepEqual(effectiveDecisionFunctions, [{ proname: "authorize_nearfamily_private_tester" }, { proname: "consume_nearfamily_decision_nonce" }], "the decision identity may execute only the fixed NearFamily functions");
 
-    await client.query("UPDATE nearyou.private_tester_activation_state SET release_id=$1,terminal_kill=false WHERE product='nearfamily'", [release]);
+    const baselineSha256 = "c".repeat(64), evidenceDigest = "d".repeat(64), nonceHash = "e".repeat(64);
+    const expiresAt = Date.now() + 600_000;
+    const claims = { expiresAt, productReadiness: [{ product: "nearfamily", releaseId: release, expiresAt, controllerMapping: { verified: true } }] };
+    await client.query("INSERT INTO nearyou.private_tester_activation_baselines(sha256,release_id,dark_gates) VALUES($1,$2,$3::jsonb)", [baselineSha256, release, JSON.stringify({ nearfamily: false, nearstory: false, scheduler: false })]);
+    await client.query("INSERT INTO nearyou.release_evidence_audit(nonce_hash,claims_digest,principal,key_id,key_version,release_id,consumed_at,claims_projection) VALUES($1,$2,'service:test','key:test',1,$3,statement_timestamp(),$4::jsonb)", [nonceHash, evidenceDigest, release, JSON.stringify(claims)]);
+    await client.query("UPDATE nearyou.private_tester_activation_state SET release_id=$1,promoted_baseline_sha256=$2,evidence_digest=$3,terminal_kill=false WHERE product='nearfamily'", [release, baselineSha256, evidenceDigest]);
     await client.query("INSERT INTO nearyou.private_tester_activation_invites(product,household_hash,release_id,expires_at) VALUES('nearfamily',$1,$2,statement_timestamp()+interval '10 minutes')", [hash, release]);
     const decisionUrl = new URL(disposablePostgresUrl);
     decisionUrl.username = decisionUser;
@@ -121,6 +147,9 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
       const invited = await decide(hash, release);
       assert.equal(invited.allowed, true);
       assert.ok(invited.expires_at instanceof Date);
+      const nonceArgs = ["cloudflare:nearfamily-disposable", 1, "nonce_abcdefghijklmnopqrstuv", "f".repeat(64)];
+      assert.equal((await decisionPool.query("SELECT nearyou.consume_nearfamily_decision_nonce($1,$2,$3,$4,statement_timestamp()+interval '5 minutes') AS consumed", nonceArgs)).rows[0].consumed, true);
+      assert.equal((await decisionPool.query("SELECT nearyou.consume_nearfamily_decision_nonce($1,$2,$3,$4,statement_timestamp()+interval '5 minutes') AS consumed", nonceArgs)).rows[0].consumed, false);
       assert.deepEqual(await decide(deniedHash, release), { allowed: false, expires_at: null });
       assert.deepEqual(await decide(hash, "rel_20260819_nearfamily_other_01"), { allowed: false, expires_at: null });
       await client.query("UPDATE nearyou.private_tester_activation_invites SET expires_at=statement_timestamp()-interval '1 second' WHERE product='nearfamily' AND household_hash=$1", [hash]);

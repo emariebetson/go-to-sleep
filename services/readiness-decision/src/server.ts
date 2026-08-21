@@ -33,6 +33,27 @@ export function createPostgresDecisionAuthority(pg: Pg): DecisionAuthority {
   });
 }
 
+export function createPostgresDecisionNonceStore(pg: Pg): DecisionNonceStore {
+  if (!pg || typeof pg.query !== "function") throw new Error("decision nonce store unavailable");
+  return Object.freeze({
+    consume: async (input) => {
+      const row = (await pg.query<{ consumed: boolean }>("SELECT nearyou.consume_nearfamily_decision_nonce($1,$2,$3,$4,$5) AS consumed", [input.issuer, input.keyVersion, input.nonce, input.requestSha256, new Date(input.expiresAt)])).rows[0];
+      if (!row || typeof row.consumed !== "boolean") throw new Error("decision nonce store unavailable");
+      return row.consumed;
+    },
+  });
+}
+
+export function createPostgresDecisionClock(pg: Pg): () => Promise<number> {
+  if (!pg || typeof pg.query !== "function") throw new Error("decision clock unavailable");
+  return async () => {
+    const row = (await pg.query<{ observed_at: string }>("SELECT floor(extract(epoch FROM statement_timestamp())*1000)::bigint::text AS observed_at", [])).rows[0];
+    const observedAt = typeof row?.observed_at === "string" && /^[0-9]{13}$/.test(row.observed_at) ? Number(row.observed_at) : NaN;
+    if (!Number.isSafeInteger(observedAt)) throw new Error("decision clock unavailable");
+    return observedAt;
+  };
+}
+
 export function createReadinessDecisionServer(input: Readonly<{
   issuer: string;
   now(): Promise<number>;

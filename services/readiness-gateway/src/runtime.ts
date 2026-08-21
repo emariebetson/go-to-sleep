@@ -1,8 +1,14 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
-import { createReadinessDecisionServer } from "../../readiness-decision/src/server";
+import {
+  createPostgresDecisionAuthority,
+  createPostgresDecisionClock,
+  createPostgresDecisionNonceStore,
+  createReadinessDecisionServer,
+} from "../../readiness-decision/src/server";
 
 type Mode = "decision" | "controller" | "kill";
+type Pg = { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }> };
 
 export function createDisposableGatewayHandler(input: Readonly<{
   mode: Mode;
@@ -32,6 +38,24 @@ export function createDisposableGatewayHandler(input: Readonly<{
   return (request) => server.handle(request);
 }
 
+export function createDatabaseBackedDecisionHandler(input: Readonly<{
+  disposable: boolean;
+  key: Uint8Array;
+  keyNotBefore: number;
+  keyNotAfter: number;
+  pg: Pg;
+}>): (request: Request) => Promise<Response> {
+  if (!input.disposable || !(input.key instanceof Uint8Array) || input.key.byteLength !== 32 || !Number.isSafeInteger(input.keyNotBefore) || !Number.isSafeInteger(input.keyNotAfter) || input.keyNotBefore >= input.keyNotAfter || !input.pg || typeof input.pg.query !== "function") throw new Error("database-backed readiness gateway invalid");
+  const server = createReadinessDecisionServer({
+    issuer: "cloudflare:nearfamily-disposable",
+    now: createPostgresDecisionClock(input.pg),
+    keys: [{ version: 1, status: "current", notBefore: input.keyNotBefore, notAfter: input.keyNotAfter, key: input.key }],
+    nonceStore: createPostgresDecisionNonceStore(input.pg),
+    authority: createPostgresDecisionAuthority(input.pg),
+  });
+  return (request) => server.handle(request);
+}
+
 function decodeKey(path: string): Uint8Array {
   const raw = readFileSync(path, "utf8").trim();
   if (!/^[A-Za-z0-9+/]{43}=$/.test(raw)) throw new Error("readiness gateway key invalid");
@@ -42,12 +66,26 @@ function decodeKey(path: string): Uint8Array {
 
 async function start(): Promise<void> {
   const mode = process.env.READINESS_GATEWAY_MODE as Mode;
-  const handler = createDisposableGatewayHandler({
-    mode,
-    disposable: process.env.READINESS_GATEWAY_DISPOSABLE === "true",
-    key: mode === "decision" ? decodeKey(process.env.READINESS_GATEWAY_HMAC_KEY_FILE ?? "") : new Uint8Array(32),
-    now: Date.now,
-  });
+  const disposable = process.env.READINESS_GATEWAY_DISPOSABLE === "true";
+  const key = mode === "decision" ? decodeKey(process.env.READINESS_GATEWAY_HMAC_KEY_FILE ?? "") : new Uint8Array(32);
+  let handler: (request: Request) => Promise<Response>;
+  if (mode === "decision" && process.env.READINESS_GATEWAY_DATABASE_BACKED === "true") {
+    const instanceConnectionName = process.env.READINESS_GATEWAY_CLOUD_SQL_INSTANCE ?? "";
+    const user = process.env.READINESS_GATEWAY_DATABASE_USER ?? "";
+    const database = process.env.READINESS_GATEWAY_DATABASE_NAME ?? "";
+    const keyNotBefore = Number(process.env.READINESS_GATEWAY_KEY_NOT_BEFORE);
+    const keyNotAfter = Number(process.env.READINESS_GATEWAY_KEY_NOT_AFTER);
+    if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z]+(?:-[a-z]+)+[0-9]:[a-z][a-z0-9-]{2,97}$/.test(instanceConnectionName) || !/^[a-z0-9-]{3,30}@[a-z][a-z0-9-]{4,28}\.iam$/.test(user) || !/^[a-z][a-z0-9_]{2,62}$/.test(database)) throw new Error("database-backed readiness gateway configuration invalid");
+    const connectorName = "@google-cloud/cloud-sql-connector", pgName = "pg";
+    const connectorModule = await import(connectorName) as unknown as { Connector: new () => { getOptions(input: Record<string, unknown>): Promise<Record<string, unknown>>; close(): void }; AuthTypes: { IAM: string }; IpAddressTypes: { PRIVATE: string } };
+    const pgModule = await import(pgName) as unknown as { Pool: new (input: Record<string, unknown>) => Pg & { end(): Promise<void> } };
+    const connector = new connectorModule.Connector();
+    const options = await connector.getOptions({ instanceConnectionName, authType: connectorModule.AuthTypes.IAM, ipType: connectorModule.IpAddressTypes.PRIVATE });
+    const pool = new pgModule.Pool({ ...options, user, database, max: 1, connectionTimeoutMillis: 750, idleTimeoutMillis: 60_000 });
+    handler = createDatabaseBackedDecisionHandler({ disposable, key, keyNotBefore, keyNotAfter, pg: pool });
+  } else {
+    handler = createDisposableGatewayHandler({ mode, disposable, key, now: Date.now });
+  }
   const port = Number(process.env.PORT ?? "8080");
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("readiness gateway port invalid");
   createServer(async (incoming, outgoing) => {
