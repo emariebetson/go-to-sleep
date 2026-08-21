@@ -6,9 +6,14 @@ import {
   createPostgresDecisionNonceStore,
   createReadinessDecisionServer,
 } from "../../readiness-decision/src/server";
+import { createReadinessControllerServer } from "../../readiness-controller/src/server";
+import { createPostgresPrivateTesterActivationController } from "../../../lib/private-tester-activation";
 
 type Mode = "decision" | "controller" | "kill";
 type Pg = { query<T>(sql: string, args: unknown[]): Promise<{ rows: T[] }> };
+type ControllerPg = Pg & { transaction<T>(run: (tx: Pg) => Promise<T>): Promise<T> };
+type ControllerIdentity = Readonly<{ issuer: string; audience: string; subject: string }>;
+type VerifiedControllerIdentity = Readonly<{ issuer: string; audience: string; subject: string; expiresAt: number }>;
 
 export function createDisposableGatewayHandler(input: Readonly<{
   mode: Mode;
@@ -54,6 +59,31 @@ export function createDatabaseBackedDecisionHandler(input: Readonly<{
     authority: createPostgresDecisionAuthority(input.pg),
   });
   return (request) => server.handle(request);
+}
+
+export function createDatabaseBackedControllerHandler(input: Readonly<{
+  mode: "controller" | "kill";
+  disposable: boolean;
+  pg: ControllerPg;
+  ordinaryIdentity: ControllerIdentity;
+  emergencyIdentity: ControllerIdentity;
+  verifyIdToken(input: Readonly<{ token: string; audience: string }>): Promise<VerifiedControllerIdentity>;
+}>): (request: Request) => Promise<Response> {
+  if (!input.disposable || !(input.mode === "controller" || input.mode === "kill") || !input.pg || typeof input.pg.query !== "function" || typeof input.pg.transaction !== "function" || typeof input.verifyIdToken !== "function") throw new Error("database-backed readiness controller invalid");
+  const apply = createPostgresPrivateTesterActivationController(input.pg);
+  const executor = Object.freeze({ apply: (request: Parameters<typeof apply>[0]) => apply(request) });
+  const server = createReadinessControllerServer({
+    now: createPostgresDecisionClock(input.pg),
+    ordinaryIdentity: input.ordinaryIdentity,
+    emergencyIdentity: input.emergencyIdentity,
+    verifyIdToken: input.verifyIdToken,
+    ordinaryController: executor,
+    emergencyController: executor,
+  });
+  const allowedPath = input.mode === "kill" ? "/v1/nearfamily/emergency" : "/v1/nearfamily/controller";
+  return (request) => new URL(request.url).pathname === allowedPath
+    ? server.handle(request)
+    : Promise.resolve(new Response('{"version":1,"accepted":false}', { status: 404, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } }));
 }
 
 function decodeKey(path: string): Uint8Array {
