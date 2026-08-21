@@ -9,6 +9,8 @@ import {
   requireReadinessGatewayProofEnvironment,
   verifyReadinessGatewayProof,
 } from "../scripts/verify-readiness-gateway.ts";
+import { createDisposableGatewayHandler } from "../services/readiness-gateway/src/runtime.ts";
+import { runReadinessDenialProbe } from "../scripts/readiness-denial-probe.ts";
 
 const execFile = promisify(execFileCallback);
 const tfvarsPath = new URL("../infra/disposable/readiness-gateway.tfvars.example", import.meta.url);
@@ -116,6 +118,14 @@ test("readiness gateway tfvars example exists and contains dedicated identity an
   assert.match(values, /readiness_kill_service_audience/);
 });
 
+test("disposable readiness gateway image pins its base and starts the guarded runtime", () => {
+  const dockerfile = readFileSync(new URL("../services/readiness-gateway/Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /^FROM node:24-bookworm@sha256:[a-f0-9]{64}$/m);
+  assert.match(dockerfile, /npm install --global tsx@4\.22\.1/);
+  assert.match(dockerfile, /USER node/);
+  assert.match(dockerfile, /runtime\.ts/);
+});
+
 test("readiness gateway proof proof requires disposable target and explicit vars", () => {
   assert.throws(() => requireReadinessGatewayProofEnvironment({}), /Readiness gateway proof requires an explicit disposable deployment/);
   assert.throws(
@@ -205,4 +215,34 @@ test("readiness gateway proof CLI rejects omitted disposable confirmation", asyn
   }),
     (error) => error.code === 1 && /Readiness gateway proof requires an explicit disposable deployment/.test(error.stderr || ""),
   );
+});
+
+test("disposable runtime refuses production mode and keeps controller lanes closed", async () => {
+  assert.throws(() => createDisposableGatewayHandler({ mode: "decision", disposable: false, key: new Uint8Array(32), now: () => 1_787_000_000_000 }), /disposable/);
+  for (const mode of ["controller", "kill"]) {
+    const handler = createDisposableGatewayHandler({ mode, disposable: true, key: new Uint8Array(32), now: () => 1_787_000_000_000 });
+    assert.equal((await handler(new Request("https://internal.example/v1/nearfamily/controller", { method: "POST" }))).status, 403);
+  }
+});
+
+test("real denial probe requires one accepted HMAC then proves missing, invalid, replayed, and direct denials", async () => {
+  const now = 1_787_000_000_000;
+  const key = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
+  const decision = createDisposableGatewayHandler({ mode: "decision", disposable: true, key, now: () => now });
+  const fetch = async (url, init = {}) => {
+    const target = String(url);
+    if (target === "https://lb.example/v1/nearfamily/decision") return decision(new Request(target, init));
+    if (target === "https://decision.run.app/v1/nearfamily/decision") return new Response("", { status: 404 });
+    if (target.includes("controller.run.app")) return new Response("", { status: 403 });
+    throw new Error(`unexpected URL ${target}`);
+  };
+  assert.deepEqual(await runReadinessDenialProbe({
+    gatewayUrl: "https://lb.example/v1/nearfamily/decision",
+    directDecisionUrl: "https://decision.run.app/v1/nearfamily/decision",
+    controllerUrl: "https://controller.run.app/v1/nearfamily/controller",
+    key,
+    now,
+    nonce: "nonce_abcdefghijklmnopqrstuv",
+    fetch,
+  }), { missingHmac: 401, invalidHmac: 401, replayedHmac: 401, directCloudRun: 404, wrongAudience: 403, controllerEscalation: 403 });
 });
