@@ -11,7 +11,7 @@ steps:
         test "${_RESTORED_CLOUD_SQL_INSTANCE}" = "nearnight:us-central1:nearyou-evidence-20260820"
         printf '%s' "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" | grep -Eq '^gcr\.io/cloud-sql-connectors/cloud-sql-proxy@sha256:[a-f0-9]{64}$'
         docker run --detach --rm --name restore-evidence-auth-proxy --network cloudbuild \
-          "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" --auto-iam-authn --structured-logs --address=0.0.0.0 --port=5432 \
+          "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" --auto-iam-authn --private-ip --structured-logs --address=0.0.0.0 --port=5432 \
           "${_RESTORED_CLOUD_SQL_INSTANCE}"
         trap 'docker rm -f restore-evidence-auth-proxy >/dev/null 2>&1 || true' EXIT
         docker run --rm --network cloudbuild -v /workspace:/workspace -w /workspace \

@@ -179,6 +179,7 @@ test("the private restored-database proof writes only to the provisioned immutab
   assert.match(build, /serviceAccount: projects\/nearnight\/serviceAccounts\/nearyou-evidence-ci@nearnight\.iam\.gserviceaccount\.com/);
   assert.match(build, /location: gs:\/\/nearyou-production-private-evidence-nearnight\/restores\/\$BUILD_ID/);
   assert.doesNotMatch(build, /gs:\/\/nearyou-private-evidence/);
+  assert.match(build, /--private-ip/);
 });
 
 test("the independent restored-database capture is digest-pinned and emits only checksum evidence", () => {
@@ -187,6 +188,7 @@ test("the independent restored-database capture is digest-pinned and emits only 
   assert.match(build, /cloud-sql-connectors\/cloud-sql-proxy@sha256:\[a-f0-9\]\{64\}/);
   assert.match(build, /capture-restore-checksums\.ts evidence\/capture\.json/);
   assert.match(build, /capture:proxy-started/);
+  assert.match(build, /--private-ip/);
   assert.match(build, /docker logs restore-evidence-auth-proxy/);
   assert.match(build, /npm install --prefix \/tmp\/restore-evidence-runtime --ignore-scripts --no-save pg@8\.16\.3 tsx@4\.22\.1/);
   assert.doesNotMatch(build, /npm ci/);
