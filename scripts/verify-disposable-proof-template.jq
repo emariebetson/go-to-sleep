@@ -19,6 +19,6 @@ $c.args == ["/var/run/secrets/nearyou/database-url"] and
 $v.name == $m.name and
 $m.mountPath == "/var/run/secrets/nearyou" and
 $v.secret.secretName == "nf-rdy-disposable-migration-admin" and
-$v.secret.items == [{"key":"1","path":"database-url"}] and
+$v.secret.items == [{"key":"2","path":"database-url"}] and
 ($a["run.googleapis.com/network-interfaces"] | fromjson) == [{"network":"nearyou-production","subnetwork":"nearyou-production"}] and
 $a["run.googleapis.com/vpc-access-egress"] == "private-ranges-only"
