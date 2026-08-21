@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { acceptsMigrationLedger, applyPostgresMigrations, loadPostgresMigrations } from "../scripts/migrate.ts";
 import { registerRolloutController } from "../scripts/register-rollout-controller.ts";
-import { cloudSqlRoleAssignmentPlan,validateCloudSqlRoleAssignmentReadback } from "../scripts/cloud-sql-role-assignment-plan.ts";
+import { cloudSqlRoleAssignmentPlan,executeCloudSqlRoleAssignment,validateCloudSqlRoleAssignmentReadback } from "../scripts/cloud-sql-role-assignment-plan.ts";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -27,17 +27,32 @@ const migrationBody = (sql) => sql.replace(/^\s*BEGIN;\s*/i, "").replace(/\s*COM
 const ledgerChecksum = (files) => sha256(files.map((file) => `${file.id}:${file.checksum}`).join("\n"));
 
 test("0009 repairs the Cloud SQL service-account length limit without rewriting 0008",async()=>{
-  const files=await loadPostgresMigrations(),migration=files[8],plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",observedSessionUser:"nearyou_migration_admin",operationId:`op_${"a".repeat(64)}`});
+  const files=await loadPostgresMigrations(),migration=files[8],plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-evidence-20260820",operationId:`op_${"a".repeat(64)}`});
   assert.equal(migration.id,"0009_cloud_sql_verifier_identity_limit");
   assert.match(migration.sql,/session_user::text<>'nearyou-pt-baseline@nearnight\.iam'/);
   assert.doesNotMatch(migration.sql,/gserviceaccount\.com/);
   assert.equal(plan.requiresMigrationHead,"0014_release_policy_evidence_read");
-  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-readiness-kill@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-readiness-decision@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_decision"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
+  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nf-rdy-controller@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nf-rdy-kill@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nf-rdy-decision@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_decision"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
   assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&!item.command.some(value=>value.includes("revoke"))));
   assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
   assert.equal(validateCloudSqlRoleAssignmentReadback(plan,rows).reviewRequired,true);
   await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"CLOUD_IAM_SERVICE_ACCOUNT"})),/readback invalid/);
+  assert.throws(()=>cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-production",operationId:`op_${"a".repeat(64)}`}),/configuration invalid/);
+  assert.throws(()=>cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"wrong",operationId:`op_${"a".repeat(64)}`}),/configuration invalid/);
+});
+
+test("disposable Cloud SQL role assignment executes additive grants and retains exact readback",async()=>{
+  const plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-evidence-20260820",operationId:`op_${"b".repeat(64)}`}),calls=[];
+  const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
+  const receipt=await executeCloudSqlRoleAssignment(plan,async(command,args)=>{calls.push([command,...args]);return args[2]==="list"?JSON.stringify(rows):""});
+  assert.equal(calls.length,plan.assignments.length+1);
+  assert.ok(calls.slice(0,-1).every(call=>call[0]==="gcloud"&&call[1]==="sql"&&call[2]==="users"&&call[3]==="assign-roles"));
+  assert.deepEqual(calls.at(-1),["gcloud","sql","users","list","--project=nearnight","--instance=nearyou-evidence-20260820","--format=json(name,type,databaseRoles)"]);
+  assert.equal(receipt.disposable,true);
+  assert.equal(receipt.reviewRequired,true);
+  assert.equal(receipt.assignments.length,4);
+  await assert.rejects(()=>executeCloudSqlRoleAssignment(plan,async(command,args)=>args[2]==="list"?"[]":""),/readback invalid/);
 });
 
 test("0010 grants only schema usage required to call migration-owned registration functions",async()=>{
@@ -144,6 +159,11 @@ test("production evidence builds the catalog from the complete 0001 through 0014
   assert.match(workflow, /node --import tsx scripts\/apply-catalog-migrations\.ts/);
   assert.doesNotMatch(workflow, /for migration in postgres\/migrations/);
   assert.doesNotMatch(workflow, /Apply PostgreSQL migrations 0001-0006 in reviewed order/);
+  assert.match(workflow, /readiness-gateway-disposable-roles:[\s\S]*if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /NEARYOU_CLOUD_SQL_ROLE_INSTANCE: nearyou-evidence-20260820/);
+  assert.match(workflow, /NEARYOU_CLOUD_SQL_ROLE_DISPOSABLE: "true"/);
+  assert.match(workflow, /cloud-sql-role-assignment-plan\.ts evidence\/readiness-gateway-disposable-role-receipt\.json/);
+  assert.match(workflow, /readiness-gateway-disposable-role-receipt-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
 });
 
 test("baseline ACL gate has deliberate failure semantics for every negative assertion", async () => {
@@ -174,14 +194,14 @@ async function findPsql() {
 }
 
 const psql = await findPsql();
-test("baseline ACL gate process exits nonzero when the verifier URL is missing", { skip: psql ? false : "psql is unavailable" }, async () => {
+const disposablePostgresUrl = process.env.NEARYOU_TEST_POSTGRES16_DATABASE_URL;
+test("baseline ACL gate process exits nonzero when the verifier URL is missing", { skip: psql&&disposablePostgresUrl ? false : "a disposable PostgreSQL connection is unavailable" }, async () => {
   await assert.rejects(
-    execFile(psql, ["-X", "-f", aclGatePath], { cwd: repositoryRoot, timeout: 10_000 }),
+    execFile(psql, ["-X", "--dbname", disposablePostgresUrl, "-f", aclGatePath], { cwd: repositoryRoot, timeout: 10_000 }),
     (error) => error.code === 3,
   );
 });
 
-const disposablePostgresUrl = process.env.NEARYOU_TEST_POSTGRES16_DATABASE_URL;
 test("disposable PostgreSQL 16 executes the historical 0006 to 0007 upgrade and ACL process", { skip: disposablePostgresUrl ? false : "NEARYOU_TEST_POSTGRES16_DATABASE_URL is unset" }, async () => {
   assert.equal(process.env.NEARYOU_TEST_POSTGRES16_DISPOSABLE, "true", "PostgreSQL integration target must be explicitly disposable");
   assert.ok(psql, "psql is required when the PostgreSQL 16 integration target is enabled");

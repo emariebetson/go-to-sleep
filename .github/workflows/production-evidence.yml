@@ -107,6 +107,45 @@ jobs:
           path: evidence/readiness-gateway-image*.json
           if-no-files-found: error
           retention-days: 90
+  readiness-gateway-disposable-roles:
+    needs: nearfamily-decision-proof
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production-evidence
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - id: role-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+        with:
+          version: ">= 548.0.0"
+      - name: Assign and read back disposable gateway database roles
+        env:
+          NEARYOU_CLOUD_SQL_ROLE_PROJECT: nearnight
+          NEARYOU_CLOUD_SQL_ROLE_INSTANCE: nearyou-evidence-20260820
+          NEARYOU_CLOUD_SQL_ROLE_DISPOSABLE: "true"
+          NEARYOU_CLOUD_SQL_ROLE_CONFIRMATION: DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-evidence-20260820
+          NEARYOU_CLOUD_SQL_ROLE_OPERATION_SEED: ${{ github.run_id }}:${{ github.run_attempt }}:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node --import tsx scripts/cloud-sql-role-assignment-plan.ts evidence/readiness-gateway-disposable-role-receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: readiness-gateway-disposable-role-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/readiness-gateway-disposable-role-receipt.json
+          if-no-files-found: error
+          retention-days: 90
   operational-evidence:
     needs: [postgres-contract, nearfamily-decision-proof]
     runs-on: ubuntu-latest
