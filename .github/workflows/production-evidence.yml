@@ -74,6 +74,39 @@ jobs:
           name: nearfamily-private-decision-proof-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/nearfamily-private-decision-proof.log
           if-no-files-found: warn
+  readiness-gateway-image:
+    needs: nearfamily-decision-proof
+    runs-on: ubuntu-latest
+    environment: production-evidence
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: image-auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_EVIDENCE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_EVIDENCE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+        with:
+          version: ">= 548.0.0"
+      - name: Build immutable disposable controller image
+        run: |
+          set -euo pipefail
+          test "${{ vars.GCP_PROJECT }}" = "nearnight"
+          mkdir -p evidence
+          build_id="$(gcloud builds submit . --project=nearnight --region=us-central1 --config=infra/disposable/readiness-gateway-image.cloudbuild.yaml --substitutions=_IMAGE_TAG="$GITHUB_SHA" --async --format='value(id)')"
+          gcloud builds log "$build_id" --project=nearnight --region=us-central1 --stream
+          test "$(gcloud builds describe "$build_id" --project=nearnight --region=us-central1 --format='value(status)')" = "SUCCESS"
+          gcloud builds describe "$build_id" --project=nearnight --region=us-central1 --format=json > evidence/readiness-gateway-image-build.json
+          gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:$GITHUB_SHA" --project=nearnight --format=json > evidence/readiness-gateway-image.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: readiness-gateway-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/readiness-gateway-image*.json
+          if-no-files-found: error
+          retention-days: 90
   operational-evidence:
     needs: [postgres-contract, nearfamily-decision-proof]
     runs-on: ubuntu-latest

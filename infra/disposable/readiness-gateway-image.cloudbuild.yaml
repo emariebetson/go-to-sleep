@@ -1,0 +1,19 @@
+steps:
+  - name: gcr.io/cloud-builders/docker@sha256:2e8d40d8e48dc14fab4213d5e532d74f63fd403d9e8d7f6463096a75820286c3
+    args:
+      - build
+      - --file
+      - services/readiness-gateway/Dockerfile
+      - --tag
+      - us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:${_IMAGE_TAG}
+      - .
+  - name: gcr.io/cloud-builders/docker@sha256:2e8d40d8e48dc14fab4213d5e532d74f63fd403d9e8d7f6463096a75820286c3
+    args:
+      - push
+      - us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:${_IMAGE_TAG}
+images:
+  - us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:${_IMAGE_TAG}
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _IMAGE_TAG: manual-only
