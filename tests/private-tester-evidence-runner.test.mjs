@@ -5,6 +5,7 @@ import test from "node:test";
 import { createGoogleStorageGenerationZeroStore, runPrivateTesterEvidence } from "../scripts/run-private-tester-evidence.ts";
 import { composePrivateTesterDeploymentManifest, privateTesterDeploymentManifestSignedBytes } from "../lib/private-tester-deployment-manifest.ts";
 import { uploadImmutableObject } from "../scripts/immutable-object-upload.ts";
+import { redactRestoreFailure } from "../scripts/restore-failure.ts";
 
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const now = Date.parse("2026-08-19T12:00:00.000Z");
@@ -246,4 +247,10 @@ test("the restored checksum uploader creates one immutable object and rejects a 
     bucket: "evidence-bucket", object: "restores/capture-build/evidence/capture.json", raw: "{}\n", accessToken: "token_abcdefghijklmnopqrstuvwxyz",
     fetch: async () => new Response("{}", { status: 412 }),
   }), /immutable object conflict/);
+});
+
+test("restored proof diagnostics identify the stage without leaking credentials", () => {
+  const message = redactRestoreFailure("database-query", new Error("postgresql://user:secret@10.0.0.1/db token_abcdefghijklmnopqrstuvwxyz\nsecond line"));
+  assert.equal(message, "stage=database-query reason=postgres-url-redacted token-redacted second line");
+  assert.doesNotMatch(message, /secret|token_abcdefghijklmnopqrstuvwxyz|\n/);
 });
