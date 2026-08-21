@@ -171,8 +171,11 @@ test("production evidence builds the catalog from the complete 0001 through 0014
   assert.match(workflow, /cloud-sql-role-assignment-plan\.ts evidence\/readiness-gateway-disposable-role-receipt\.json/);
   assert.match(workflow, /gcloud run jobs execute nf-rdy-database-proof[\s\S]*readiness-gateway-database-proof-receipt\.json/);
   assert.match(workflow, /gcloud run jobs deploy nf-rdy-database-proof[\s\S]*nf-rdy-disposable-migration-admin:1/);
+  assert.equal((workflow.match(/verify-disposable-proof-template\.jq/g)??[]).length,2);
   const proofDockerfile=await readFile(new URL("../Dockerfile.readiness-database-proof",import.meta.url),"utf8");
   assert.match(proofDockerfile,/ENTRYPOINT \["node", "--import", "tsx", "scripts\/verify-disposable-gateway-database\.ts"\]/);
+  const proofTemplate=await readFile(new URL("../scripts/verify-disposable-proof-template.jq",import.meta.url),"utf8");
+  for(const contract of ["maxRetries == 0","timeoutSeconds == \"300\"","nf-rdy-disposable-migration-admin","NEARYOU_GATEWAY_DATABASE_DISPOSABLE","NEARYOU_GATEWAY_DATABASE_INSTANCE","network-interfaces","vpc-access-egress","$c.image == $image"])assert.ok(proofTemplate.includes(contract));
   assert.match(workflow, /migrationHead == "0014_release_policy_evidence_read"[\s\S]*laneIsolation == true/);
   assert.match(workflow, /readiness-gateway-disposable-role-receipt-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
 });
