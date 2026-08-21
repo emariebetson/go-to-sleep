@@ -15,7 +15,7 @@ steps:
     args:
       - build
       - --file
-      - Dockerfile.catalog-prep
+      - Dockerfile.readiness-database-proof
       - --tag
       - us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-database-proof:${_IMAGE_TAG}
       - .

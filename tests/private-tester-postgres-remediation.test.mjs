@@ -165,10 +165,14 @@ test("production evidence builds the catalog from the complete 0001 through 0014
   assert.doesNotMatch(workflow, /for migration in postgres\/migrations/);
   assert.doesNotMatch(workflow, /Apply PostgreSQL migrations 0001-0006 in reviewed order/);
   assert.match(workflow, /readiness-gateway-disposable-roles:[\s\S]*if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /readiness-gateway-disposable-roles:[\s\S]*needs: \[nearfamily-decision-proof, readiness-gateway-image\]/);
   assert.match(workflow, /NEARYOU_CLOUD_SQL_ROLE_INSTANCE: nearyou-evidence-20260820/);
   assert.match(workflow, /NEARYOU_CLOUD_SQL_ROLE_DISPOSABLE: "true"/);
   assert.match(workflow, /cloud-sql-role-assignment-plan\.ts evidence\/readiness-gateway-disposable-role-receipt\.json/);
   assert.match(workflow, /gcloud run jobs execute nf-rdy-database-proof[\s\S]*readiness-gateway-database-proof-receipt\.json/);
+  assert.match(workflow, /gcloud run jobs deploy nf-rdy-database-proof[\s\S]*nf-rdy-disposable-migration-admin:1/);
+  const proofDockerfile=await readFile(new URL("../Dockerfile.readiness-database-proof",import.meta.url),"utf8");
+  assert.match(proofDockerfile,/ENTRYPOINT \["node", "--import", "tsx", "scripts\/verify-disposable-gateway-database\.ts"\]/);
   assert.match(workflow, /migrationHead == "0014_release_policy_evidence_read"[\s\S]*laneIsolation == true/);
   assert.match(workflow, /readiness-gateway-disposable-role-receipt-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
 });
