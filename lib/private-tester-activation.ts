@@ -283,11 +283,15 @@ export function createDurablePrivateTesterActivationController(input: { authorit
     validateDurableRequest(raw);
     const now = input.now();
     if (!integer(now)) invalid("clock unavailable");
-    let principal: { principal: string }, baseline: { sha256: string; releaseId: string; darkGates: DarkGates } | null, claims: Claims | null;
+    let principal: { principal: string };
+    try { principal = await input.authority.authenticatedController(); } catch { invalid("authority unavailable"); }
+    if (!PRINCIPAL.test(principal.principal)) invalid("authority invalid");
+    if (raw.action === "kill") return input.store.apply({ ...raw, principal: principal.principal, canonicalClaims: "{}" });
+    let baseline: { sha256: string; releaseId: string; darkGates: DarkGates } | null, claims: Claims | null;
     try {
-      [principal, baseline, claims] = await Promise.all([input.authority.authenticatedController(), input.authority.promotedBaseline(raw.promotedBaselineSha256), input.authority.trustedReleaseEvidence(raw.releaseEvidenceDigest)]);
+      [baseline, claims] = await Promise.all([input.authority.promotedBaseline(raw.promotedBaselineSha256), input.authority.trustedReleaseEvidence(raw.releaseEvidenceDigest)]);
     } catch { invalid("authority unavailable"); }
-    if (!PRINCIPAL.test(principal.principal) || !baseline || !exact(baseline, ["sha256", "releaseId", "darkGates"]) || baseline.sha256 !== raw.promotedBaselineSha256 || baseline.releaseId !== raw.releaseId || !darkGates(baseline.darkGates) || !claims) invalid("authority invalid");
+    if (!baseline || !exact(baseline, ["sha256", "releaseId", "darkGates"]) || baseline.sha256 !== raw.promotedBaselineSha256 || baseline.releaseId !== raw.releaseId || !darkGates(baseline.darkGates) || !claims) invalid("authority invalid");
     let canonicalClaims: string;
     try { canonicalClaims = canonicalEvidence(claims); } catch { invalid("evidence invalid"); }
     if (await sha256Text(canonicalClaims) !== raw.releaseEvidenceDigest || claims.releaseId !== raw.releaseId || claims.expiresAt <= now || !claims.productReadiness.some((item) => item.product === raw.product && item.releaseId === raw.releaseId && item.expiresAt > now && item.controllerMapping.verified === true)) invalid("evidence invalid");
