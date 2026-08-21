@@ -182,6 +182,8 @@ test("the private restored-database proof writes only to the provisioned immutab
   assert.match(build, /serviceAccount: projects\/nearnight\/serviceAccounts\/nearyou-evidence-ci@nearnight\.iam\.gserviceaccount\.com/);
   assert.match(build, /RESTORE_EVIDENCE_BUCKET='nearyou-production-private-evidence-nearnight'/);
   assert.match(build, /RESTORE_EVIDENCE_OBJECT='restores\/\$\{BUILD_ID\}\/evidence\/restore\.json'/);
+  assert.match(build, /RELEASE_ID='rel_20260813_nearyou_dark'/);
+  assert.match(build, /SCHEMA_CHECKSUM='4ea5ebc2812b54d409a37f2bbab8691bd27d0982de309c1eb45e4e5c022516f7'/);
   assert.doesNotMatch(build, /^artifacts:/m);
   assert.doesNotMatch(build, /gs:\/\/nearyou-private-evidence/);
   assert.match(build, /--private-ip/);

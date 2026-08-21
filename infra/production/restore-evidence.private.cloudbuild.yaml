@@ -22,6 +22,8 @@ steps:
           -e RESTORE_GCP_PROJECT=nearnight \
           -e RESTORE_EVIDENCE_BUCKET='nearyou-production-private-evidence-nearnight' \
           -e RESTORE_EVIDENCE_OBJECT='restores/${BUILD_ID}/evidence/restore.json' \
+          -e RELEASE_ID='rel_20260813_nearyou_dark' \
+          -e SCHEMA_CHECKSUM='4ea5ebc2812b54d409a37f2bbab8691bd27d0982de309c1eb45e4e5c022516f7' \
           -e RESTORED_DATABASE_URL='postgresql://nearyou-evidence-ci%40nearnight.iam@restore-evidence-auth-proxy:5432/nearyou?sslmode=disable' \
           node:24-bookworm bash -ceu '
             npm install --prefix /tmp/restore-evidence-runtime --ignore-scripts --no-save pg@8.16.3 tsx@4.22.1

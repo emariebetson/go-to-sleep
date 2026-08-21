@@ -21,6 +21,7 @@ async function main() {
       const rows = (await pool.query("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"")).rows, catalog = await collectLiveCatalog(pool), rowChecksum = createHash("sha256").update(JSON.stringify(rows)).digest("hex"), catalogChecksum = createHash("sha256").update(JSON.stringify(catalog)).digest("hex");
       return { rowChecksum, catalogChecksum, rowCount: rows.length };
     } });
+    stage = "artifact-identity";
     const raw = JSON.stringify(operationalArtifact(result)) + "\n";
     stage = "local-write";
     await writeFile(output, raw, { flag: "wx" });
