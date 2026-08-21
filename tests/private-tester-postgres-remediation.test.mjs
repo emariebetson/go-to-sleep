@@ -172,7 +172,8 @@ test("production evidence builds the catalog from the complete 0001 through 0014
   assert.match(workflow, /gcloud run jobs execute nf-rdy-database-proof[\s\S]*readiness-gateway-database-proof-receipt\.json/);
   assert.match(workflow, /labels\.\\"run\.googleapis\.com\/execution_name\\"=\\"\$execution\\"/);
   assert.match(workflow, /gcloud run jobs deploy nf-rdy-database-proof[\s\S]*nf-rdy-disposable-migration-admin:2/);
-  assert.match(workflow, /gcloud run jobs execute nf-rdy-database-proof[\s\S]*--async[\s\S]*status\.conditions[\s\S]*readiness-gateway-database-proof\.log/);
+  assert.match(workflow, /gcloud run jobs execute nf-rdy-database-proof[\s\S]*--async[\s\S]*status\.conditions[\s\S]*readiness-gateway-database-proof-log\.json/);
+  assert.match(workflow, /\.jsonPayload\?[\s\S]*\.instance == "nearnight:us-central1:nearyou-evidence-20260820"/);
   assert.equal((workflow.match(/verify-disposable-proof-template\.jq/g)??[]).length,2);
   const proofDockerfile=await readFile(new URL("../Dockerfile.readiness-database-proof",import.meta.url),"utf8");
   assert.match(proofDockerfile,/ENTRYPOINT \["node", "--import", "tsx", "scripts\/verify-disposable-gateway-database\.ts"\]/);

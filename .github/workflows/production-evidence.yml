@@ -174,8 +174,8 @@ jobs:
             sleep 5
           done
           jq -e --arg image "$proof_image" -f scripts/verify-disposable-proof-template.jq evidence/readiness-gateway-database-proof-execution.json >/dev/null
-          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"nf-rdy-database-proof\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\"" --project=nearnight --freshness=15m --limit=100 --order=asc --format='value(textPayload)' > evidence/readiness-gateway-database-proof.log
-          grep -m1 '^{' evidence/readiness-gateway-database-proof.log > evidence/readiness-gateway-database-proof-receipt.json || true
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"nf-rdy-database-proof\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\"" --project=nearnight --freshness=15m --limit=100 --order=asc --format=json > evidence/readiness-gateway-database-proof-log.json
+          jq -ce '[.[] | .jsonPayload? | select(.version == 1 and .disposable == true and .instance == "nearnight:us-central1:nearyou-evidence-20260820")][0]' evidence/readiness-gateway-database-proof-log.json > evidence/readiness-gateway-database-proof-receipt.json || true
           jq -e '.status.conditions[] | select(.type == "Completed" and .status == "True")' evidence/readiness-gateway-database-proof-execution.json >/dev/null
           test -s evidence/readiness-gateway-database-proof-receipt.json
           jq -e '.disposable == true and .migrationHead == "0014_release_policy_evidence_read" and .controller.mapped == true and .kill.mapped == true and .laneIsolation == true' evidence/readiness-gateway-database-proof-receipt.json >/dev/null
@@ -187,7 +187,7 @@ jobs:
             evidence/readiness-gateway-disposable-role-receipt.json
             evidence/readiness-gateway-database-proof-job.json
             evidence/readiness-gateway-database-proof-execution.json
-            evidence/readiness-gateway-database-proof.log
+            evidence/readiness-gateway-database-proof-log.json
             evidence/readiness-gateway-database-proof-receipt.json
           if-no-files-found: error
           retention-days: 90
