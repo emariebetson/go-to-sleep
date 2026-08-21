@@ -171,7 +171,7 @@ jobs:
           gcloud run jobs executions describe "$execution" --project=nearnight --region=us-central1 --format=json > evidence/readiness-gateway-database-proof-execution.json
           jq -e '.status.conditions[] | select(.type == "Completed" and .status == "True")' evidence/readiness-gateway-database-proof-execution.json >/dev/null
           jq -e --arg image "$proof_image" -f scripts/verify-disposable-proof-template.jq evidence/readiness-gateway-database-proof-execution.json >/dev/null
-          gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=nf-rdy-database-proof AND labels.run.googleapis.com/execution_name=$execution" --project=nearnight --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep -m1 '^{' > evidence/readiness-gateway-database-proof-receipt.json
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"nf-rdy-database-proof\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\"" --project=nearnight --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep -m1 '^{' > evidence/readiness-gateway-database-proof-receipt.json
           jq -e '.disposable == true and .migrationHead == "0014_release_policy_evidence_read" and .controller.mapped == true and .kill.mapped == true and .laneIsolation == true' evidence/readiness-gateway-database-proof-receipt.json >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

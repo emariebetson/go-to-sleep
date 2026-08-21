@@ -170,6 +170,7 @@ test("production evidence builds the catalog from the complete 0001 through 0014
   assert.match(workflow, /NEARYOU_CLOUD_SQL_ROLE_DISPOSABLE: "true"/);
   assert.match(workflow, /cloud-sql-role-assignment-plan\.ts evidence\/readiness-gateway-disposable-role-receipt\.json/);
   assert.match(workflow, /gcloud run jobs execute nf-rdy-database-proof[\s\S]*readiness-gateway-database-proof-receipt\.json/);
+  assert.match(workflow, /labels\.\\"run\.googleapis\.com\/execution_name\\"=\\"\$execution\\"/);
   assert.match(workflow, /gcloud run jobs deploy nf-rdy-database-proof[\s\S]*nf-rdy-disposable-migration-admin:1/);
   assert.equal((workflow.match(/verify-disposable-proof-template\.jq/g)??[]).length,2);
   const proofDockerfile=await readFile(new URL("../Dockerfile.readiness-database-proof",import.meta.url),"utf8");
