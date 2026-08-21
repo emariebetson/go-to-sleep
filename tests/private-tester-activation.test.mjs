@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createDurablePrivateTesterActivationController,
   createPrivateTesterActivationTestController,
   createPrivateTesterActivationTestStore,
   createPostgresPrivateTesterActivationAuthority,
@@ -123,6 +124,36 @@ test("the kill switch still wins when promoted evidence is no longer available",
   const killed = await activate(request({ action: "kill", operationId: "kill-nearstory-000002", expectedVersion: active.version, promotedBaselineSha256: hash("f"), invites: [] }));
   assert.equal(killed.status, "killed");
   assert.equal(await activate.authorize({ product: "nearstory", householdHash: invitedHouseholdHash }), false);
+});
+
+test("the durable emergency kill does not depend on baseline or release-evidence availability", async () => {
+  const calls = [];
+  const kill = createDurablePrivateTesterActivationController({
+    now: () => now,
+    authority: {
+      authenticatedController: async () => ({ principal: "service:readiness_kill" }),
+      promotedBaseline: async () => { throw new Error("baseline unavailable"); },
+      trustedReleaseEvidence: async () => { throw new Error("evidence unavailable"); },
+    },
+    store: {
+      apply: async (command) => {
+        calls.push(command);
+        return { product: "nearfamily", releaseId, version: 2, globalPercent: 0, status: "killed", auditDigest: hash("f") };
+      },
+    },
+  });
+
+  const result = await kill(durableRequest({
+    action: "kill",
+    operationId: "kill-nearfamily-000001",
+    product: "nearfamily",
+    invites: [],
+  }));
+
+  assert.equal(result.status, "killed");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].principal, "service:readiness_kill");
+  assert.equal(calls[0].canonicalClaims, "{}");
 });
 
 test("callers cannot mutate controller state or reopen a killed authorization", async () => {
