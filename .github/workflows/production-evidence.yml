@@ -101,6 +101,7 @@ jobs:
           test "$(gcloud builds describe "$build_id" --project=nearnight --region=us-central1 --format='value(status)')" = "SUCCESS"
           gcloud builds describe "$build_id" --project=nearnight --region=us-central1 --format=json > evidence/readiness-gateway-image-build.json
           gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-gateway:$GITHUB_SHA" --project=nearnight --format=json > evidence/readiness-gateway-image.json
+          gcloud artifacts docker images describe "us-central1-docker.pkg.dev/nearnight/nearyou-prep/readiness-database-proof:$GITHUB_SHA" --project=nearnight --format=json > evidence/readiness-database-proof-image.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: readiness-gateway-image-${{ github.run_id }}-${{ github.run_attempt }}
@@ -139,11 +140,26 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           node --import tsx scripts/cloud-sql-role-assignment-plan.ts evidence/readiness-gateway-disposable-role-receipt.json
+      - name: Execute private database migration and identity proof
+        run: |
+          set -euo pipefail
+          gcloud run jobs describe nf-rdy-database-proof --project=nearnight --region=us-central1 --format=json > evidence/readiness-gateway-database-proof-job.json
+          jq -e '.metadata.labels["nearyou-disposable-instance"] == "nearyou-evidence-20260820" and .metadata.labels["nearyou-migration-head"] == "0014"' evidence/readiness-gateway-database-proof-job.json >/dev/null
+          execution="$(gcloud run jobs execute nf-rdy-database-proof --project=nearnight --region=us-central1 --wait --format='value(metadata.name)')"
+          test -n "$execution"
+          gcloud run jobs executions describe "$execution" --project=nearnight --region=us-central1 --format=json > evidence/readiness-gateway-database-proof-execution.json
+          jq -e '.status.conditions[] | select(.type == "Completed" and .status == "True")' evidence/readiness-gateway-database-proof-execution.json >/dev/null
+          gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=nf-rdy-database-proof AND labels.run.googleapis.com/execution_name=$execution" --project=nearnight --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep -m1 '^{' > evidence/readiness-gateway-database-proof-receipt.json
+          jq -e '.disposable == true and .migrationHead == "0014_release_policy_evidence_read" and .controller.mapped == true and .kill.mapped == true and .laneIsolation == true' evidence/readiness-gateway-database-proof-receipt.json >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: readiness-gateway-disposable-role-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: evidence/readiness-gateway-disposable-role-receipt.json
+          path: |
+            evidence/readiness-gateway-disposable-role-receipt.json
+            evidence/readiness-gateway-database-proof-job.json
+            evidence/readiness-gateway-database-proof-execution.json
+            evidence/readiness-gateway-database-proof-receipt.json
           if-no-files-found: error
           retention-days: 90
   operational-evidence:
