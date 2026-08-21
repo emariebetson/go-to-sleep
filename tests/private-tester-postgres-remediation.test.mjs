@@ -38,7 +38,7 @@ test("0009 repairs the Cloud SQL service-account length limit without rewriting 
   assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
   assert.equal(validateCloudSqlRoleAssignmentReadback(plan,rows).reviewRequired,true);
-  await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"CLOUD_IAM_SERVICE_ACCOUNT"})),/readback invalid/);
+  await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"BUILT_IN"})),/readback invalid/);
   await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,databaseRoles:[row.databaseRoles[0],"nearyou_rollout_controller"]})),/readback invalid/);
   assert.throws(()=>cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-production",operationId:`op_${"a".repeat(64)}`}),/configuration invalid/);
   assert.throws(()=>cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"wrong",operationId:`op_${"a".repeat(64)}`}),/configuration invalid/);
