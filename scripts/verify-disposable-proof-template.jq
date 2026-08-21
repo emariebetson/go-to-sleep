@@ -8,6 +8,7 @@ def annotations: .spec.template.metadata.annotations;
 $s.serviceAccountName == "nearyou-prod-migration@nearnight.iam.gserviceaccount.com" and
 $s.maxRetries == 0 and
 $s.timeoutSeconds == "300" and
+($s.containers | length) == 1 and
 $c.image == $image and
 $c.args == ["/var/run/secrets/nearyou/database-url"] and
 ($c.env | sort_by(.name)) == [
