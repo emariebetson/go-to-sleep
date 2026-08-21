@@ -67,6 +67,8 @@ test("readiness controller and kill services are private, vpc-routed, and identi
   assert.match(source, /resource "google_cloud_run_v2_service_iam_member" "readiness_controller_kill_invoker"/);
   assert.doesNotMatch(controller, /invoker_iam_disabled\s*=\s*true/);
   assert.doesNotMatch(kill, /invoker_iam_disabled\s*=\s*true/);
+  assert.match(source, /member\s*=\s*"serviceAccount:\$\{var\.readiness_controller_caller_service_account_email\}"/);
+  assert.match(source, /member\s*=\s*"serviceAccount:\$\{var\.readiness_kill_caller_service_account_email\}"/);
 });
 
 test("readiness decision is reachable only through an external load balancer protected by Cloud Armor", () => {
@@ -91,6 +93,7 @@ test("readiness gateway binds separate Cloud SQL roles for decision and controll
 
   assert.match(source, /resource "google_sql_user" "readiness_decision"/);
   assert.match(source, /resource "google_sql_user" "readiness_controller_kill"/);
+  assert.doesNotMatch(source, /database_roles\s*=/);
 });
 
 test("readiness gateway reuses the existing controller OIDC principal instead of redeclaring it", () => {
@@ -186,6 +189,10 @@ function proofEnvironment() {
     READINESS_GATEWAY_BACKEND_SERVICE: "nearyou-readiness-decision",
     READINESS_GATEWAY_CLOUD_ARMOR_POLICY: "nearyou-readiness-decision",
     READINESS_GATEWAY_DENIAL_PROBE_COMMAND: "readiness-denial-probe",
+    READINESS_GATEWAY_URL: "https://lb.example/v1/nearfamily/decision",
+    READINESS_GATEWAY_DIRECT_DECISION_URL: "https://decision.run.app/v1/nearfamily/decision",
+    READINESS_GATEWAY_CONTROLLER_URL: "https://controller.run.app/v1/nearfamily/controller",
+    READINESS_GATEWAY_HMAC_KEY_FILE: tfvarsPath.pathname,
   };
 }
 
@@ -216,12 +223,20 @@ function commandRunner(overrides = {}) {
 }
 
 test("readiness gateway proof hashes live read-only evidence and denial probes without emitting values", async () => {
-  const result = await verifyReadinessGatewayProof(proofEnvironment(), commandRunner());
+  const calls = [];
+  const runner = commandRunner();
+  const result = await verifyReadinessGatewayProof(proofEnvironment(), async (file, args) => { calls.push({ file, args }); return runner(file, args); });
   assert.equal(result.ready, true);
   assert.match(result.evidenceSha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(result).sort(), ["evidenceSha256", "ready", "verification"]);
   assert.equal(result.verification.defaultUrlDisabled, true);
   assert.equal(result.verification.denialProbes, true);
+  assert.deepEqual(calls.find((call) => call.file === "readiness-denial-probe")?.args, [
+    "--gateway-url", "https://lb.example/v1/nearfamily/decision",
+    "--direct-decision-url", "https://decision.run.app/v1/nearfamily/decision",
+    "--controller-url", "https://controller.run.app/v1/nearfamily/controller",
+    "--key-file", tfvarsPath.pathname,
+  ]);
 });
 
 test("readiness gateway proof rejects public IAM, wrong ingress, shared identities, missing VPC, and malformed probe output", async () => {
@@ -428,7 +443,7 @@ test("disposable Cloudflare Worker signs one canonical decision and forwards onl
   const forwarded = [];
   const worker = createDisposableDecisionWorker({
     gatewayUrl: "https://lb.example/v1/nearfamily/decision",
-    keyBase64: Buffer.from(key).toString("base64"),
+    keyHex: Buffer.from(key).toString("hex"),
     now: () => now,
     nonce: () => "nonce_abcdefghijklmnopqrstuv",
     fetch: async (url, init) => {
@@ -448,7 +463,7 @@ test("disposable Cloudflare Worker never follows gateway redirects", async () =>
   let redirectMode;
   const worker = createDisposableDecisionWorker({
     gatewayUrl: "https://lb.example/v1/nearfamily/decision",
-    keyBase64: Buffer.from(key).toString("base64"),
+    keyHex: Buffer.from(key).toString("hex"),
     now: () => 1_787_000_000_000,
     nonce: () => "nonce_abcdefghijklmnopqrstuv",
     fetch: async (_url, init) => {
@@ -460,4 +475,10 @@ test("disposable Cloudflare Worker never follows gateway redirects", async () =>
   const response = await worker(new Request("https://worker.example/v1/nearfamily/decision", { method: "POST", headers: { "content-type": "application/json" }, body }));
   assert.equal(redirectMode, "manual");
   assert.equal(response.status, 503);
+});
+
+test("disposable signing worker is service-bound and never has a public workers.dev route", () => {
+  const config = readFileSync(new URL("../wrangler.readiness-disposable.jsonc", import.meta.url), "utf8");
+  assert.match(config, /"workers_dev"\s*:\s*false/);
+  assert.doesNotMatch(config, /"routes"\s*:/);
 });

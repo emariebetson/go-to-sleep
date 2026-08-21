@@ -31,8 +31,8 @@ test("0009 repairs the Cloud SQL service-account length limit without rewriting 
   assert.equal(migration.id,"0009_cloud_sql_verifier_identity_limit");
   assert.match(migration.sql,/session_user::text<>'nearyou-pt-baseline@nearnight\.iam'/);
   assert.doesNotMatch(migration.sql,/gserviceaccount\.com/);
-  assert.equal(plan.requiresMigrationHead,"0010_migration_schema_usage");
-  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
+  assert.equal(plan.requiresMigrationHead,"0014_release_policy_evidence_read");
+  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou_migration_admin","BUILT_IN","nearyou_migration"],["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-readiness-kill@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-readiness-decision@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_decision"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
   assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&!item.command.some(value=>value.includes("revoke"))));
   assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
