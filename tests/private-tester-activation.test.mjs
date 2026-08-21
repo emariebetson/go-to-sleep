@@ -147,6 +147,7 @@ test("the durable emergency kill does not depend on baseline or release-evidence
     action: "kill",
     operationId: "kill-nearfamily-000001",
     product: "nearfamily",
+    releaseEvidenceDigest: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
     invites: [],
   }));
 
@@ -154,6 +155,14 @@ test("the durable emergency kill does not depend on baseline or release-evidence
   assert.equal(calls.length, 1);
   assert.equal(calls[0].principal, "service:readiness_kill");
   assert.equal(calls[0].canonicalClaims, "{}");
+
+  await assert.rejects(() => kill(durableRequest({
+    action: "kill",
+    operationId: "kill-nearfamily-000009",
+    product: "nearfamily",
+    releaseEvidenceDigest: hash("d"),
+    invites: [],
+  })), /kill sentinel/);
 });
 
 test("callers cannot mutate controller state or reopen a killed authorization", async () => {
