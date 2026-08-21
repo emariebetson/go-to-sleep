@@ -311,6 +311,39 @@ test("database-backed emergency runtime isolates its route and reaches the termi
   assert.equal(calls.some((sql) => sql.includes("apply_private_tester_activation")), true);
 });
 
+test("Google ID-token verification binds the verified service-account email to the exact audience", async () => {
+  assert.equal(typeof readinessGatewayRuntime.createGoogleIdTokenVerifier, "function");
+  const calls = [];
+  const verify = readinessGatewayRuntime.createGoogleIdTokenVerifier({
+    verifyIdToken: async (input) => {
+      calls.push(input);
+      return { getPayload: () => ({
+        iss: "https://accounts.google.com",
+        aud: "https://nf-rdy-kill.example.run.app",
+        sub: "123456789012345678901",
+        email: "kill-caller@nearnight.iam.gserviceaccount.com",
+        email_verified: true,
+        exp: 1_787_000_060,
+      }) };
+    },
+  });
+  assert.deepEqual(await verify({ token: "emergency-token", audience: "https://nf-rdy-kill.example.run.app" }), {
+    issuer: "https://accounts.google.com",
+    audience: "https://nf-rdy-kill.example.run.app",
+    subject: "kill-caller@nearnight.iam.gserviceaccount.com",
+    expiresAt: 1_787_000_060_000,
+  });
+  assert.deepEqual(calls, [{ idToken: "emergency-token", audience: "https://nf-rdy-kill.example.run.app" }]);
+  const unverified = readinessGatewayRuntime.createGoogleIdTokenVerifier({ verifyIdToken: async () => ({ getPayload: () => ({
+    iss: "https://accounts.google.com",
+    aud: "https://nf-rdy-kill.example.run.app",
+    email: "kill-caller@nearnight.iam.gserviceaccount.com",
+    email_verified: false,
+    exp: 1_787_000_060,
+  }) }) });
+  await assert.rejects(() => unverified({ token: "emergency-token", audience: "https://nf-rdy-kill.example.run.app" }), /identity/);
+});
+
 test("real denial probe requires one accepted HMAC then proves missing, invalid, replayed, and direct denials", async () => {
   const now = 1_787_000_000_000;
   const key = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
