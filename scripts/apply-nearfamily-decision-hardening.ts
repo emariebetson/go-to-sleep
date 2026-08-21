@@ -40,25 +40,26 @@ async function connect(databaseUrl: string): Promise<Connection> {
 export async function runNearfamilyDecisionHardening(input: Input, dependencies: Dependencies = {}) {
   if (!input.disposable || input.instance !== DISPOSABLE_INSTANCE || !/^postgres(?:ql)?:\/\//.test(input.databaseUrl)) throw new Error("NearFamily decision hardening target invalid");
   const files = dependencies.files ?? await loadPostgresMigrations();
-  if (files.length !== 13 || files[11]?.id !== "0012_nearfamily_private_tester_decision" || files[12]?.id !== "0013_nearfamily_decision_nonce_and_evidence") throw new Error("NearFamily decision hardening migration set invalid");
+  if (files.length !== 14 || files[11]?.id !== "0012_nearfamily_private_tester_decision" || files[12]?.id !== "0013_nearfamily_decision_nonce_and_evidence" || files[13]?.id !== "0014_release_policy_evidence_read") throw new Error("NearFamily decision hardening migration set invalid");
   const connection = await (dependencies.connect ?? connect)(input.databaseUrl);
   try {
     const target = (await connection.query<{ database_name: string; server_version: number; database_user: string }>("SELECT current_database()::text AS database_name,current_setting('server_version_num')::integer AS server_version,current_user::text AS database_user", [])).rows[0];
     if (!target || target.database_name !== "nearyou" || target.server_version < 160000 || target.server_version >= 170000 || !/migration|postgres|admin/i.test(target.database_user)) throw new Error("NearFamily decision hardening database target invalid");
     const prior = (await connection.query<{ id: string; checksum: string }>("SELECT id,checksum FROM nearyou.schema_migrations ORDER BY id COLLATE \"C\"", [])).rows;
-    if (JSON.stringify(prior) !== JSON.stringify(files.slice(0, 12).map(({ id, checksum }) => ({ id, checksum })))) throw new Error("NearFamily decision hardening predecessor invalid");
+    if (JSON.stringify(prior) !== JSON.stringify(files.slice(0, 13).map(({ id, checksum }) => ({ id, checksum })))) throw new Error("NearFamily decision hardening predecessor invalid");
     const schemaChecksum = checksum(files);
     const migration = await (dependencies.apply ?? applyPostgresMigrations)(connection, files, schemaChecksum);
     if (migration.migrationLedgerChecksum !== schemaChecksum) throw new Error("NearFamily decision hardening migration result invalid");
-    const facts = (await connection.query<{ migration_head: string; nonce_force_rls: boolean; public_execute_count: string; decision_authorize: boolean; decision_nonce: boolean; decision_table_access: boolean }>(`SELECT
+    const facts = (await connection.query<{ migration_head: string; nonce_force_rls: boolean; public_execute_count: string; decision_authorize: boolean; decision_nonce: boolean; decision_table_access: boolean; policy_owner_evidence_select: boolean }>(`SELECT
       (SELECT id FROM nearyou.schema_migrations ORDER BY id COLLATE "C" DESC LIMIT 1) AS migration_head,
       (SELECT relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='nearyou' AND c.relname='nearfamily_decision_nonces') AS nonce_force_rls,
       (SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl WHERE n.nspname='nearyou' AND p.proname IN('authorize_nearfamily_private_tester','consume_nearfamily_decision_nonce') AND acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public_execute_count,
       has_function_privilege('nearyou_private_tester_decision','nearyou.authorize_nearfamily_private_tester(text,text,timestamptz)','EXECUTE') AS decision_authorize,
       has_function_privilege('nearyou_private_tester_decision','nearyou.consume_nearfamily_decision_nonce(text,integer,text,text,timestamptz)','EXECUTE') AS decision_nonce,
-      (has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','SELECT') OR has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','INSERT') OR has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','UPDATE') OR has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','DELETE')) AS decision_table_access`, [])).rows[0];
-    if (!facts || facts.migration_head !== files[12].id || facts.nonce_force_rls !== true || facts.public_execute_count !== "0" || facts.decision_authorize !== true || facts.decision_nonce !== true || facts.decision_table_access !== false) throw new Error("NearFamily decision hardening ACL verification failed");
-    return Object.freeze({ version: 1, ready: true as const, instance: input.instance, migrationHead: facts.migration_head, schemaChecksum, security: Object.freeze({ nonceForceRls: true, publicExecuteCount: 0, decisionFunctions: 2, directTableAccess: false }) });
+      (has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','SELECT') OR has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','INSERT') OR has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','UPDATE') OR has_table_privilege('nearyou_private_tester_decision','nearyou.nearfamily_decision_nonces','DELETE')) AS decision_table_access,
+      has_table_privilege('nearyou_release_policy_owner','nearyou.release_evidence_audit','SELECT') AS policy_owner_evidence_select`, [])).rows[0];
+    if (!facts || facts.migration_head !== files[13].id || facts.nonce_force_rls !== true || facts.public_execute_count !== "0" || facts.decision_authorize !== true || facts.decision_nonce !== true || facts.decision_table_access !== false || facts.policy_owner_evidence_select !== true) throw new Error("NearFamily decision hardening ACL verification failed");
+    return Object.freeze({ version: 1, ready: true as const, instance: input.instance, migrationHead: facts.migration_head, schemaChecksum, security: Object.freeze({ nonceForceRls: true, publicExecuteCount: 0, decisionFunctions: 2, directTableAccess: false, policyOwnerEvidenceSelect: true }) });
   } finally { await connection.close(); }
 }
 

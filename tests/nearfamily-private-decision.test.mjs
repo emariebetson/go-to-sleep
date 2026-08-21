@@ -47,7 +47,7 @@ test("NearFamily decision hardening binds evidence and durable nonce authority",
   assert.match(sql, /REVOKE ALL ON nearyou\.nearfamily_decision_nonces FROM PUBLIC/);
 });
 
-test("catalog and production Terraform require the 0013 decision authority and complete forced-RLS set", () => {
+test("catalog and production Terraform require the 0014 evidence-readable decision authority and complete forced-RLS set", () => {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const terraform = readFileSync(terraformPath, "utf8");
   const forcedRls = [
@@ -60,9 +60,9 @@ test("catalog and production Terraform require the 0013 decision authority and c
     "nearfamily_decision_nonces",
   ];
 
-  assert.equal(manifest.migrationHead, "0013_nearfamily_decision_nonce_and_evidence");
+  assert.equal(manifest.migrationHead, "0014_release_policy_evidence_read");
   assert.deepEqual(manifest.requireForcedRls, forcedRls);
-  assert.match(terraform, /migrationHead, ""\) == "0013_nearfamily_decision_nonce_and_evidence"/);
+  assert.match(terraform, /migrationHead, ""\) == "0014_release_policy_evidence_read"/);
   assert.match(terraform, /requireForcedRls, \[\]\) == \["household_members", "tenant_records", "private_tester_activation_baselines", "private_tester_activation_state", "private_tester_activation_invites", "private_tester_activation_audit", "nearfamily_decision_nonces"\]/);
 });
 

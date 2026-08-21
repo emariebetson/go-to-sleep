@@ -13,16 +13,16 @@ test("decision hardening requires the exact restored disposable clone", () => {
   assert.equal(requireNearfamilyDecisionHardeningEnvironment({ NEARYOU_DECISION_HARDENING_DISPOSABLE: "true", NEARYOU_DECISION_HARDENING_INSTANCE: instance, READINESS_CONTROL_DATABASE_URL: "postgres://admin@127.0.0.1/nearyou" }).instance, instance);
 });
 
-test("decision hardening requires 0012, applies 0013 once, and verifies narrow ACLs", async () => {
+test("decision hardening requires 0012-0014, applies the evidence read repair once, and verifies narrow ACLs", async () => {
   const prior = Array.from({ length: 12 }, (_, index) => ({ id: `${String(index + 1).padStart(4, "0")}_migration_${index + 1}`, checksum: String(index + 1).repeat(64).slice(0, 64) }));
   prior[11] = { id: "0012_nearfamily_private_tester_decision", checksum: "c".repeat(64) };
-  const files = [...prior.map((row) => ({ ...row, sql: "BEGIN; COMMIT;" })), { id: "0013_nearfamily_decision_nonce_and_evidence", checksum: "d".repeat(64), sql: "BEGIN; COMMIT;" }];
+  const files = [...prior.map((row) => ({ ...row, sql: "BEGIN; COMMIT;" })), { id: "0013_nearfamily_decision_nonce_and_evidence", checksum: "d".repeat(64), sql: "BEGIN; COMMIT;" }, { id: "0014_release_policy_evidence_read", checksum: "e".repeat(64), sql: "BEGIN; COMMIT;" }];
   const queries = [];
   const connection = { query: async (sql) => {
     queries.push(sql);
     if (sql.includes("server_version_num")) return { rows: [{ database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin" }] };
-    if (sql.includes("relforcerowsecurity")) return { rows: [{ migration_head: "0013_nearfamily_decision_nonce_and_evidence", nonce_force_rls: true, public_execute_count: "0", decision_authorize: true, decision_nonce: true, decision_table_access: false }] };
-    if (sql.includes("schema_migrations") && sql.includes("ORDER BY")) return { rows: prior };
+    if (sql.includes("relforcerowsecurity")) return { rows: [{ migration_head: "0014_release_policy_evidence_read", nonce_force_rls: true, public_execute_count: "0", decision_authorize: true, decision_nonce: true, decision_table_access: false, policy_owner_evidence_select: true }] };
+    if (sql.includes("schema_migrations") && sql.includes("ORDER BY")) return { rows: [...prior, { id: "0013_nearfamily_decision_nonce_and_evidence", checksum: "d".repeat(64) }] };
     throw new Error("unexpected SQL");
   }, close: async () => {} };
   let applied;
@@ -31,9 +31,26 @@ test("decision hardening requires 0012, applies 0013 once, and verifies narrow A
     connect: async () => connection,
     apply: async (_pg, actual, checksum) => { applied = { actual, checksum }; return { migrationLedgerChecksum: checksum }; },
   });
-  assert.equal(applied.actual.at(-1).id, "0013_nearfamily_decision_nonce_and_evidence");
+  assert.equal(applied.actual.at(-1).id, "0014_release_policy_evidence_read");
   assert.equal(result.ready, true);
-  assert.equal(result.migrationHead, "0013_nearfamily_decision_nonce_and_evidence");
+  assert.equal(result.migrationHead, "0014_release_policy_evidence_read");
   assert.match(result.schemaChecksum, /^[a-f0-9]{64}$/);
   assert.equal(queries.length, 3);
+});
+
+test("decision hardening rejects an evidence-backed authority whose security-definer owner cannot read release evidence", async () => {
+  const prior = Array.from({ length: 12 }, (_, index) => ({ id: `${String(index + 1).padStart(4, "0")}_migration_${index + 1}`, checksum: String(index + 1).repeat(64).slice(0, 64) }));
+  prior[11] = { id: "0012_nearfamily_private_tester_decision", checksum: "c".repeat(64) };
+  const files = [...prior.map((row) => ({ ...row, sql: "BEGIN; COMMIT;" })), { id: "0013_nearfamily_decision_nonce_and_evidence", checksum: "d".repeat(64), sql: "BEGIN; COMMIT;" }, { id: "0014_release_policy_evidence_read", checksum: "e".repeat(64), sql: "BEGIN; COMMIT;" }];
+  const connection = { query: async (sql) => {
+    if (sql.includes("server_version_num")) return { rows: [{ database_name: "nearyou", server_version: 160011, database_user: "nearyou_migration_admin" }] };
+    if (sql.includes("relforcerowsecurity")) return { rows: [{ migration_head: "0014_release_policy_evidence_read", nonce_force_rls: true, public_execute_count: "0", decision_authorize: true, decision_nonce: true, decision_table_access: false, policy_owner_evidence_select: false }] };
+    if (sql.includes("schema_migrations") && sql.includes("ORDER BY")) return { rows: [...prior, { id: "0013_nearfamily_decision_nonce_and_evidence", checksum: "d".repeat(64) }] };
+    throw new Error("unexpected SQL");
+  }, close: async () => {} };
+  await assert.rejects(() => runNearfamilyDecisionHardening({ instance, databaseUrl: "postgres://admin@127.0.0.1/nearyou", disposable: true }, {
+    files,
+    connect: async () => connection,
+    apply: async (_pg, _actual, checksum) => ({ migrationLedgerChecksum: checksum }),
+  }), /ACL verification/);
 });
