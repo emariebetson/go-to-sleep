@@ -269,3 +269,22 @@ test("disposable Cloudflare Worker signs one canonical decision and forwards onl
   assert.deepEqual(await response.json(), { version: 1, allowed: false });
   assert.deepEqual(forwarded, ["https://lb.example/v1/nearfamily/decision"]);
 });
+
+test("disposable Cloudflare Worker never follows gateway redirects", async () => {
+  const key = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
+  let redirectMode;
+  const worker = createDisposableDecisionWorker({
+    gatewayUrl: "https://lb.example/v1/nearfamily/decision",
+    keyBase64: Buffer.from(key).toString("base64"),
+    now: () => 1_787_000_000_000,
+    nonce: () => "nonce_abcdefghijklmnopqrstuv",
+    fetch: async (_url, init) => {
+      redirectMode = init.redirect;
+      return new Response("moved", { status: 302, headers: { location: "https://attacker.example" } });
+    },
+  });
+  const body = '{"householdHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","releaseId":"rel_20260819_readiness_gateway_01"}';
+  const response = await worker(new Request("https://worker.example/v1/nearfamily/decision", { method: "POST", headers: { "content-type": "application/json" }, body }));
+  assert.equal(redirectMode, "manual");
+  assert.equal(response.status, 503);
+});

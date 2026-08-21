@@ -46,8 +46,12 @@ export function createDisposableDecisionWorker(input: WorkerDependencies): (requ
     const signature = base64Url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(claims)));
     const envelope = `{"bodySha256":"${bodySha256}","householdHash":"${householdHash}","issuedAt":${issuedAt},"keyVersion":1,"nonce":"${nonce}","releaseId":"${releaseId}","signature":"${signature}","version":1}`;
     try {
-      return await input.fetch(input.gatewayUrl, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: envelope });
-    } catch { return new Response("unavailable", { status: 503 }); }
+      const response = await input.fetch(input.gatewayUrl, { method: "POST", redirect: "manual", headers: { "content-type": "application/json" }, body: envelope });
+      return response.status >= 300 && response.status < 400 ? new Response("unavailable", { status: 503 }) : response;
+    } catch (error) {
+      console.error("readiness_gateway_fetch_failed", error instanceof Error ? error.message : "unknown");
+      return new Response("unavailable", { status: 503 });
+    }
   };
 }
 
@@ -60,7 +64,7 @@ export default {
       keyBase64: env.NEARFAMILY_DECISION_SIGNING_KEY,
       now: Date.now,
       nonce: () => crypto.randomUUID().replace(/-/g, ""),
-      fetch,
+      fetch: (target, init) => fetch(target, init),
     })(request);
   },
 };
