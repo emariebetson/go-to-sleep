@@ -482,3 +482,5 @@ test("disposable signing worker is service-bound and never has a public workers.
   assert.match(config, /"workers_dev"\s*:\s*false/);
   assert.doesNotMatch(config, /"routes"\s*:/);
 });
+
+test("main evidence build avoids the staging bucket and retains pinned-builder digests",()=>{const workflow=readFileSync(new URL("../.github/workflows/production-evidence.yml",import.meta.url),"utf8");assert.doesNotMatch(workflow,/gcloud builds submit/);assert.match(workflow,/gcr\.io\/cloud-builders\/docker@sha256:[a-f0-9]{64}/);assert.match(workflow,/readiness-gateway-image-build\.json/);assert.match(workflow,/image_summary\.fully_qualified_digest/)});
