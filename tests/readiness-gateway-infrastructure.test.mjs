@@ -9,11 +9,12 @@ import {
   requireReadinessGatewayProofEnvironment,
   verifyReadinessGatewayProof,
 } from "../scripts/verify-readiness-gateway.ts";
-import { createDatabaseBackedDecisionHandler, createDisposableGatewayHandler } from "../services/readiness-gateway/src/runtime.ts";
+import * as readinessGatewayRuntime from "../services/readiness-gateway/src/runtime.ts";
 import { runReadinessDenialProbe } from "../scripts/readiness-denial-probe.ts";
 import { createDisposableDecisionWorker } from "../cloudflare/readiness-disposable-worker.ts";
 
 const execFile = promisify(execFileCallback);
+const { createDatabaseBackedDecisionHandler, createDisposableGatewayHandler } = readinessGatewayRuntime;
 const tfvarsPath = new URL("../infra/disposable/readiness-gateway.tfvars.example", import.meta.url);
 
 const productionDirectory = fileURLToPath(new URL("../infra/production", import.meta.url));
@@ -253,6 +254,61 @@ test("database-backed disposable decision runtime uses PostgreSQL for clock, non
   assert.match(calls[0], /statement_timestamp/);
   assert.match(calls[1], /consume_nearfamily_decision_nonce/);
   assert.match(calls[2], /authorize_nearfamily_private_tester/);
+});
+
+test("database-backed emergency runtime isolates its route and reaches the terminal PostgreSQL transaction", async () => {
+  assert.equal(typeof readinessGatewayRuntime.createDatabaseBackedControllerHandler, "function");
+  const now = 1_787_000_000_000;
+  const releaseId = "rel_20260819_readiness_gateway_01";
+  const calls = [];
+  const pg = {
+    query: async (sql) => {
+      calls.push(sql);
+      if (sql.includes("statement_timestamp")) return { rows: [{ observed_at: String(now) }] };
+      if (sql.includes("private_tester_activation_controller_principal")) return { rows: [{ principal: "service:nearyou_readiness_controller_kill" }] };
+      throw new Error(`unexpected SQL: ${sql}`);
+    },
+    transaction: async (run) => run({ query: async (sql) => {
+      calls.push(sql);
+      if (!sql.includes("apply_private_tester_activation")) throw new Error(`unexpected transaction SQL: ${sql}`);
+      return { rows: [{ result: { product: "nearfamily", releaseId, version: 2, globalPercent: 0, status: "killed", auditDigest: "f".repeat(64) } }] };
+    } }),
+  };
+  const handler = readinessGatewayRuntime.createDatabaseBackedControllerHandler({
+    mode: "kill",
+    disposable: true,
+    pg,
+    ordinaryIdentity: { issuer: "https://accounts.google.com", audience: "https://nf-rdy-controller.example.run.app", subject: "ordinary-caller@nearnight.iam.gserviceaccount.com" },
+    emergencyIdentity: { issuer: "https://accounts.google.com", audience: "https://nf-rdy-kill.example.run.app", subject: "kill-caller@nearnight.iam.gserviceaccount.com" },
+    verifyIdToken: async ({ audience }) => ({ issuer: "https://accounts.google.com", audience, subject: "kill-caller@nearnight.iam.gserviceaccount.com", expiresAt: now + 60_000 }),
+  });
+  const wrongLane = await handler(new Request("https://internal.example/v1/nearfamily/controller", { method: "POST" }));
+  assert.equal(wrongLane.status, 404);
+  assert.equal(calls.length, 0);
+  const body = JSON.stringify({
+    action: "kill",
+    expectedVersion: 1,
+    invites: [],
+    operationId: "kill-nearfamily-000001",
+    product: "nearfamily",
+    promotedBaselineSha256: "b".repeat(64),
+    releaseEvidenceDigest: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    releaseId,
+  });
+  const response = await handler(new Request("https://internal.example/v1/nearfamily/emergency", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer emergency-token",
+      "content-type": "application/json",
+      "x-nearyou-request-sha256": await (await import("../services/readiness-decision/src/envelope.ts")).sha256Hex(body),
+    },
+    body,
+  }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, "killed");
+  assert.equal(calls.some((sql) => sql.includes("load_private_tester_activation_baseline")), false);
+  assert.equal(calls.some((sql) => sql.includes("load_private_tester_activation_evidence")), false);
+  assert.equal(calls.some((sql) => sql.includes("apply_private_tester_activation")), true);
 });
 
 test("real denial probe requires one accepted HMAC then proves missing, invalid, replayed, and direct denials", async () => {
