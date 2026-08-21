@@ -32,27 +32,32 @@ test("0009 repairs the Cloud SQL service-account length limit without rewriting 
   assert.match(migration.sql,/session_user::text<>'nearyou-pt-baseline@nearnight\.iam'/);
   assert.doesNotMatch(migration.sql,/gserviceaccount\.com/);
   assert.equal(plan.requiresMigrationHead,"0014_release_policy_evidence_read");
-  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nf-rdy-controller@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nf-rdy-kill@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nf-rdy-decision@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_decision"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
+  assert.equal(plan.exactRolesOnly,true);
+  assert.deepEqual(plan.assignments.map(item=>[item.databaseUser,item.userType,item.databaseRole]),[["nearyou-readiness-ctl@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-readiness-kill@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_rollout_controller"],["nearyou-readiness-decision@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_decision"],["nearyou-pt-baseline@nearnight.iam","CLOUD_IAM_SERVICE_ACCOUNT","nearyou_private_tester_baseline_verifier"]]);
   assert.ok(plan.assignments.every(item=>item.command.includes(`--type=${item.userType}`)&&item.command.some(value=>value===`--database-roles=${item.databaseRole}`)&&!item.command.some(value=>value.includes("revoke"))));
   assert.ok(plan.assignments.every(item=>item.command[4]===item.databaseUser&&item.readback.some(value=>value===`--filter=name=${item.databaseUser}`)));
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
   assert.equal(validateCloudSqlRoleAssignmentReadback(plan,rows).reviewRequired,true);
   await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,type:"CLOUD_IAM_SERVICE_ACCOUNT"})),/readback invalid/);
+  await assert.rejects(async()=>validateCloudSqlRoleAssignmentReadback(plan,rows.map((row,index)=>index?row:{...row,databaseRoles:[row.databaseRoles[0],"nearyou_rollout_controller"]})),/readback invalid/);
   assert.throws(()=>cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-production",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-production",operationId:`op_${"a".repeat(64)}`}),/configuration invalid/);
   assert.throws(()=>cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"wrong",operationId:`op_${"a".repeat(64)}`}),/configuration invalid/);
+  const terraform=`${await readFile(new URL("../infra/production/product-rollout.tf",import.meta.url),"utf8")}\n${await readFile(new URL("../infra/production/readiness-gateway.tf",import.meta.url),"utf8")}`;
+  for(const assignment of plan.assignments.filter(item=>item.serviceAccountEmail))assert.match(terraform,new RegExp(`account_id\\s*=\\s*"${assignment.serviceAccountEmail.split("@")[0]}"`));
 });
 
 test("disposable Cloud SQL role assignment executes additive grants and retains exact readback",async()=>{
   const plan=cloudSqlRoleAssignmentPlan({project:"nearnight",instance:"nearyou-evidence-20260820",disposable:true,confirmation:"DISPOSABLE_ROLE_ASSIGNMENT_nearnight_nearyou-evidence-20260820",operationId:`op_${"b".repeat(64)}`}),calls=[];
   const rows=plan.assignments.map(item=>({name:item.databaseUser,type:item.userType,databaseRoles:[item.databaseRole]}));
-  const receipt=await executeCloudSqlRoleAssignment(plan,async(command,args)=>{calls.push([command,...args]);return args[2]==="list"?JSON.stringify(rows):""});
-  assert.equal(calls.length,plan.assignments.length+1);
-  assert.ok(calls.slice(0,-1).every(call=>call[0]==="gcloud"&&call[1]==="sql"&&call[2]==="users"&&call[3]==="assign-roles"));
+  const receipt=await executeCloudSqlRoleAssignment(plan,async(command,args)=>{calls.push([command,...args]);if(args[0]==="run")return plan.assignments.find(item=>item.cloudRunService===args[3]).serviceAccountEmail;if(args[2]==="list")return JSON.stringify(rows);return""});
+  assert.equal(calls.length,plan.assignments.length+4);
+  assert.ok(calls.slice(3,-1).every(call=>call[0]==="gcloud"&&call[1]==="sql"&&call[2]==="users"&&call[3]==="assign-roles"));
   assert.deepEqual(calls.at(-1),["gcloud","sql","users","list","--project=nearnight","--instance=nearyou-evidence-20260820","--format=json(name,type,databaseRoles)"]);
   assert.equal(receipt.disposable,true);
   assert.equal(receipt.reviewRequired,true);
   assert.equal(receipt.assignments.length,4);
-  await assert.rejects(()=>executeCloudSqlRoleAssignment(plan,async(command,args)=>args[2]==="list"?"[]":""),/readback invalid/);
+  await assert.rejects(()=>executeCloudSqlRoleAssignment(plan,async(command,args)=>args[0]==="run"?"wrong@nearnight.iam.gserviceaccount.com":args[2]==="list"?JSON.stringify(rows):""),/service identity readback invalid/);
+  await assert.rejects(()=>executeCloudSqlRoleAssignment(plan,async(command,args)=>args[0]==="run"?plan.assignments.find(item=>item.cloudRunService===args[3]).serviceAccountEmail:args[2]==="list"?"[]":""),/readback invalid/);
 });
 
 test("0010 grants only schema usage required to call migration-owned registration functions",async()=>{
