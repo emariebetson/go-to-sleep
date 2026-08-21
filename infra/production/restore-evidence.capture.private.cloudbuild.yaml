@@ -8,6 +8,7 @@ steps:
       - |
         test "${PROJECT_ID}" = "nearnight"
         test "${_RESTORED_CLOUD_SQL_INSTANCE}" = "nearnight:us-central1:nearyou-evidence-20260820"
+        mkdir -p evidence
         printf '%s' "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" | grep -Eq '^gcr\.io/cloud-sql-connectors/cloud-sql-proxy@sha256:[a-f0-9]{64}$'
         docker run --detach --rm --name restore-evidence-auth-proxy --network cloudbuild \
           "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" --auto-iam-authn --private-ip --structured-logs --address=0.0.0.0 --port=5432 \

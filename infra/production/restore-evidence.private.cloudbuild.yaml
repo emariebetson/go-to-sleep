@@ -9,6 +9,7 @@ steps:
       - |
         test "${PROJECT_ID}" = "nearnight"
         test "${_RESTORED_CLOUD_SQL_INSTANCE}" = "nearnight:us-central1:nearyou-evidence-20260820"
+        mkdir -p evidence
         printf '%s' "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" | grep -Eq '^gcr\.io/cloud-sql-connectors/cloud-sql-proxy@sha256:[a-f0-9]{64}$'
         docker run --detach --rm --name restore-evidence-auth-proxy --network cloudbuild \
           "${_CLOUD_SQL_AUTH_PROXY_IMAGE}" --auto-iam-authn --private-ip --structured-logs --address=0.0.0.0 --port=5432 \
@@ -21,9 +22,11 @@ steps:
           -e RESTORE_GCP_PROJECT=nearnight \
           -e RESTORED_DATABASE_URL='postgresql://nearyou-evidence-ci%40nearnight.iam@restore-evidence-auth-proxy:5432/nearyou?sslmode=disable' \
           node:24-bookworm bash -ceu '
-            npm ci --ignore-scripts
+            npm install --prefix /tmp/restore-evidence-runtime --ignore-scripts --no-save pg@8.16.3 tsx@4.22.1
+            test ! -e /workspace/node_modules
+            ln -s /tmp/restore-evidence-runtime/node_modules /workspace/node_modules
             export GOOGLE_OAUTH_ACCESS_TOKEN="$(node -e '\''fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",{headers:{"Metadata-Flavor":"Google"}}).then(r=>{if(!r.ok)throw new Error("metadata token unavailable");return r.json()}).then(v=>process.stdout.write(v.access_token))'\'')"
-            node --import tsx scripts/restore-evidence-cli.ts evidence/restore.json
+            /tmp/restore-evidence-runtime/node_modules/.bin/tsx scripts/restore-evidence-cli.ts evidence/restore.json
           '
 artifacts:
   objects:
