@@ -17,6 +17,8 @@ steps:
         printf '%s\n' 'capture:proxy-started'
         docker run --rm --network cloudbuild -v /workspace:/workspace -w /workspace \
           -e RESTORED_DATABASE_URL='postgresql://nearyou-evidence-ci%40nearnight.iam@restore-evidence-auth-proxy:5432/nearyou?sslmode=disable' \
+          -e CAPTURE_EVIDENCE_BUCKET='nearyou-production-private-evidence-nearnight' \
+          -e CAPTURE_EVIDENCE_OBJECT='restores/capture-${BUILD_ID}/evidence/capture.json' \
           node:24-bookworm bash -ceu '
             printf "%s\\n" "capture:dependency-install"
             npm install --prefix /tmp/restore-evidence-runtime --ignore-scripts --no-save pg@8.16.3 tsx@4.22.1
@@ -25,10 +27,6 @@ steps:
             printf "%s\\n" "capture:query-start"
             /tmp/restore-evidence-runtime/node_modules/.bin/tsx scripts/capture-restore-checksums.ts evidence/capture.json
           '
-artifacts:
-  objects:
-    location: gs://nearyou-production-private-evidence-nearnight/restores/capture-$BUILD_ID
-    paths: [evidence/capture.json]
 serviceAccount: projects/nearnight/serviceAccounts/nearyou-evidence-ci@nearnight.iam.gserviceaccount.com
 options:
   pool:

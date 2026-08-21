@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createGoogleStorageGenerationZeroStore, runPrivateTesterEvidence } from "../scripts/run-private-tester-evidence.ts";
 import { composePrivateTesterDeploymentManifest, privateTesterDeploymentManifestSignedBytes } from "../lib/private-tester-deployment-manifest.ts";
+import { uploadImmutableObject } from "../scripts/immutable-object-upload.ts";
 
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const now = Date.parse("2026-08-19T12:00:00.000Z");
@@ -220,4 +221,23 @@ test("the object-store adapter uses generation zero and fetches raw bytes on a c
   assert.equal(requests[0].init.headers.authorization, "Bearer token_abcdefghijklmnopqrstuvwxyz");
   assert.equal(requests[1].init.method, "GET");
   assert.match(requests[1].url, /alt=media/);
+});
+
+test("the restored checksum uploader creates one immutable object and rejects a collision", async () => {
+  const requests = [];
+  await uploadImmutableObject({
+    bucket: "evidence-bucket",
+    object: "restores/capture-build/evidence/capture.json",
+    raw: "{\"version\":1}\n",
+    accessToken: "token_abcdefghijklmnopqrstuvwxyz",
+    fetch: async (url, init) => { requests.push({ url: String(url), init }); return new Response("{}", { status: 200 }); },
+  });
+  assert.match(requests[0].url, /ifGenerationMatch=0/);
+  assert.match(requests[0].url, /name=restores%2Fcapture-build%2Fevidence%2Fcapture\.json/);
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(requests[0].init.body, "{\"version\":1}\n");
+  await assert.rejects(() => uploadImmutableObject({
+    bucket: "evidence-bucket", object: "restores/capture-build/evidence/capture.json", raw: "{}\n", accessToken: "token_abcdefghijklmnopqrstuvwxyz",
+    fetch: async () => new Response("{}", { status: 412 }),
+  }), /immutable object conflict/);
 });
