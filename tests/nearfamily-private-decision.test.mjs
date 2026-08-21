@@ -108,7 +108,9 @@ test("disposable PostgreSQL 16 gives the decision identity only fixed NearFamily
     const priorChecksum = (await import("node:crypto")).createHash("sha256").update(priorMigrations.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")).digest("hex");
     await applyPostgresMigrations(transactionalPg, priorMigrations, priorChecksum);
     await client.query("CREATE ROLE nearyou_private_tester_decision LOGIN");
-    await assert.rejects(() => applyPostgresMigrations(transactionalPg, migrations.slice(0, decisionMigrationIndex + 1), checksum), /migration execution failed:0012_nearfamily_private_tester_decision/);
+    const decisionMigrations = migrations.slice(0, decisionMigrationIndex + 1);
+    const decisionChecksum = (await import("node:crypto")).createHash("sha256").update(decisionMigrations.map(({ id, checksum }) => `${id}:${checksum}`).join("\n")).digest("hex");
+    await assert.rejects(() => applyPostgresMigrations(transactionalPg, decisionMigrations, decisionChecksum), /migration execution failed:0012_nearfamily_private_tester_decision/);
     await client.query("DROP ROLE nearyou_private_tester_decision");
     await applyPostgresMigrations(transactionalPg, migrations, checksum);
     await client.query(`CREATE ROLE "${decisionUser}" LOGIN PASSWORD '${decisionPassword}'`);
