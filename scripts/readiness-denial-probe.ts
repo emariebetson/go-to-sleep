@@ -60,12 +60,12 @@ function option(name: string): string {
 async function main(): Promise<void> {
   if (process.env.READINESS_GATEWAY_DISPOSABLE !== "true") throw new Error("readiness denial probe requires disposable mode");
   const rawKey = (await readFile(option("--key-file"), "utf8")).trim();
-  if (!/^[A-Za-z0-9+/]{43}=$/.test(rawKey)) throw new Error("readiness denial probe key invalid");
+  if (!/^[a-f0-9]{64}$/.test(rawKey)) throw new Error("readiness denial probe key invalid");
   const result = await runReadinessDenialProbe({
     gatewayUrl: option("--gateway-url"),
     directDecisionUrl: option("--direct-decision-url"),
     controllerUrl: option("--controller-url"),
-    key: new Uint8Array(Buffer.from(rawKey, "base64")),
+    key: new Uint8Array(Buffer.from(rawKey, "hex")),
     now: Date.now(),
     nonce: randomBytes(18).toString("base64url"),
   });

@@ -64,7 +64,6 @@ resource "google_sql_user" "readiness_decision" {
   name     = google_service_account.readiness_decision[0].email
   instance = google_sql_database_instance.primary.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
-  database_roles = ["nearyou_private_tester_decision"]
 
   depends_on = [terraform_data.approval_gate]
 }
@@ -74,7 +73,6 @@ resource "google_sql_user" "readiness_controller_kill" {
   name     = google_service_account.readiness_controller_kill[0].email
   instance = google_sql_database_instance.primary.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
-  database_roles = ["nearyou_rollout_controller"]
 
   depends_on = [terraform_data.approval_gate]
 }
@@ -245,7 +243,7 @@ resource "google_cloud_run_v2_service" "readiness_controller" {
       }
       env {
         name  = "READINESS_GATEWAY_ORDINARY_CALLER"
-        value = google_service_account.readiness_controller.email
+        value = var.readiness_controller_caller_service_account_email
       }
       env {
         name  = "READINESS_GATEWAY_EMERGENCY_AUDIENCE"
@@ -253,7 +251,7 @@ resource "google_cloud_run_v2_service" "readiness_controller" {
       }
       env {
         name  = "READINESS_GATEWAY_EMERGENCY_CALLER"
-        value = google_service_account.readiness_controller_kill[0].email
+        value = var.readiness_kill_caller_service_account_email
       }
 
       resources {
@@ -273,7 +271,7 @@ resource "google_cloud_run_v2_service_iam_member" "readiness_controller_invoker"
   location = local.region
   name     = google_cloud_run_v2_service.readiness_controller[0].name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.readiness_controller.email}"
+  member   = "serviceAccount:${var.readiness_controller_caller_service_account_email}"
 }
 
 resource "google_compute_region_network_endpoint_group" "readiness_decision" {
@@ -459,7 +457,7 @@ resource "google_cloud_run_v2_service" "readiness_controller_kill" {
       }
       env {
         name  = "READINESS_GATEWAY_ORDINARY_CALLER"
-        value = google_service_account.readiness_controller.email
+        value = var.readiness_controller_caller_service_account_email
       }
       env {
         name  = "READINESS_GATEWAY_EMERGENCY_AUDIENCE"
@@ -467,7 +465,7 @@ resource "google_cloud_run_v2_service" "readiness_controller_kill" {
       }
       env {
         name  = "READINESS_GATEWAY_EMERGENCY_CALLER"
-        value = google_service_account.readiness_controller_kill[0].email
+        value = var.readiness_kill_caller_service_account_email
       }
 
       resources {
@@ -487,5 +485,5 @@ resource "google_cloud_run_v2_service_iam_member" "readiness_controller_kill_inv
   location = local.region
   name     = google_cloud_run_v2_service.readiness_controller_kill[0].name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.readiness_controller_kill[0].email}"
+  member   = "serviceAccount:${var.readiness_kill_caller_service_account_email}"
 }

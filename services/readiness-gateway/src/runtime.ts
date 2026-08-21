@@ -122,8 +122,8 @@ export function createDatabaseBackedControllerHandler(input: Readonly<{
 
 function decodeKey(path: string): Uint8Array {
   const raw = readFileSync(path, "utf8").trim();
-  if (!/^[A-Za-z0-9+/]{43}=$/.test(raw)) throw new Error("readiness gateway key invalid");
-  const key = new Uint8Array(Buffer.from(raw, "base64"));
+  if (!/^[a-f0-9]{64}$/.test(raw)) throw new Error("readiness gateway key invalid");
+  const key = new Uint8Array(Buffer.from(raw, "hex"));
   if (key.byteLength !== 32) throw new Error("readiness gateway key invalid");
   return key;
 }

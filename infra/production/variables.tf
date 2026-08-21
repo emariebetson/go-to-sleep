@@ -281,6 +281,20 @@ variable "readiness_controller_service_audience" {
     error_message = "A real readiness controller audience is required."
   }
 }
+variable "readiness_controller_caller_service_account_email" {
+  type = string
+  validation {
+    condition     = can(regex("^[a-z0-9-]{3,100}@[a-z][a-z0-9-]{4,28}\\.iam\\.gserviceaccount\\.com$", var.readiness_controller_caller_service_account_email))
+    error_message = "An exact readiness controller caller service account is required."
+  }
+}
+variable "readiness_kill_caller_service_account_email" {
+  type = string
+  validation {
+    condition     = can(regex("^[a-z0-9-]{3,100}@[a-z][a-z0-9-]{4,28}\\.iam\\.gserviceaccount\\.com$", var.readiness_kill_caller_service_account_email)) && var.readiness_kill_caller_service_account_email != var.readiness_controller_caller_service_account_email
+    error_message = "A distinct readiness emergency caller service account is required."
+  }
+}
 variable "readiness_kill_service_audience" {
   type = string
   validation {

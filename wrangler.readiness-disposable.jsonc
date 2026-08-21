@@ -3,7 +3,7 @@
   "name": "nearfamily-readiness-disposable",
   "main": "cloudflare/readiness-disposable-worker.ts",
   "compatibility_date": "2026-08-20",
-  "workers_dev": true,
+  "workers_dev": false,
   "account_id": "20bb6d9ba33266b8cd7d9d15211986ef",
   "vars": {
     "READINESS_GATEWAY_URL": "https://136-68-241-211.sslip.io/v1/nearfamily/decision"

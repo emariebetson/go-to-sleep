@@ -19,7 +19,9 @@ readiness_decision_secret_version = "1"
 readiness_decision_key_not_before = 1787000000000
 readiness_decision_key_not_after = 1787172800000
 readiness_controller_service_audience = "https://nearyou-readiness-controller-aaaaaaaaaa-uc.a.run.app"
+readiness_controller_caller_service_account_email = "nearyou-readiness-operator@nearyou-rdy-gwy.iam.gserviceaccount.com"
 readiness_kill_service_audience = "https://run.googleapis.com/projects/nearyou-rdy-gwy/locations/us-central1/services/nearyou-readiness-controller-kill"
+readiness_kill_caller_service_account_email = "nearyou-readiness-breakglass@nearyou-rdy-gwy.iam.gserviceaccount.com"
 
 secret_bootstrap_evidence = {
   complete   = true

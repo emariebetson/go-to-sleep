@@ -25,6 +25,8 @@ export function requireReadinessGatewayProofEnvironment(environment: Record<stri
   const region = required(environment, "READINESS_GATEWAY_REGION", /^[a-z]+(?:-[a-z]+)+[0-9]$/);
   const tfvars = environment.READINESS_GATEWAY_TFVARS;
   if (!tfvars || !existsSync(tfvars)) throw new Error("Readiness gateway proof requires the readiness gateway terraform vars file");
+  const keyFile = environment.READINESS_GATEWAY_HMAC_KEY_FILE;
+  if (!keyFile || !/^[A-Za-z0-9._/-]{3,512}$/.test(keyFile) || !existsSync(keyFile)) throw new Error("Readiness gateway proof requires READINESS_GATEWAY_HMAC_KEY_FILE");
   return {
     project, region, tfvars,
     decisionService: required(environment, "READINESS_GATEWAY_DECISION_SERVICE", /^[a-z][a-z0-9-]{2,62}$/),
@@ -33,6 +35,10 @@ export function requireReadinessGatewayProofEnvironment(environment: Record<stri
     backendService: required(environment, "READINESS_GATEWAY_BACKEND_SERVICE", /^[a-z][a-z0-9-]{2,62}$/),
     cloudArmorPolicy: required(environment, "READINESS_GATEWAY_CLOUD_ARMOR_POLICY", /^[a-z][a-z0-9-]{2,62}$/),
     denialProbeCommand: required(environment, "READINESS_GATEWAY_DENIAL_PROBE_COMMAND", /^[A-Za-z0-9._/-]{3,256}$/),
+    gatewayUrl: required(environment, "READINESS_GATEWAY_URL", /^https:\/\/[^/?#]+\/v1\/nearfamily\/decision$/),
+    directDecisionUrl: required(environment, "READINESS_GATEWAY_DIRECT_DECISION_URL", /^https:\/\/[^/?#]+\/v1\/nearfamily\/decision$/),
+    controllerUrl: required(environment, "READINESS_GATEWAY_CONTROLLER_URL", /^https:\/\/[^/?#]+\/v1\/nearfamily\/controller$/),
+    keyFile,
   };
 }
 
@@ -103,7 +109,7 @@ export async function verifyReadinessGatewayProof(environment: Record<string, st
   if (backend.loadBalancingScheme !== "EXTERNAL_MANAGED" || typeof backend.securityPolicy !== "string" || !backend.securityPolicy.endsWith(`/securityPolicies/${target.cloudArmorPolicy}`)) throw new Error("Readiness gateway external load balancer is missing its Cloud Armor policy");
   const rules = Array.isArray(armor.rules) ? armor.rules : [];
   if (!rules.some((rule) => (rule as Json).action === "throttle" && ((rule as Json).rateLimitOptions as Json | undefined)?.rateLimitThreshold)) throw new Error("Readiness gateway Cloud Armor rate limit is missing");
-  const probes = await readJson(runner, target.denialProbeCommand, ["--project", target.project, "--region", target.region, "--decision-service", target.decisionService, "--controller-service", target.controllerService, "--kill-service", target.killService], "denial probe");
+  const probes = await readJson(runner, target.denialProbeCommand, ["--gateway-url", target.gatewayUrl, "--direct-decision-url", target.directDecisionUrl, "--controller-url", target.controllerUrl, "--key-file", target.keyFile], "denial probe");
   assertDenialProbes(probes);
   const evidence = {
     version: 1,

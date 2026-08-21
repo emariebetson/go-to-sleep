@@ -79,7 +79,6 @@ resource "google_sql_user" "readiness_controller" {
   name     = google_service_account.readiness_controller.email
   instance = google_sql_database_instance.primary.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
-  database_roles = ["nearyou_rollout_controller"]
 }
 resource "google_service_account" "private_tester_baseline_verifier" {
   account_id   = "nearyou-pt-baseline"

@@ -1,6 +1,6 @@
 type WorkerDependencies = Readonly<{
   gatewayUrl: string;
-  keyBase64: string;
+  keyHex: string;
   now(): number;
   nonce(): string;
   fetch: typeof fetch;
@@ -9,7 +9,7 @@ type WorkerDependencies = Readonly<{
 const BODY = /^\{"householdHash":"([a-f0-9]{64})","releaseId":"(rel_[A-Za-z0-9_-]{8,100})"\}$/;
 
 function bytes(value: string): Uint8Array {
-  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+  return Uint8Array.from(value.match(/.{2}/g) ?? [], (pair) => Number.parseInt(pair, 16));
 }
 
 function base64Url(value: ArrayBuffer): string {
@@ -27,8 +27,8 @@ async function sha256(value: string): Promise<string> {
 }
 
 export function createDisposableDecisionWorker(input: WorkerDependencies): (request: Request) => Promise<Response> {
-  if (!/^https:\/\/[^/?#]+\/v1\/nearfamily\/decision$/.test(input.gatewayUrl) || !/^[A-Za-z0-9+/]{43}=$/.test(input.keyBase64) || typeof input.fetch !== "function") throw new Error("disposable decision worker invalid");
-  const keyBytes = bytes(input.keyBase64);
+  if (!/^https:\/\/[^/?#]+\/v1\/nearfamily\/decision$/.test(input.gatewayUrl) || !/^[a-f0-9]{64}$/.test(input.keyHex) || typeof input.fetch !== "function") throw new Error("disposable decision worker invalid");
+  const keyBytes = bytes(input.keyHex);
   if (keyBytes.byteLength !== 32) throw new Error("disposable decision worker invalid");
   return async (request) => {
     if (request.method !== "POST" || new URL(request.url).pathname !== "/v1/nearfamily/decision") return new Response("not found", { status: 404 });
@@ -61,7 +61,7 @@ export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return createDisposableDecisionWorker({
       gatewayUrl: env.READINESS_GATEWAY_URL,
-      keyBase64: env.NEARFAMILY_DECISION_SIGNING_KEY,
+      keyHex: env.NEARFAMILY_DECISION_SIGNING_KEY,
       now: Date.now,
       nonce: () => crypto.randomUUID().replace(/-/g, ""),
       fetch: (target, init) => fetch(target, init),
