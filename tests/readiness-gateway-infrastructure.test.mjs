@@ -65,7 +65,8 @@ test("readiness controller and kill services are private, vpc-routed, and identi
   assert.match(kill, /INGRESS_TRAFFIC_INTERNAL_ONLY/);
   assert.match(source, /resource "google_cloud_run_v2_service_iam_member" "readiness_controller_invoker"/);
   assert.match(source, /resource "google_cloud_run_v2_service_iam_member" "readiness_controller_kill_invoker"/);
-  assert.doesNotMatch(source, /invoker_iam_disabled\s*=\s*true[\s\S]*?readiness_controller/);
+  assert.doesNotMatch(controller, /invoker_iam_disabled\s*=\s*true/);
+  assert.doesNotMatch(kill, /invoker_iam_disabled\s*=\s*true/);
 });
 
 test("readiness decision is reachable only through an external load balancer protected by Cloud Armor", () => {
@@ -139,7 +140,8 @@ test("disposable readiness gateway image pins its base and starts the guarded ru
 });
 
 test("Terraform binds the exact database-backed runtime contract", () => {
-  for (const value of ["decision", "controller", "kill"]) assert.match(source, new RegExp(`READINESS_GATEWAY_MODE[\\s\\S]{0,120}value\\s*=\\s*"${value}"`));
+  const gatewaySource = readFileSync(new URL("../infra/production/readiness-gateway.tf", import.meta.url), "utf8");
+  for (const value of ["decision", "controller", "kill"]) assert.match(gatewaySource, new RegExp(`READINESS_GATEWAY_MODE[\\s\\S]{0,120}value\\s*=\\s*"${value}"`));
   for (const name of [
     "READINESS_GATEWAY_DISPOSABLE",
     "READINESS_GATEWAY_DATABASE_BACKED",
@@ -150,12 +152,12 @@ test("Terraform binds the exact database-backed runtime contract", () => {
     "READINESS_GATEWAY_ORDINARY_CALLER",
     "READINESS_GATEWAY_EMERGENCY_AUDIENCE",
     "READINESS_GATEWAY_EMERGENCY_CALLER",
-  ]) assert.match(source, new RegExp(name));
-  assert.match(source, /READINESS_GATEWAY_HMAC_KEY_FILE[\s\S]{0,160}\/var\/run\/secrets\/nearyou\/hmac-key/);
-  assert.match(source, /READINESS_GATEWAY_KEY_NOT_BEFORE/);
-  assert.match(source, /READINESS_GATEWAY_KEY_NOT_AFTER/);
-  assert.doesNotMatch(source, /path\s*=\s*"database-url"/);
-  assert.match(source, /resource "google_secret_manager_secret_iam_member" "readiness_decision_hmac_accessor"[\s\S]*roles\/secretmanager\.secretAccessor[\s\S]*google_service_account\.readiness_decision\[0\]\.email/);
+  ]) assert.match(gatewaySource, new RegExp(name));
+  assert.match(gatewaySource, /READINESS_GATEWAY_HMAC_KEY_FILE[\s\S]{0,160}\/var\/run\/secrets\/nearyou\/hmac-key/);
+  assert.match(gatewaySource, /READINESS_GATEWAY_KEY_NOT_BEFORE/);
+  assert.match(gatewaySource, /READINESS_GATEWAY_KEY_NOT_AFTER/);
+  assert.doesNotMatch(gatewaySource, /path\s*=\s*"database-url"/);
+  assert.match(gatewaySource, /resource "google_secret_manager_secret_iam_member" "readiness_decision_hmac_accessor"[\s\S]*roles\/secretmanager\.secretAccessor[\s\S]*google_service_account\.readiness_decision\[0\]\.email/);
 });
 
 test("migration registration includes both ordinary and emergency controller identities", () => {
