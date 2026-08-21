@@ -1,5 +1,5 @@
 def spec: if .kind == "Job" then .spec.template.spec.template.spec else .spec.template.spec end;
-def annotations: .spec.template.metadata.annotations;
+def annotations: if .kind == "Job" then .spec.template.metadata.annotations else .metadata.annotations end;
 (spec) as $s |
 (annotations) as $a |
 ($s.containers[0]) as $c |

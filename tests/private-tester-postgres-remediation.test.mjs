@@ -180,6 +180,7 @@ test("production evidence builds the catalog from the complete 0001 through 0014
   const proofDockerfile=await readFile(new URL("../Dockerfile.readiness-database-proof",import.meta.url),"utf8");
   assert.match(proofDockerfile,/ENTRYPOINT \["node", "--import", "tsx", "scripts\/verify-disposable-gateway-database\.ts"\]/);
   const proofTemplate=await readFile(new URL("../scripts/verify-disposable-proof-template.jq",import.meta.url),"utf8");
+  assert.match(proofTemplate, /if \.kind == "Job" then \.spec\.template\.metadata\.annotations else \.metadata\.annotations end/);
   for(const contract of ["maxRetries == 0","timeoutSeconds == \"300\"","$s.containers | length","nf-rdy-disposable-migration-admin","NEARYOU_GATEWAY_DATABASE_DISPOSABLE","NEARYOU_GATEWAY_DATABASE_INSTANCE","network-interfaces","vpc-access-egress","$c.image == $image"])assert.ok(proofTemplate.includes(contract));
   assert.match(workflow, /migrationHead == "0014_release_policy_evidence_read"[\s\S]*laneIsolation == true/);
   assert.match(workflow, /readiness-gateway-disposable-role-receipt-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
